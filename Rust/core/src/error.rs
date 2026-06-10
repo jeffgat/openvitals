@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
-pub enum GooseError {
+pub enum OpenVitalsError {
     #[error("{0}")]
     Message(String),
 
@@ -24,9 +24,9 @@ pub enum GooseError {
     Sqlite(#[from] rusqlite::Error),
 }
 
-pub type GooseResult<T> = Result<T, GooseError>;
+pub type OpenVitalsResult<T> = Result<T, OpenVitalsError>;
 
-impl GooseError {
+impl OpenVitalsError {
     pub fn message(message: impl Into<String>) -> Self {
         Self::Message(message.into())
     }

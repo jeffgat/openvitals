@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""NeuroKit2 HRV adapter for goose-reference-algo-runner.
+"""NeuroKit2 HRV adapter for open-vitals-reference-algo-runner.
 
-The adapter emits Goose's external reference contract on stdout. NeuroKit2 is
+The adapter emits OpenVitals's external reference contract on stdout. NeuroKit2 is
 an optional local benchmark dependency; tests may use the explicit fallback flag
 to verify the contract without installing Python science packages.
 """
@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import importlib.util
 import json
 import math
 import sys
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "goose.external-reference-output.v1"
+SCHEMA = "open_vitals.external-reference-output.v1"
 PROVIDER = "external.neurokit2.hrv"
 ALGORITHM_ID = "reference.hrv.neurokit2.v1"
 ALGORITHM_VERSION = "1.0.0"
@@ -24,7 +25,7 @@ SAMPLING_RATE_HZ = 1000
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run NeuroKit2 time-domain HRV for Goose.")
+    parser = argparse.ArgumentParser(description="Run NeuroKit2 time-domain HRV for OpenVitals.")
     parser.add_argument("--input", required=True)
     parser.add_argument("--family", required=True)
     parser.add_argument("--provider", required=True)
@@ -132,8 +133,8 @@ def base_report(
         "algorithm_id": ALGORITHM_ID,
         "algorithm_version": ALGORITHM_VERSION,
         "display_name": "NeuroKit2 HRV Time Domain",
-        "input_schema": "goose.hrv-input.v1",
-        "output_schema": "goose.hrv-neurokit2-reference-output.v1",
+        "input_schema": "open_vitals.hrv-input.v1",
+        "output_schema": "open_vitals.hrv-neurokit2-reference-output.v1",
         "start_time": payload.get("start_time", ""),
         "end_time": payload.get("end_time", ""),
         "output": None,
@@ -160,7 +161,7 @@ def base_report(
         },
         "quality_gates": [
             "external_provider_exit_zero",
-            "goose_contract_schema_match",
+            "open_vitals_contract_schema_match",
             "units_recorded",
             "non_empty_provenance",
             "at_least_2_valid_rr_intervals_to_compute",

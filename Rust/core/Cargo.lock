@@ -264,22 +264,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "goose-core"
-version = "0.1.0"
-dependencies = [
- "crc32fast",
- "hex",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror",
- "tungstenite",
- "zip",
-]
-
-[[package]]
 name = "hashbrown"
 version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -445,6 +429,22 @@ name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
+
+[[package]]
+name = "open-vitals-core"
+version = "0.1.0"
+dependencies = [
+ "crc32fast",
+ "hex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "tungstenite",
+ "zip",
+]
 
 [[package]]
 name = "password-hash"

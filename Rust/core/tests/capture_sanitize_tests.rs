@@ -1,6 +1,6 @@
 use std::fs;
 
-use goose_core::capture_sanitize::{
+use open_vitals_core::capture_sanitize::{
     CaptureSanitizeOptions, sanitize_capture_path, sanitize_json_value, sanitize_text,
 };
 

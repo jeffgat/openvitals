@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::{
-    GooseError, GooseResult,
+    OpenVitalsError, OpenVitalsResult,
     debug_ws::{
         DEBUG_EVENT_TOPIC_ACTIVITY_CANDIDATE_CORRECTED,
         DEBUG_EVENT_TOPIC_ACTIVITY_CANDIDATE_CREATED,
@@ -17,7 +17,7 @@ use crate::{
         DEBUG_EVENT_TOPIC_HEALTH_SYNC_ACTIVITY_PLANNED,
     },
     protocol::ParsedPayload,
-    store::{DebugEventRow, DecodedFrameRow, GooseStore, RawEvidenceRow},
+    store::{DebugEventRow, DecodedFrameRow, OpenVitalsStore, RawEvidenceRow},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -100,17 +100,17 @@ pub struct ObservabilityTimelineRow {
 }
 
 pub fn packet_timeline_between(
-    store: &GooseStore,
+    store: &OpenVitalsStore,
     start: &str,
     end: &str,
-) -> GooseResult<Vec<PacketTimelineRow>> {
+) -> OpenVitalsResult<Vec<PacketTimelineRow>> {
     let decoded_rows = store.decoded_frames_between(start, end)?;
     packet_timeline_from_decoded_frames(&decoded_rows)
 }
 
 pub fn packet_timeline_from_decoded_frames(
     decoded_rows: &[DecodedFrameRow],
-) -> GooseResult<Vec<PacketTimelineRow>> {
+) -> OpenVitalsResult<Vec<PacketTimelineRow>> {
     decoded_rows
         .iter()
         .map(timeline_row_from_decoded_frame)
@@ -121,7 +121,7 @@ pub fn observability_timeline_from_rows(
     raw_rows: &[RawEvidenceRow],
     packet_rows: &[PacketTimelineRow],
     debug_rows: &[DebugEventRow],
-) -> GooseResult<Vec<ObservabilityTimelineRow>> {
+) -> OpenVitalsResult<Vec<ObservabilityTimelineRow>> {
     let capture_session_ids = capture_session_ids_from_debug_rows(debug_rows)?;
     let raw_capture_session_ids = raw_rows
         .iter()
@@ -151,7 +151,7 @@ pub fn observability_timeline_from_rows(
     for row in debug_rows
         .iter()
         .map(observability_row_from_debug_event)
-        .collect::<GooseResult<Vec<_>>>()?
+        .collect::<OpenVitalsResult<Vec<_>>>()?
     {
         if let Some(row) = row {
             rows.push(row);
@@ -168,10 +168,10 @@ pub fn observability_timeline_from_rows(
     Ok(rows)
 }
 
-fn timeline_row_from_decoded_frame(row: &DecodedFrameRow) -> GooseResult<PacketTimelineRow> {
+fn timeline_row_from_decoded_frame(row: &DecodedFrameRow) -> OpenVitalsResult<PacketTimelineRow> {
     let parsed_payload: Option<ParsedPayload> = serde_json::from_str(&row.parsed_payload_json)
         .map_err(|error| {
-            GooseError::message(format!(
+            OpenVitalsError::message(format!(
                 "{} parsed_payload_json invalid: {error}",
                 row.frame_id
             ))
@@ -346,9 +346,9 @@ fn timeline_row_from_decoded_frame(row: &DecodedFrameRow) -> GooseResult<PacketT
     })
 }
 
-fn parse_warnings(row: &DecodedFrameRow) -> GooseResult<Vec<String>> {
+fn parse_warnings(row: &DecodedFrameRow) -> OpenVitalsResult<Vec<String>> {
     serde_json::from_str(&row.warnings_json).map_err(|error| {
-        GooseError::message(format!("{} warnings_json invalid: {error}", row.frame_id))
+        OpenVitalsError::message(format!("{} warnings_json invalid: {error}", row.frame_id))
     })
 }
 
@@ -430,14 +430,14 @@ fn observability_row_from_packet_timeline(
 
 fn capture_session_ids_from_debug_rows(
     debug_rows: &[DebugEventRow],
-) -> GooseResult<BTreeSet<String>> {
+) -> OpenVitalsResult<BTreeSet<String>> {
     let mut session_ids = BTreeSet::new();
     for row in debug_rows
         .iter()
         .filter(|row| row.topic.starts_with("capture.session."))
     {
         let data: serde_json::Value = serde_json::from_str(&row.data_json).map_err(|error| {
-            GooseError::message(format!("{} data_json invalid: {error}", row.sequence))
+            OpenVitalsError::message(format!("{} data_json invalid: {error}", row.sequence))
         })?;
         if let Some(session_id) = observability_capture_session_id(&data) {
             session_ids.insert(session_id);
@@ -448,9 +448,9 @@ fn capture_session_ids_from_debug_rows(
 
 fn observability_row_from_debug_event(
     row: &DebugEventRow,
-) -> GooseResult<Option<ObservabilityTimelineRow>> {
+) -> OpenVitalsResult<Option<ObservabilityTimelineRow>> {
     let data: serde_json::Value = serde_json::from_str(&row.data_json).map_err(|error| {
-        GooseError::message(format!("{} data_json invalid: {error}", row.sequence))
+        OpenVitalsError::message(format!("{} data_json invalid: {error}", row.sequence))
     })?;
 
     let Some(stage) = observability_stage_for_topic(&row.topic) else {

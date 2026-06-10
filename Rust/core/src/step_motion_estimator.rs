@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::{
-    GooseError, GooseResult,
+    OpenVitalsError, OpenVitalsResult,
     capture_correlation::{
         CaptureCorrelationOptions, CaptureCorrelationReport,
         DEFAULT_MIN_OWNED_CAPTURES_PER_SUMMARY, run_capture_correlation_for_store,
@@ -12,16 +12,16 @@ use crate::{
     protocol::{
         DataPacketBodySummary, I16SeriesSummary, ParsedPayload, decode_hex_with_whitespace,
     },
-    store::{DailyActivityMetricInput, DecodedFrameRow, GooseStore, MetricProvenanceInput},
+    store::{DailyActivityMetricInput, DecodedFrameRow, OpenVitalsStore, MetricProvenanceInput},
     validation_labels::{
         OFFICIAL_WHOOP_LABEL_POLICY, official_label_policy_issue_action,
         official_label_policy_issues,
     },
 };
 
-pub const RAW_MOTION_STEP_ESTIMATE_REPORT_SCHEMA: &str = "goose.raw-motion-step-estimate-report.v1";
-pub const GOOSE_STEPS_RAW_MOTION_ESTIMATE_V0_ID: &str = "goose.steps.raw_motion_estimate.v0";
-pub const GOOSE_STEPS_RAW_MOTION_ESTIMATE_V0_VERSION: &str = "0.1.0";
+pub const RAW_MOTION_STEP_ESTIMATE_REPORT_SCHEMA: &str = "open_vitals.raw-motion-step-estimate-report.v1";
+pub const OPENVITALS_STEPS_RAW_MOTION_ESTIMATE_V0_ID: &str = "open_vitals.steps.raw_motion_estimate.v0";
+pub const OPENVITALS_STEPS_RAW_MOTION_ESTIMATE_V0_VERSION: &str = "0.1.0";
 
 #[derive(Debug, Clone)]
 pub struct RawMotionStepEstimateOptions {
@@ -146,12 +146,12 @@ struct MotionPlan {
 }
 
 pub fn run_raw_motion_step_estimate_for_store(
-    store: &GooseStore,
+    store: &OpenVitalsStore,
     database_path: &str,
     start: &str,
     end: &str,
     options: RawMotionStepEstimateOptions,
-) -> GooseResult<RawMotionStepEstimateReport> {
+) -> OpenVitalsResult<RawMotionStepEstimateReport> {
     validate_options(&options)?;
     let write_options = options.clone();
     let decoded_rows = store.decoded_frames_between(start, end)?;
@@ -184,7 +184,7 @@ pub fn run_raw_motion_step_estimate(
     start: &str,
     end: &str,
     options: RawMotionStepEstimateOptions,
-) -> GooseResult<RawMotionStepEstimateReport> {
+) -> OpenVitalsResult<RawMotionStepEstimateReport> {
     validate_options(&options)?;
     let trusted_frames =
         trusted_frames_for_summary_kinds(correlation, &["raw_motion_k10", "raw_motion_k21"]);
@@ -302,13 +302,13 @@ pub fn run_raw_motion_step_estimate(
 
     Ok(RawMotionStepEstimateReport {
         schema: RAW_MOTION_STEP_ESTIMATE_REPORT_SCHEMA.to_string(),
-        generated_by: "goose-raw-motion-step-estimator".to_string(),
+        generated_by: "open-vitals-raw-motion-step-estimator".to_string(),
         pass,
         database_path: database_path.to_string(),
         start: start.to_string(),
         end: end.to_string(),
-        algorithm_id: GOOSE_STEPS_RAW_MOTION_ESTIMATE_V0_ID.to_string(),
-        algorithm_version: GOOSE_STEPS_RAW_MOTION_ESTIMATE_V0_VERSION.to_string(),
+        algorithm_id: OPENVITALS_STEPS_RAW_MOTION_ESTIMATE_V0_ID.to_string(),
+        algorithm_version: OPENVITALS_STEPS_RAW_MOTION_ESTIMATE_V0_VERSION.to_string(),
         label_policy: OFFICIAL_WHOOP_LABEL_POLICY.to_string(),
         source_kind_if_promoted: "local_estimate".to_string(),
         promotion_status: if pass {
@@ -359,10 +359,10 @@ pub fn run_raw_motion_step_estimate(
 }
 
 fn persist_validated_raw_motion_step_metric(
-    store: &GooseStore,
+    store: &OpenVitalsStore,
     report: &mut RawMotionStepEstimateReport,
     options: &RawMotionStepEstimateOptions,
-) -> GooseResult<()> {
+) -> OpenVitalsResult<()> {
     if !options.write_metric || !report.pass {
         return Ok(());
     }
@@ -371,26 +371,26 @@ fn persist_validated_raw_motion_step_metric(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| GooseError::message("date_key is required when write_metric is true"))?;
+        .ok_or_else(|| OpenVitalsError::message("date_key is required when write_metric is true"))?;
     let timezone = options
         .timezone
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| GooseError::message("timezone is required when write_metric is true"))?;
+        .ok_or_else(|| OpenVitalsError::message("timezone is required when write_metric is true"))?;
     let start_time_unix_ms = report.start_time_unix_ms.ok_or_else(|| {
-        GooseError::message("start must be an RFC3339 UTC timestamp when write_metric is true")
+        OpenVitalsError::message("start must be an RFC3339 UTC timestamp when write_metric is true")
     })?;
     let end_time_unix_ms = report.end_time_unix_ms.ok_or_else(|| {
-        GooseError::message("end must be an RFC3339 UTC timestamp when write_metric is true")
+        OpenVitalsError::message("end must be an RFC3339 UTC timestamp when write_metric is true")
     })?;
     if end_time_unix_ms <= start_time_unix_ms {
-        return Err(GooseError::message(
+        return Err(OpenVitalsError::message(
             "end must be after start when write_metric is true",
         ));
     }
     let estimated_steps = report.estimated_steps.ok_or_else(|| {
-        GooseError::message("estimated_steps is required before writing a step metric")
+        OpenVitalsError::message("estimated_steps is required before writing a step metric")
     })?;
     let metric_id = daily_activity_metric_id(date_key, timezone);
     let provenance_id = format!("prov-{metric_id}");
@@ -405,20 +405,16 @@ fn persist_validated_raw_motion_step_metric(
         "sample_rate_hz": report.sample_rate_hz,
         "peak_threshold_i16": report.peak_threshold_i16,
         "min_peak_spacing_samples": report.min_peak_spacing_samples,
-        "manual_step_delta_label": report.manual_step_delta,
-        "official_whoop_step_delta_label": report.official_whoop_step_delta,
-        "label_policy": report.label_policy,
-        "label_provenance": report.label_provenance.clone(),
     })
     .to_string();
     let quality_flags_json = serde_json::to_string(&report.quality_flags).map_err(|error| {
-        GooseError::message(format!(
+        OpenVitalsError::message(format!(
             "cannot serialize raw-motion step quality flags: {error}"
         ))
     })?;
     let provenance_json = json!({
-        "algorithm": GOOSE_STEPS_RAW_MOTION_ESTIMATE_V0_ID,
-        "algorithm_version": GOOSE_STEPS_RAW_MOTION_ESTIMATE_V0_VERSION,
+        "algorithm": OPENVITALS_STEPS_RAW_MOTION_ESTIMATE_V0_ID,
+        "algorithm_version": OPENVITALS_STEPS_RAW_MOTION_ESTIMATE_V0_VERSION,
         "source_kind": "local_estimate",
         "date_key": date_key,
         "timezone": timezone,
@@ -428,9 +424,9 @@ fn persist_validated_raw_motion_step_metric(
         "end_time_unix_ms": end_time_unix_ms,
         "promotion_status": report.promotion_status,
         "official_labels_policy": "validation_label_only",
-        "official_whoop_step_delta_used_as_label": report.official_whoop_step_delta.is_some(),
+        "official_label_used_for_validation": report.official_whoop_step_delta.is_some(),
         "manual_step_delta_used_as_label": report.manual_step_delta.is_some(),
-        "label_policy": OFFICIAL_WHOOP_LABEL_POLICY,
+        "validation_label_policy": "labels_validate_only_not_metric_inputs",
     })
     .to_string();
 
@@ -473,7 +469,7 @@ fn estimate_frame_steps(
     plan: MotionPlan,
     trusted_frames: &BTreeMap<String, bool>,
     options: &RawMotionStepEstimateOptions,
-) -> GooseResult<Option<RawMotionStepFrameEstimate>> {
+) -> OpenVitalsResult<Option<RawMotionStepFrameEstimate>> {
     let selected_axes = selected_motion_axes(&plan.axes);
     let axes = selected_axes
         .into_iter()
@@ -577,8 +573,8 @@ fn estimate_frame_steps(
             "parser_version": row.parser_version,
             "body_summary_kind": plan.body_summary_kind,
             "packet_k": plan.packet_k,
-            "algorithm": GOOSE_STEPS_RAW_MOTION_ESTIMATE_V0_ID,
-            "algorithm_version": GOOSE_STEPS_RAW_MOTION_ESTIMATE_V0_VERSION,
+            "algorithm": OPENVITALS_STEPS_RAW_MOTION_ESTIMATE_V0_ID,
+            "algorithm_version": OPENVITALS_STEPS_RAW_MOTION_ESTIMATE_V0_VERSION,
             "source_kind_if_promoted": "local_estimate",
             "promotion_policy": "requires_controlled_capture_labels",
             "sample_rate_hz": options.sample_rate_hz,
@@ -589,10 +585,10 @@ fn estimate_frame_steps(
     }))
 }
 
-fn motion_plan_from_row(row: &DecodedFrameRow) -> GooseResult<Option<MotionPlan>> {
+fn motion_plan_from_row(row: &DecodedFrameRow) -> OpenVitalsResult<Option<MotionPlan>> {
     let parsed_payload: Option<ParsedPayload> = serde_json::from_str(&row.parsed_payload_json)
         .map_err(|error| {
-            GooseError::message(format!(
+            OpenVitalsError::message(format!(
                 "{} parsed_payload_json invalid: {error}",
                 row.frame_id
             ))
@@ -732,9 +728,9 @@ fn trusted_frames_for_summary_kinds(
     frames
 }
 
-fn parse_warnings(row: &DecodedFrameRow) -> GooseResult<Vec<String>> {
+fn parse_warnings(row: &DecodedFrameRow) -> OpenVitalsResult<Vec<String>> {
     serde_json::from_str(&row.warnings_json).map_err(|error| {
-        GooseError::message(format!("{} warnings_json invalid: {error}", row.frame_id))
+        OpenVitalsError::message(format!("{} warnings_json invalid: {error}", row.frame_id))
     })
 }
 
@@ -745,24 +741,24 @@ fn read_i16_le(bytes: &[u8], offset: usize) -> Option<i16> {
     ]))
 }
 
-fn validate_options(options: &RawMotionStepEstimateOptions) -> GooseResult<()> {
+fn validate_options(options: &RawMotionStepEstimateOptions) -> OpenVitalsResult<()> {
     if !options.sample_rate_hz.is_finite() || options.sample_rate_hz <= 0.0 {
-        return Err(GooseError::message(
+        return Err(OpenVitalsError::message(
             "sample_rate_hz must be finite and positive",
         ));
     }
     if !options.peak_threshold_i16.is_finite() || options.peak_threshold_i16 <= 0.0 {
-        return Err(GooseError::message(
+        return Err(OpenVitalsError::message(
             "peak_threshold_i16 must be finite and positive",
         ));
     }
     if options.min_peak_spacing_samples == 0 {
-        return Err(GooseError::message(
+        return Err(OpenVitalsError::message(
             "min_peak_spacing_samples must be at least 1",
         ));
     }
     if options.tolerance_steps < 0 {
-        return Err(GooseError::message("tolerance_steps must be non-negative"));
+        return Err(OpenVitalsError::message("tolerance_steps must be non-negative"));
     }
     if options.write_metric {
         if options
@@ -772,7 +768,7 @@ fn validate_options(options: &RawMotionStepEstimateOptions) -> GooseResult<()> {
             .unwrap_or_default()
             .is_empty()
         {
-            return Err(GooseError::message(
+            return Err(OpenVitalsError::message(
                 "date_key is required when write_metric is true",
             ));
         }
@@ -783,7 +779,7 @@ fn validate_options(options: &RawMotionStepEstimateOptions) -> GooseResult<()> {
             .unwrap_or_default()
             .is_empty()
         {
-            return Err(GooseError::message(
+            return Err(OpenVitalsError::message(
                 "timezone is required when write_metric is true",
             ));
         }

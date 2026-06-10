@@ -175,11 +175,10 @@ fn ios_health_metric_display_filters_forbidden_metric_sources() {
 fn swift_source_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .expect("core crate has parent")
+        .expect("core crate has Rust parent")
         .parent()
-        .expect("goose project has parent")
-        .join("goose-swift")
-        .join("GooseSwift")
+        .expect("openVitals project root")
+        .join("OpenVitals")
 }
 
 fn swift_source(root: &Path, filename: &str) -> String {

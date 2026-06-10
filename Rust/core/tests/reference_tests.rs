@@ -1,5 +1,5 @@
-use goose_core::{
-    metrics::{HrvInput, SleepInput, StrainInput, StressInput, goose_hrv_v0},
+use open_vitals_core::{
+    metrics::{HrvInput, SleepInput, StrainInput, StressInput, open_vitals_hrv_v0},
     reference::{
         REFERENCE_HRV_TIME_DOMAIN_ID, REFERENCE_HRV_TIME_DOMAIN_VERSION,
         REFERENCE_SLEEP_ACTIGRAPHY_ID, REFERENCE_SLEEP_ACTIGRAPHY_VERSION,
@@ -9,7 +9,7 @@ use goose_core::{
         reference_strain_edwards_load, reference_stress_hrv_hr_proxy, sleep_reference_run_record,
         strain_reference_run_record, stress_reference_run_record,
     },
-    store::GooseStore,
+    store::OpenVitalsStore,
 };
 
 #[test]
@@ -69,7 +69,7 @@ fn reference_hrv_time_domain_reports_insufficient_data_without_output() {
 }
 
 #[test]
-fn goose_hrv_v0_matches_internal_reference_for_shared_policy() {
+fn open_vitals_hrv_v0_matches_internal_reference_for_shared_policy() {
     let input = HrvInput {
         start_time: "2026-05-27T00:00:00Z".to_string(),
         end_time: "2026-05-27T00:01:00Z".to_string(),
@@ -77,13 +77,13 @@ fn goose_hrv_v0_matches_internal_reference_for_shared_policy() {
         input_ids: Vec::new(),
     };
 
-    let goose = goose_hrv_v0(&input).output.unwrap();
+    let open_vitals = open_vitals_hrv_v0(&input).output.unwrap();
     let reference = reference_hrv_time_domain(&input).output.unwrap();
 
-    assert_close(goose.mean_nn_ms, reference.mean_nn_ms);
-    assert_close(goose.rmssd_ms, reference.rmssd_ms);
-    assert_close(goose.sdnn_ms, reference.sdnn_sample_ms);
-    assert_close(goose.pnn50_fraction, reference.pnn50_fraction);
+    assert_close(open_vitals.mean_nn_ms, reference.mean_nn_ms);
+    assert_close(open_vitals.rmssd_ms, reference.rmssd_ms);
+    assert_close(open_vitals.sdnn_ms, reference.sdnn_sample_ms);
+    assert_close(open_vitals.pnn50_fraction, reference.pnn50_fraction);
 }
 
 #[test]
@@ -225,7 +225,7 @@ fn reference_stress_hrv_hr_proxy_rejects_invalid_hrv_baseline() {
 
 #[test]
 fn reference_definition_and_run_persist_to_sqlite() {
-    let store = GooseStore::open_in_memory().unwrap();
+    let store = OpenVitalsStore::open_in_memory().unwrap();
     for definition in reference_algorithm_definitions() {
         store.upsert_algorithm_definition(&definition).unwrap();
     }

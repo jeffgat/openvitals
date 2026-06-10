@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::{
-    GooseError, GooseResult,
+    OpenVitalsError, OpenVitalsResult,
     metrics::{
         AlgorithmRunResult, HrvInput, MetricComponent, SleepInput, StrainInput, StressInput,
     },
@@ -81,8 +81,8 @@ pub fn reference_algorithm_definitions() -> Vec<AlgorithmDefinitionRecord> {
             display_name: "Reference HRV Time Domain".to_string(),
             implementation: "rust-reference".to_string(),
             license: "UNLICENSED".to_string(),
-            input_schema: "goose.hrv-input.v1".to_string(),
-            output_schema: "goose.hrv-reference-output.v1".to_string(),
+            input_schema: "open_vitals.hrv-input.v1".to_string(),
+            output_schema: "open_vitals.hrv-reference-output.v1".to_string(),
             input_requirements_json: json!({
                 "rr_intervals_ms": {
                     "unit": "ms",
@@ -112,8 +112,8 @@ pub fn reference_algorithm_definitions() -> Vec<AlgorithmDefinitionRecord> {
             display_name: "Reference Sleep Actigraphy Summary".to_string(),
             implementation: "rust-reference".to_string(),
             license: "UNLICENSED".to_string(),
-            input_schema: "goose.sleep-input.v1".to_string(),
-            output_schema: "goose.sleep-actigraphy-reference-output.v1".to_string(),
+            input_schema: "open_vitals.sleep-input.v1".to_string(),
+            output_schema: "open_vitals.sleep-actigraphy-reference-output.v1".to_string(),
             input_requirements_json: json!({
                 "time_in_bed_minutes": {"unit": "minutes", "minimum_to_compute": 1.0},
                 "sleep_duration_minutes": {"unit": "minutes", "minimum_to_compute": 1.0},
@@ -145,8 +145,8 @@ pub fn reference_algorithm_definitions() -> Vec<AlgorithmDefinitionRecord> {
             display_name: "Reference Edwards Zone Load".to_string(),
             implementation: "rust-reference".to_string(),
             license: "UNLICENSED".to_string(),
-            input_schema: "goose.strain-input.v1".to_string(),
-            output_schema: "goose.edwards-zone-load-reference-output.v1".to_string(),
+            input_schema: "open_vitals.strain-input.v1".to_string(),
+            output_schema: "open_vitals.edwards-zone-load-reference-output.v1".to_string(),
             input_requirements_json: json!({
                 "hr_zone_minutes": {"unit": "minutes", "required_count": 5},
                 "duration_minutes": {"unit": "minutes", "minimum_to_compute": 1.0}
@@ -174,8 +174,8 @@ pub fn reference_algorithm_definitions() -> Vec<AlgorithmDefinitionRecord> {
             display_name: "Reference HRV/HR Stress Proxy".to_string(),
             implementation: "rust-reference".to_string(),
             license: "UNLICENSED".to_string(),
-            input_schema: "goose.stress-input.v1".to_string(),
-            output_schema: "goose.stress-hrv-hr-reference-output.v1".to_string(),
+            input_schema: "open_vitals.stress-input.v1".to_string(),
+            output_schema: "open_vitals.stress-hrv-hr-reference-output.v1".to_string(),
             input_requirements_json: json!({
                 "heart_rate_bpm": {"unit": "bpm", "minimum_to_compute": 1.0},
                 "resting_hr_bpm": {"unit": "bpm", "minimum_to_compute": 1.0},
@@ -519,28 +519,28 @@ pub fn reference_stress_hrv_hr_proxy(
 pub fn hrv_reference_run_record(
     run_id: &str,
     result: &AlgorithmRunResult<HrvReferenceOutput>,
-) -> GooseResult<AlgorithmRunRecord> {
+) -> OpenVitalsResult<AlgorithmRunRecord> {
     reference_run_record(run_id, result, "HRV reference")
 }
 
 pub fn sleep_reference_run_record(
     run_id: &str,
     result: &AlgorithmRunResult<SleepActigraphyReferenceOutput>,
-) -> GooseResult<AlgorithmRunRecord> {
+) -> OpenVitalsResult<AlgorithmRunRecord> {
     reference_run_record(run_id, result, "sleep reference")
 }
 
 pub fn strain_reference_run_record(
     run_id: &str,
     result: &AlgorithmRunResult<StrainEdwardsReferenceOutput>,
-) -> GooseResult<AlgorithmRunRecord> {
+) -> OpenVitalsResult<AlgorithmRunRecord> {
     reference_run_record(run_id, result, "strain reference")
 }
 
 pub fn stress_reference_run_record(
     run_id: &str,
     result: &AlgorithmRunResult<StressHrvHrReferenceOutput>,
-) -> GooseResult<AlgorithmRunRecord> {
+) -> OpenVitalsResult<AlgorithmRunRecord> {
     reference_run_record(run_id, result, "stress reference")
 }
 
@@ -548,19 +548,19 @@ fn reference_run_record<T: Serialize>(
     run_id: &str,
     result: &AlgorithmRunResult<T>,
     label: &str,
-) -> GooseResult<AlgorithmRunRecord> {
+) -> OpenVitalsResult<AlgorithmRunRecord> {
     let output_json = serde_json::to_string(&result.output).map_err(|error| {
-        GooseError::message(format!("cannot serialize {label} output: {error}"))
+        OpenVitalsError::message(format!("cannot serialize {label} output: {error}"))
     })?;
     let quality_flags_json = serde_json::to_string(&result.quality_flags).map_err(|error| {
-        GooseError::message(format!("cannot serialize {label} quality flags: {error}"))
+        OpenVitalsError::message(format!("cannot serialize {label} quality flags: {error}"))
     })?;
     let provenance_json = serde_json::to_string(&json!({
         "provenance": result.provenance,
         "errors": result.errors
     }))
     .map_err(|error| {
-        GooseError::message(format!("cannot serialize {label} provenance: {error}"))
+        OpenVitalsError::message(format!("cannot serialize {label} provenance: {error}"))
     })?;
 
     Ok(AlgorithmRunRecord {

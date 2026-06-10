@@ -1,4 +1,4 @@
-# Goose Core Fixtures
+# OpenVitals Core Fixtures
 
 Fixtures in this directory must have a sibling `.fixture.json` sidecar.
 
@@ -18,7 +18,7 @@ Current frame fixtures intentionally stop at stable evidence:
 Current sanitized capture fixtures cover:
 
 - a synthetic CoreBluetooth-style notification batch using
-  `goose.captured-frame-batch.v1`
+  `open_vitals.captured-frame-batch.v1`
 - multi-frame parser/import coverage for GET_HELLO plus a shortened K10 raw
   motion packet without per-frame sidecars
 
@@ -27,8 +27,8 @@ fixtures or trusted references prove units and offsets.
 
 Current algorithm fixtures cover hand-derived inputs for:
 
-- `goose.hrv.v0`
-- `goose.sleep.v0`
-- `goose.strain.v0`
-- `goose.recovery.v0`
-- `goose.stress.v0`
+- `open_vitals.hrv.v0`
+- `open_vitals.sleep.v0`
+- `open_vitals.strain.v0`
+- `open_vitals.recovery.v0`
+- `open_vitals.stress.v0`

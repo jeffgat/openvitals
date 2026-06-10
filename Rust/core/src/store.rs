@@ -6,7 +6,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    GooseError, GooseResult,
+    OpenVitalsError, OpenVitalsResult,
     protocol::{DeviceType, ParsedFrame},
 };
 
@@ -157,7 +157,7 @@ const ALLOWED_SLEEP_CORRECTION_LABEL_TYPES: [&str; 5] = [
 ];
 
 #[derive(Debug)]
-pub struct GooseStore {
+pub struct OpenVitalsStore {
     conn: Connection,
 }
 
@@ -887,30 +887,30 @@ pub struct DebugEventRow {
     pub data_json: String,
 }
 
-impl GooseStore {
-    pub fn open(path: &Path) -> GooseResult<Self> {
+impl OpenVitalsStore {
+    pub fn open(path: &Path) -> OpenVitalsResult<Self> {
         let conn = Connection::open(path)?;
         let store = Self { conn };
         store.migrate()?;
         Ok(store)
     }
 
-    pub fn open_read_only(path: &Path) -> GooseResult<Self> {
+    pub fn open_read_only(path: &Path) -> OpenVitalsResult<Self> {
         let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         Ok(Self { conn })
     }
 
-    pub fn open_in_memory() -> GooseResult<Self> {
+    pub fn open_in_memory() -> OpenVitalsResult<Self> {
         let conn = Connection::open_in_memory()?;
         let store = Self { conn };
         store.migrate()?;
         Ok(store)
     }
 
-    pub fn immediate_transaction<F, T>(&self, operation: F) -> GooseResult<T>
+    pub fn immediate_transaction<F, T>(&self, operation: F) -> OpenVitalsResult<T>
     where
-        F: FnOnce(&GooseStore) -> GooseResult<T>,
+        F: FnOnce(&OpenVitalsStore) -> OpenVitalsResult<T>,
     {
         self.conn.execute_batch("BEGIN IMMEDIATE TRANSACTION")?;
         match operation(self) {
@@ -925,12 +925,12 @@ impl GooseStore {
         }
     }
 
-    pub fn migrate(&self) -> GooseResult<()> {
+    pub fn migrate(&self) -> OpenVitalsResult<()> {
         self.conn.execute_batch(
             r#"
             PRAGMA foreign_keys = ON;
 
-            CREATE TABLE IF NOT EXISTS goose_schema_migrations (
+            CREATE TABLE IF NOT EXISTS open_vitals_schema_migrations (
                 version INTEGER PRIMARY KEY,
                 applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
             );
@@ -1405,20 +1405,20 @@ impl GooseStore {
                 PRIMARY KEY (session_id, sequence)
             );
 
-            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (1);
-            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (2);
-            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (3);
-            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (4);
-            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (5);
-            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (6);
-            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (7);
-            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (8);
-            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (9);
-            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (10);
-            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (11);
-            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (12);
-            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (13);
-            INSERT OR IGNORE INTO goose_schema_migrations(version) VALUES (14);
+            INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (1);
+            INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (2);
+            INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (3);
+            INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (4);
+            INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (5);
+            INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (6);
+            INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (7);
+            INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (8);
+            INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (9);
+            INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (10);
+            INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (11);
+            INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (12);
+            INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (13);
+            INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (14);
             PRAGMA user_version = 14;
             "#,
         )?;
@@ -1431,7 +1431,7 @@ impl GooseStore {
         Ok(())
     }
 
-    pub fn schema_version(&self) -> GooseResult<i64> {
+    pub fn schema_version(&self) -> OpenVitalsResult<i64> {
         Ok(self
             .conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))?)
@@ -1442,11 +1442,11 @@ impl GooseStore {
         sessions: &[OvernightSyncSessionInput<'_>],
         raw_notifications: &[OvernightRawNotificationInput<'_>],
         historical_range_polls: &[OvernightHistoricalRangePollInput<'_>],
-    ) -> GooseResult<OvernightMirrorReport> {
+    ) -> OpenVitalsResult<OvernightMirrorReport> {
         self.immediate_transaction(|store| {
             store.ensure_overnight_mirror_tables()?;
             let mut report = OvernightMirrorReport {
-                schema: "goose.overnight-mirror-report.v1".to_string(),
+                schema: "open_vitals.overnight-mirror-report.v1".to_string(),
                 session_upserted: 0,
                 raw_inserted: 0,
                 raw_existing: 0,
@@ -1491,7 +1491,7 @@ impl GooseStore {
         })
     }
 
-    pub fn overnight_mirror_counts(&self, session_id: &str) -> GooseResult<OvernightMirrorCounts> {
+    pub fn overnight_mirror_counts(&self, session_id: &str) -> OpenVitalsResult<OvernightMirrorCounts> {
         validate_required("session_id", session_id)?;
         self.ensure_overnight_mirror_tables()?;
         let session_exists: bool = self.conn.query_row(
@@ -1515,7 +1515,7 @@ impl GooseStore {
             |row| row.get(0),
         )?;
         Ok(OvernightMirrorCounts {
-            schema: "goose.overnight-mirror-counts.v1".to_string(),
+            schema: "open_vitals.overnight-mirror-counts.v1".to_string(),
             session_id: session_id.to_string(),
             session_exists,
             raw_notification_count,
@@ -1524,7 +1524,7 @@ impl GooseStore {
         })
     }
 
-    fn ensure_overnight_mirror_tables(&self) -> GooseResult<()> {
+    fn ensure_overnight_mirror_tables(&self) -> OpenVitalsResult<()> {
         self.conn.execute_batch(
             r#"
             CREATE TABLE IF NOT EXISTS overnight_sync_sessions (
@@ -1620,7 +1620,7 @@ impl GooseStore {
     fn upsert_overnight_sync_session(
         &self,
         input: &OvernightSyncSessionInput<'_>,
-    ) -> GooseResult<bool> {
+    ) -> OpenVitalsResult<bool> {
         validate_required("session_id", input.session_id)?;
         validate_required("started_at", input.started_at)?;
         validate_required("mode", input.mode)?;
@@ -1723,7 +1723,7 @@ impl GooseStore {
     fn insert_overnight_raw_notification(
         &self,
         input: &OvernightRawNotificationInput<'_>,
-    ) -> GooseResult<bool> {
+    ) -> OpenVitalsResult<bool> {
         validate_required("session_id", input.session_id)?;
         validate_required("captured_at", input.captured_at)?;
         validate_required("source", input.source)?;
@@ -1733,7 +1733,7 @@ impl GooseStore {
         validate_non_negative("byte_count", input.byte_count)?;
 
         let payload = hex::decode(input.frame_hex).map_err(|error| {
-            GooseError::message(format!("frame_hex is not valid hexadecimal: {error}"))
+            OpenVitalsError::message(format!("frame_hex is not valid hexadecimal: {error}"))
         })?;
         let sha256 = sha256_hex(&payload);
 
@@ -1787,7 +1787,7 @@ impl GooseStore {
     fn insert_overnight_historical_range_poll(
         &self,
         input: &OvernightHistoricalRangePollInput<'_>,
-    ) -> GooseResult<bool> {
+    ) -> OpenVitalsResult<bool> {
         validate_required("session_id", input.session_id)?;
         validate_required("captured_at", input.captured_at)?;
         validate_required("status", input.status)?;
@@ -1842,7 +1842,7 @@ impl GooseStore {
         Ok(changed > 0)
     }
 
-    pub fn insert_raw_evidence(&self, input: RawEvidenceInput<'_>) -> GooseResult<bool> {
+    pub fn insert_raw_evidence(&self, input: RawEvidenceInput<'_>) -> OpenVitalsResult<bool> {
         validate_required("evidence_id", input.evidence_id)?;
         validate_required("source", input.source)?;
         validate_required("captured_at", input.captured_at)?;
@@ -1891,26 +1891,26 @@ impl GooseStore {
             .optional()?;
         match existing_sha256 {
             Some(existing_sha256) if existing_sha256 == sha256 => Ok(false),
-            Some(_) => Err(GooseError::message(format!(
+            Some(_) => Err(OpenVitalsError::message(format!(
                 "raw evidence id {} already exists with a different checksum",
                 input.evidence_id
             ))),
-            None => Err(GooseError::message(format!(
+            None => Err(OpenVitalsError::message(format!(
                 "raw evidence id {} insert was ignored but no existing row was found",
                 input.evidence_id
             ))),
         }
     }
 
-    pub fn insert_decoded_frame(&self, input: DecodedFrameInput<'_>) -> GooseResult<bool> {
+    pub fn insert_decoded_frame(&self, input: DecodedFrameInput<'_>) -> OpenVitalsResult<bool> {
         validate_required("frame_id", input.frame_id)?;
         validate_required("evidence_id", input.evidence_id)?;
         validate_required("parser_version", input.parser_version)?;
 
         let parsed_payload_json = serde_json::to_string(&input.parsed.parsed_payload)
-            .map_err(|error| GooseError::message(error.to_string()))?;
+            .map_err(|error| OpenVitalsError::message(error.to_string()))?;
         let warnings_json = serde_json::to_string(&input.parsed.warnings)
-            .map_err(|error| GooseError::message(error.to_string()))?;
+            .map_err(|error| OpenVitalsError::message(error.to_string()))?;
 
         let mut statement = self.conn.prepare_cached(
             r#"
@@ -1957,7 +1957,7 @@ impl GooseStore {
         Ok(changed > 0)
     }
 
-    pub fn start_capture_session(&self, input: CaptureSessionInput<'_>) -> GooseResult<bool> {
+    pub fn start_capture_session(&self, input: CaptureSessionInput<'_>) -> OpenVitalsResult<bool> {
         validate_required("session_id", input.session_id)?;
         validate_required("source", input.source)?;
         validate_required("device_model", input.device_model)?;
@@ -1979,7 +1979,7 @@ impl GooseStore {
             if existing == expected {
                 return Ok(false);
             }
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "capture session {} already exists with different metadata",
                 input.session_id
             )));
@@ -2016,17 +2016,17 @@ impl GooseStore {
         session_id: &str,
         ended_at_unix_ms: i64,
         frame_count: i64,
-    ) -> GooseResult<CaptureSessionRow> {
+    ) -> OpenVitalsResult<CaptureSessionRow> {
         validate_required("session_id", session_id)?;
         validate_non_negative("ended_at_unix_ms", ended_at_unix_ms)?;
         validate_non_negative("frame_count", frame_count)?;
         let Some(existing) = self.capture_session(session_id)? else {
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "capture session {session_id} not found"
             )));
         };
         if ended_at_unix_ms < existing.started_at_unix_ms {
-            return Err(GooseError::message(
+            return Err(OpenVitalsError::message(
                 "ended_at_unix_ms must be greater than or equal to started_at_unix_ms",
             ));
         }
@@ -2043,10 +2043,10 @@ impl GooseStore {
             params![session_id, ended_at_unix_ms, frame_count],
         )?;
         self.capture_session(session_id)?
-            .ok_or_else(|| GooseError::message(format!("capture session {session_id} not found")))
+            .ok_or_else(|| OpenVitalsError::message(format!("capture session {session_id} not found")))
     }
 
-    pub fn capture_session(&self, session_id: &str) -> GooseResult<Option<CaptureSessionRow>> {
+    pub fn capture_session(&self, session_id: &str) -> OpenVitalsResult<Option<CaptureSessionRow>> {
         validate_required("session_id", session_id)?;
         self.conn
             .query_row(
@@ -2068,18 +2068,18 @@ impl GooseStore {
                 capture_session_from_row,
             )
             .optional()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn capture_sessions_between(
         &self,
         start_unix_ms: i64,
         end_unix_ms: i64,
-    ) -> GooseResult<Vec<CaptureSessionRow>> {
+    ) -> OpenVitalsResult<Vec<CaptureSessionRow>> {
         validate_non_negative("start_unix_ms", start_unix_ms)?;
         validate_non_negative("end_unix_ms", end_unix_ms)?;
         if end_unix_ms < start_unix_ms {
-            return Err(GooseError::message(
+            return Err(OpenVitalsError::message(
                 "end_unix_ms must be greater than or equal to start_unix_ms",
             ));
         }
@@ -2106,10 +2106,10 @@ impl GooseStore {
             capture_session_from_row,
         )?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
-    pub fn insert_activity_session(&self, input: ActivitySessionInput<'_>) -> GooseResult<bool> {
+    pub fn insert_activity_session(&self, input: ActivitySessionInput<'_>) -> OpenVitalsResult<bool> {
         validate_activity_session_input(self, &input)?;
 
         if let Some(existing) = self.activity_session(input.session_id)? {
@@ -2130,7 +2130,7 @@ impl GooseStore {
             if same {
                 return Ok(false);
             }
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "activity session {} already exists with different metadata",
                 input.session_id
             )));
@@ -2173,10 +2173,10 @@ impl GooseStore {
         Ok(true)
     }
 
-    pub fn update_activity_session(&self, input: ActivitySessionInput<'_>) -> GooseResult<bool> {
+    pub fn update_activity_session(&self, input: ActivitySessionInput<'_>) -> OpenVitalsResult<bool> {
         validate_activity_session_input(self, &input)?;
         let Some(existing) = self.activity_session(input.session_id)? else {
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "activity session {} not found",
                 input.session_id
             )));
@@ -2237,7 +2237,7 @@ impl GooseStore {
         Ok(changed > 0)
     }
 
-    pub fn delete_activity_session(&self, session_id: &str) -> GooseResult<bool> {
+    pub fn delete_activity_session(&self, session_id: &str) -> OpenVitalsResult<bool> {
         validate_required("session_id", session_id)?;
         let changed = self.conn.execute(
             "DELETE FROM activity_sessions WHERE session_id = ?1",
@@ -2246,7 +2246,7 @@ impl GooseStore {
         Ok(changed > 0)
     }
 
-    pub fn activity_session(&self, session_id: &str) -> GooseResult<Option<ActivitySessionRow>> {
+    pub fn activity_session(&self, session_id: &str) -> OpenVitalsResult<Option<ActivitySessionRow>> {
         validate_required("session_id", session_id)?;
         self.conn
             .query_row(
@@ -2274,14 +2274,14 @@ impl GooseStore {
                 activity_session_from_row,
             )
             .optional()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn activity_sessions_between(
         &self,
         start_time_unix_ms: i64,
         end_time_unix_ms: i64,
-    ) -> GooseResult<Vec<ActivitySessionRow>> {
+    ) -> OpenVitalsResult<Vec<ActivitySessionRow>> {
         validate_non_negative("start_time_unix_ms", start_time_unix_ms)?;
         validate_non_negative("end_time_unix_ms", end_time_unix_ms)?;
         validate_window_order(start_time_unix_ms, end_time_unix_ms)?;
@@ -2314,13 +2314,13 @@ impl GooseStore {
             activity_session_from_row,
         )?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn activity_sessions_by_type(
         &self,
         activity_type: &str,
-    ) -> GooseResult<Vec<ActivitySessionRow>> {
+    ) -> OpenVitalsResult<Vec<ActivitySessionRow>> {
         validate_required("activity_type", activity_type)?;
         validate_activity_type(activity_type)?;
         let mut statement = self.conn.prepare(
@@ -2348,13 +2348,13 @@ impl GooseStore {
         )?;
         let rows = statement.query_map(params![activity_type], activity_session_from_row)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn activity_sessions_by_source(
         &self,
         source: &str,
-    ) -> GooseResult<Vec<ActivitySessionRow>> {
+    ) -> OpenVitalsResult<Vec<ActivitySessionRow>> {
         validate_required("source", source)?;
         let mut statement = self.conn.prepare(
             r#"
@@ -2381,13 +2381,13 @@ impl GooseStore {
         )?;
         let rows = statement.query_map(params![source], activity_session_from_row)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn activity_sessions_by_sync_status(
         &self,
         sync_status: &str,
-    ) -> GooseResult<Vec<ActivitySessionRow>> {
+    ) -> OpenVitalsResult<Vec<ActivitySessionRow>> {
         validate_required("sync_status", sync_status)?;
         validate_sync_status(sync_status)?;
         let mut statement = self.conn.prepare(
@@ -2415,13 +2415,13 @@ impl GooseStore {
         )?;
         let rows = statement.query_map(params![sync_status], activity_session_from_row)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn activity_sessions_by_custom_label(
         &self,
         custom_label: &str,
-    ) -> GooseResult<Vec<ActivitySessionRow>> {
+    ) -> OpenVitalsResult<Vec<ActivitySessionRow>> {
         validate_required("custom_label", custom_label)?;
         let mut statement = self.conn.prepare(
             r#"
@@ -2448,13 +2448,13 @@ impl GooseStore {
         )?;
         let rows = statement.query_map(params![custom_label], activity_session_from_row)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn activity_sessions_by_external_activity_type_code(
         &self,
         external_activity_type_code: &str,
-    ) -> GooseResult<Vec<ActivitySessionRow>> {
+    ) -> OpenVitalsResult<Vec<ActivitySessionRow>> {
         validate_required("external_activity_type_code", external_activity_type_code)?;
         let mut statement = self.conn.prepare(
             r#"
@@ -2484,13 +2484,13 @@ impl GooseStore {
             activity_session_from_row,
         )?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn activity_sessions_by_external_activity_type_name(
         &self,
         external_activity_type_name: &str,
-    ) -> GooseResult<Vec<ActivitySessionRow>> {
+    ) -> OpenVitalsResult<Vec<ActivitySessionRow>> {
         validate_required("external_activity_type_name", external_activity_type_name)?;
         let mut statement = self.conn.prepare(
             r#"
@@ -2520,13 +2520,13 @@ impl GooseStore {
             activity_session_from_row,
         )?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
-    pub fn insert_activity_metric(&self, input: ActivityMetricInput<'_>) -> GooseResult<bool> {
+    pub fn insert_activity_metric(&self, input: ActivityMetricInput<'_>) -> OpenVitalsResult<bool> {
         validate_activity_metric_input(self, &input)?;
         if self.activity_session(input.activity_session_id)?.is_none() {
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "activity session {} not found",
                 input.activity_session_id
             )));
@@ -2537,7 +2537,7 @@ impl GooseStore {
     pub fn insert_activity_metrics(
         &self,
         inputs: &[ActivityMetricInput<'_>],
-    ) -> GooseResult<(usize, usize)> {
+    ) -> OpenVitalsResult<(usize, usize)> {
         let mut session_ids = BTreeSet::new();
         for input in inputs {
             validate_activity_metric_input(self, input)?;
@@ -2546,7 +2546,7 @@ impl GooseStore {
 
         for session_id in session_ids {
             if self.activity_session(session_id)?.is_none() {
-                return Err(GooseError::message(format!(
+                return Err(OpenVitalsError::message(format!(
                     "activity session {} not found",
                     session_id
                 )));
@@ -2568,7 +2568,7 @@ impl GooseStore {
     fn insert_activity_metric_without_session_check(
         &self,
         input: &ActivityMetricInput<'_>,
-    ) -> GooseResult<bool> {
+    ) -> OpenVitalsResult<bool> {
         let changed = self.conn.execute(
             r#"
             INSERT OR IGNORE INTO activity_metrics (
@@ -2611,19 +2611,19 @@ impl GooseStore {
             {
                 return Ok(false);
             }
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "activity metric {} already exists with different metadata",
                 input.metric_id
             )));
         }
 
-        Err(GooseError::message(format!(
+        Err(OpenVitalsError::message(format!(
             "activity metric {} insert was ignored but no existing row was found",
             input.metric_id
         )))
     }
 
-    pub fn activity_metric(&self, metric_id: &str) -> GooseResult<Option<ActivityMetricRow>> {
+    pub fn activity_metric(&self, metric_id: &str) -> OpenVitalsResult<Option<ActivityMetricRow>> {
         validate_required("metric_id", metric_id)?;
         self.conn
             .query_row(
@@ -2646,16 +2646,16 @@ impl GooseStore {
                 activity_metric_from_row,
             )
             .optional()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn activity_metrics_for_session(
         &self,
         activity_session_id: &str,
-    ) -> GooseResult<Vec<ActivityMetricRow>> {
+    ) -> OpenVitalsResult<Vec<ActivityMetricRow>> {
         validate_required("activity_session_id", activity_session_id)?;
         if self.activity_session(activity_session_id)?.is_none() {
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "activity session {} not found",
                 activity_session_id
             )));
@@ -2680,13 +2680,13 @@ impl GooseStore {
         )?;
         let rows = statement.query_map(params![activity_session_id], activity_metric_from_row)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn activity_metrics_for_sessions(
         &self,
         activity_session_ids: &[String],
-    ) -> GooseResult<Vec<ActivityMetricRow>> {
+    ) -> OpenVitalsResult<Vec<ActivityMetricRow>> {
         if activity_session_ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -2722,13 +2722,13 @@ impl GooseStore {
             activity_metric_from_row,
         )?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn activity_metrics_by_name(
         &self,
         metric_name: &str,
-    ) -> GooseResult<Vec<ActivityMetricRow>> {
+    ) -> OpenVitalsResult<Vec<ActivityMetricRow>> {
         validate_required("metric_name", metric_name)?;
         let mut statement = self.conn.prepare(
             r#"
@@ -2750,7 +2750,7 @@ impl GooseStore {
         )?;
         let rows = statement.query_map(params![metric_name], activity_metric_from_row)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn activity_metrics_for_session_in_window(
@@ -2758,13 +2758,13 @@ impl GooseStore {
         activity_session_id: &str,
         start_time_unix_ms: i64,
         end_time_unix_ms: i64,
-    ) -> GooseResult<Vec<ActivityMetricRow>> {
+    ) -> OpenVitalsResult<Vec<ActivityMetricRow>> {
         validate_required("activity_session_id", activity_session_id)?;
         validate_non_negative("start_time_unix_ms", start_time_unix_ms)?;
         validate_non_negative("end_time_unix_ms", end_time_unix_ms)?;
         validate_window_order(start_time_unix_ms, end_time_unix_ms)?;
         if self.activity_session(activity_session_id)?.is_none() {
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "activity session {} not found",
                 activity_session_id
             )));
@@ -2794,14 +2794,14 @@ impl GooseStore {
             activity_metric_from_row,
         )?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn activity_metrics_in_window(
         &self,
         start_time_unix_ms: i64,
         end_time_unix_ms: i64,
-    ) -> GooseResult<Vec<ActivityMetricRow>> {
+    ) -> OpenVitalsResult<Vec<ActivityMetricRow>> {
         validate_non_negative("start_time_unix_ms", start_time_unix_ms)?;
         validate_non_negative("end_time_unix_ms", end_time_unix_ms)?;
         validate_window_order(start_time_unix_ms, end_time_unix_ms)?;
@@ -2829,13 +2829,13 @@ impl GooseStore {
             activity_metric_from_row,
         )?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn insert_daily_activity_metric(
         &self,
         input: DailyActivityMetricInput<'_>,
-    ) -> GooseResult<bool> {
+    ) -> OpenVitalsResult<bool> {
         validate_daily_activity_metric_input(&input)?;
         if let Some(existing) = self.daily_activity_metric(input.daily_metric_id)? {
             let same = existing.date_key == input.date_key
@@ -2855,7 +2855,7 @@ impl GooseStore {
             if same {
                 return Ok(false);
             }
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "daily activity metric {} already exists with different metadata",
                 input.daily_metric_id
             )));
@@ -2905,7 +2905,7 @@ impl GooseStore {
     pub fn upsert_daily_activity_metric(
         &self,
         input: DailyActivityMetricInput<'_>,
-    ) -> GooseResult<bool> {
+    ) -> OpenVitalsResult<bool> {
         validate_daily_activity_metric_input(&input)?;
         let changed = self.conn.execute(
             r#"
@@ -2981,7 +2981,7 @@ impl GooseStore {
     pub fn daily_activity_metric(
         &self,
         daily_metric_id: &str,
-    ) -> GooseResult<Option<DailyActivityMetricRow>> {
+    ) -> OpenVitalsResult<Option<DailyActivityMetricRow>> {
         validate_required("daily_metric_id", daily_metric_id)?;
         self.conn
             .query_row(
@@ -3011,14 +3011,14 @@ impl GooseStore {
                 daily_activity_metric_from_row,
             )
             .optional()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn daily_activity_metrics_between(
         &self,
         start_time_unix_ms: i64,
         end_time_unix_ms: i64,
-    ) -> GooseResult<Vec<DailyActivityMetricRow>> {
+    ) -> OpenVitalsResult<Vec<DailyActivityMetricRow>> {
         validate_non_negative("start_time_unix_ms", start_time_unix_ms)?;
         validate_non_negative("end_time_unix_ms", end_time_unix_ms)?;
         validate_window_order(start_time_unix_ms, end_time_unix_ms)?;
@@ -3053,13 +3053,13 @@ impl GooseStore {
             daily_activity_metric_from_row,
         )?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn insert_hourly_activity_metric(
         &self,
         input: HourlyActivityMetricInput<'_>,
-    ) -> GooseResult<bool> {
+    ) -> OpenVitalsResult<bool> {
         validate_hourly_activity_metric_input(&input)?;
         if let Some(existing) = self.hourly_activity_metric(input.hourly_metric_id)? {
             let same = existing.date_key == input.date_key
@@ -3079,7 +3079,7 @@ impl GooseStore {
             if same {
                 return Ok(false);
             }
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "hourly activity metric {} already exists with different metadata",
                 input.hourly_metric_id
             )));
@@ -3129,7 +3129,7 @@ impl GooseStore {
     pub fn upsert_hourly_activity_metric(
         &self,
         input: HourlyActivityMetricInput<'_>,
-    ) -> GooseResult<bool> {
+    ) -> OpenVitalsResult<bool> {
         validate_hourly_activity_metric_input(&input)?;
         let changed = self.conn.execute(
             r#"
@@ -3205,7 +3205,7 @@ impl GooseStore {
     pub fn hourly_activity_metric(
         &self,
         hourly_metric_id: &str,
-    ) -> GooseResult<Option<HourlyActivityMetricRow>> {
+    ) -> OpenVitalsResult<Option<HourlyActivityMetricRow>> {
         validate_required("hourly_metric_id", hourly_metric_id)?;
         self.conn
             .query_row(
@@ -3235,14 +3235,14 @@ impl GooseStore {
                 hourly_activity_metric_from_row,
             )
             .optional()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn hourly_activity_metrics_between(
         &self,
         start_time_unix_ms: i64,
         end_time_unix_ms: i64,
-    ) -> GooseResult<Vec<HourlyActivityMetricRow>> {
+    ) -> OpenVitalsResult<Vec<HourlyActivityMetricRow>> {
         validate_non_negative("start_time_unix_ms", start_time_unix_ms)?;
         validate_non_negative("end_time_unix_ms", end_time_unix_ms)?;
         validate_window_order(start_time_unix_ms, end_time_unix_ms)?;
@@ -3277,13 +3277,13 @@ impl GooseStore {
             hourly_activity_metric_from_row,
         )?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn insert_daily_recovery_metric(
         &self,
         input: DailyRecoveryMetricInput<'_>,
-    ) -> GooseResult<bool> {
+    ) -> OpenVitalsResult<bool> {
         validate_daily_recovery_metric_input(&input)?;
         if let Some(existing) = self.daily_recovery_metric(input.daily_metric_id)? {
             let same = existing.date_key == input.date_key
@@ -3303,7 +3303,7 @@ impl GooseStore {
             if same {
                 return Ok(false);
             }
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "daily recovery metric {} already exists with different metadata",
                 input.daily_metric_id
             )));
@@ -3353,7 +3353,7 @@ impl GooseStore {
     pub fn upsert_daily_recovery_metric(
         &self,
         input: DailyRecoveryMetricInput<'_>,
-    ) -> GooseResult<bool> {
+    ) -> OpenVitalsResult<bool> {
         validate_daily_recovery_metric_input(&input)?;
         let changed = self.conn.execute(
             r#"
@@ -3429,7 +3429,7 @@ impl GooseStore {
     pub fn daily_recovery_metric(
         &self,
         daily_metric_id: &str,
-    ) -> GooseResult<Option<DailyRecoveryMetricRow>> {
+    ) -> OpenVitalsResult<Option<DailyRecoveryMetricRow>> {
         validate_required("daily_metric_id", daily_metric_id)?;
         self.conn
             .query_row(
@@ -3459,14 +3459,14 @@ impl GooseStore {
                 daily_recovery_metric_from_row,
             )
             .optional()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn daily_recovery_metrics_between(
         &self,
         start_time_unix_ms: i64,
         end_time_unix_ms: i64,
-    ) -> GooseResult<Vec<DailyRecoveryMetricRow>> {
+    ) -> OpenVitalsResult<Vec<DailyRecoveryMetricRow>> {
         validate_non_negative("start_time_unix_ms", start_time_unix_ms)?;
         validate_non_negative("end_time_unix_ms", end_time_unix_ms)?;
         validate_window_order(start_time_unix_ms, end_time_unix_ms)?;
@@ -3501,10 +3501,10 @@ impl GooseStore {
             daily_recovery_metric_from_row,
         )?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
-    pub fn insert_metric_provenance(&self, input: MetricProvenanceInput<'_>) -> GooseResult<bool> {
+    pub fn insert_metric_provenance(&self, input: MetricProvenanceInput<'_>) -> OpenVitalsResult<bool> {
         validate_metric_provenance_input(self, &input)?;
         if let Some(existing) = self.metric_provenance(input.provenance_id)? {
             let same = existing.metric_scope == input.metric_scope
@@ -3518,7 +3518,7 @@ impl GooseStore {
             if same {
                 return Ok(false);
             }
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "metric provenance {} already exists with different metadata",
                 input.provenance_id
             )));
@@ -3553,7 +3553,7 @@ impl GooseStore {
         Ok(changed > 0)
     }
 
-    pub fn upsert_metric_provenance(&self, input: MetricProvenanceInput<'_>) -> GooseResult<bool> {
+    pub fn upsert_metric_provenance(&self, input: MetricProvenanceInput<'_>) -> OpenVitalsResult<bool> {
         validate_metric_provenance_input(self, &input)?;
         let changed = self.conn.execute(
             r#"
@@ -3604,7 +3604,7 @@ impl GooseStore {
     pub fn metric_provenance(
         &self,
         provenance_id: &str,
-    ) -> GooseResult<Option<MetricProvenanceRow>> {
+    ) -> OpenVitalsResult<Option<MetricProvenanceRow>> {
         validate_required("provenance_id", provenance_id)?;
         self.conn
             .query_row(
@@ -3627,14 +3627,14 @@ impl GooseStore {
                 metric_provenance_from_row,
             )
             .optional()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn metric_provenance_for_metric(
         &self,
         metric_scope: &str,
         metric_id: &str,
-    ) -> GooseResult<Vec<MetricProvenanceRow>> {
+    ) -> OpenVitalsResult<Vec<MetricProvenanceRow>> {
         validate_required("metric_scope", metric_scope)?;
         validate_required("metric_id", metric_id)?;
         let mut statement = self.conn.prepare(
@@ -3659,13 +3659,13 @@ impl GooseStore {
         let rows =
             statement.query_map(params![metric_scope, metric_id], metric_provenance_from_row)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn insert_metric_debug_feature(
         &self,
         input: MetricDebugFeatureInput<'_>,
-    ) -> GooseResult<bool> {
+    ) -> OpenVitalsResult<bool> {
         validate_metric_debug_feature_input(&input)?;
         if let Some(existing) = self.metric_debug_feature(input.feature_id)? {
             let same = existing.metric_family == input.metric_family
@@ -3681,7 +3681,7 @@ impl GooseStore {
             if same {
                 return Ok(false);
             }
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "metric debug feature {} already exists with different metadata",
                 input.feature_id
             )));
@@ -3723,7 +3723,7 @@ impl GooseStore {
     pub fn metric_debug_feature(
         &self,
         feature_id: &str,
-    ) -> GooseResult<Option<MetricDebugFeatureRow>> {
+    ) -> OpenVitalsResult<Option<MetricDebugFeatureRow>> {
         validate_required("feature_id", feature_id)?;
         self.conn
             .query_row(
@@ -3748,7 +3748,7 @@ impl GooseStore {
                 metric_debug_feature_from_row,
             )
             .optional()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn metric_debug_features_between(
@@ -3756,7 +3756,7 @@ impl GooseStore {
         metric_family: &str,
         start_time_unix_ms: i64,
         end_time_unix_ms: i64,
-    ) -> GooseResult<Vec<MetricDebugFeatureRow>> {
+    ) -> OpenVitalsResult<Vec<MetricDebugFeatureRow>> {
         validate_required("metric_family", metric_family)?;
         validate_non_negative("start_time_unix_ms", start_time_unix_ms)?;
         validate_non_negative("end_time_unix_ms", end_time_unix_ms)?;
@@ -3788,13 +3788,13 @@ impl GooseStore {
             metric_debug_feature_from_row,
         )?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn insert_step_counter_sample(
         &self,
         input: StepCounterSampleInput<'_>,
-    ) -> GooseResult<bool> {
+    ) -> OpenVitalsResult<bool> {
         validate_step_counter_sample_input(&input)?;
         if let Some(existing) = self.step_counter_sample(input.sample_id)? {
             let same = existing.sample_time_unix_ms == input.sample_time_unix_ms
@@ -3812,7 +3812,7 @@ impl GooseStore {
             if same {
                 return Ok(false);
             }
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "step counter sample {} already exists with different metadata",
                 input.sample_id
             )));
@@ -3858,7 +3858,7 @@ impl GooseStore {
     pub fn step_counter_sample(
         &self,
         sample_id: &str,
-    ) -> GooseResult<Option<StepCounterSampleRow>> {
+    ) -> OpenVitalsResult<Option<StepCounterSampleRow>> {
         validate_required("sample_id", sample_id)?;
         self.conn
             .query_row(
@@ -3885,14 +3885,14 @@ impl GooseStore {
                 step_counter_sample_from_row,
             )
             .optional()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn step_counter_samples_between(
         &self,
         start_time_unix_ms: i64,
         end_time_unix_ms: i64,
-    ) -> GooseResult<Vec<StepCounterSampleRow>> {
+    ) -> OpenVitalsResult<Vec<StepCounterSampleRow>> {
         validate_non_negative("start_time_unix_ms", start_time_unix_ms)?;
         validate_non_negative("end_time_unix_ms", end_time_unix_ms)?;
         validate_window_order(start_time_unix_ms, end_time_unix_ms)?;
@@ -3924,13 +3924,13 @@ impl GooseStore {
             step_counter_sample_from_row,
         )?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
-    pub fn insert_activity_interval(&self, input: ActivityIntervalInput<'_>) -> GooseResult<bool> {
+    pub fn insert_activity_interval(&self, input: ActivityIntervalInput<'_>) -> OpenVitalsResult<bool> {
         validate_activity_interval_input(self, &input)?;
         if self.activity_session(input.activity_session_id)?.is_none() {
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "activity session {} not found",
                 input.activity_session_id
             )));
@@ -3946,7 +3946,7 @@ impl GooseStore {
             {
                 return Ok(false);
             }
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "activity interval {} already exists with different metadata",
                 input.interval_id
             )));
@@ -3981,7 +3981,7 @@ impl GooseStore {
         Ok(true)
     }
 
-    pub fn activity_interval(&self, interval_id: &str) -> GooseResult<Option<ActivityIntervalRow>> {
+    pub fn activity_interval(&self, interval_id: &str) -> OpenVitalsResult<Option<ActivityIntervalRow>> {
         validate_required("interval_id", interval_id)?;
         self.conn
             .query_row(
@@ -4004,16 +4004,16 @@ impl GooseStore {
                 activity_interval_from_row,
             )
             .optional()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn activity_intervals_for_session(
         &self,
         activity_session_id: &str,
-    ) -> GooseResult<Vec<ActivityIntervalRow>> {
+    ) -> OpenVitalsResult<Vec<ActivityIntervalRow>> {
         validate_required("activity_session_id", activity_session_id)?;
         if self.activity_session(activity_session_id)?.is_none() {
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "activity session {} not found",
                 activity_session_id
             )));
@@ -4038,14 +4038,14 @@ impl GooseStore {
         )?;
         let rows = statement.query_map(params![activity_session_id], activity_interval_from_row)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn activity_intervals_in_window(
         &self,
         start_time_unix_ms: i64,
         end_time_unix_ms: i64,
-    ) -> GooseResult<Vec<ActivityIntervalRow>> {
+    ) -> OpenVitalsResult<Vec<ActivityIntervalRow>> {
         validate_non_negative("start_time_unix_ms", start_time_unix_ms)?;
         validate_non_negative("end_time_unix_ms", end_time_unix_ms)?;
         validate_window_order(start_time_unix_ms, end_time_unix_ms)?;
@@ -4073,13 +4073,13 @@ impl GooseStore {
             activity_interval_from_row,
         )?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
-    pub fn insert_activity_label(&self, input: ActivityLabelInput<'_>) -> GooseResult<bool> {
+    pub fn insert_activity_label(&self, input: ActivityLabelInput<'_>) -> OpenVitalsResult<bool> {
         validate_activity_label_input(self, &input)?;
         if self.activity_session(input.activity_session_id)?.is_none() {
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "activity session {} not found",
                 input.activity_session_id
             )));
@@ -4094,7 +4094,7 @@ impl GooseStore {
             {
                 return Ok(false);
             }
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "activity label {} already exists with different metadata",
                 input.label_id
             )));
@@ -4127,7 +4127,7 @@ impl GooseStore {
     pub fn insert_external_sleep_session(
         &self,
         input: ExternalSleepSessionInput<'_>,
-    ) -> GooseResult<bool> {
+    ) -> OpenVitalsResult<bool> {
         validate_external_sleep_session_input(&input)?;
 
         if let Some(existing) = self.external_sleep_session(input.sleep_id)? {
@@ -4144,7 +4144,7 @@ impl GooseStore {
             if same {
                 return Ok(false);
             }
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "external sleep session {} already exists with different metadata",
                 input.sleep_id
             )));
@@ -4186,7 +4186,7 @@ impl GooseStore {
     pub fn external_sleep_session(
         &self,
         sleep_id: &str,
-    ) -> GooseResult<Option<ExternalSleepSessionRow>> {
+    ) -> OpenVitalsResult<Option<ExternalSleepSessionRow>> {
         validate_required("sleep_id", sleep_id)?;
         self.conn
             .query_row(
@@ -4212,14 +4212,14 @@ impl GooseStore {
                 external_sleep_session_from_row,
             )
             .optional()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn external_sleep_sessions_between(
         &self,
         start_time_unix_ms: i64,
         end_time_unix_ms: i64,
-    ) -> GooseResult<Vec<ExternalSleepSessionRow>> {
+    ) -> OpenVitalsResult<Vec<ExternalSleepSessionRow>> {
         validate_non_negative("start_time_unix_ms", start_time_unix_ms)?;
         validate_non_negative("end_time_unix_ms", end_time_unix_ms)?;
         validate_window_order(start_time_unix_ms, end_time_unix_ms)?;
@@ -4250,13 +4250,13 @@ impl GooseStore {
             external_sleep_session_from_row,
         )?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn insert_external_sleep_stage(
         &self,
         input: ExternalSleepStageInput<'_>,
-    ) -> GooseResult<bool> {
+    ) -> OpenVitalsResult<bool> {
         validate_external_sleep_stage_input(self, &input)?;
 
         if let Some(existing) = self.external_sleep_stage(input.stage_id)? {
@@ -4270,7 +4270,7 @@ impl GooseStore {
             if same {
                 return Ok(false);
             }
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "external sleep stage {} already exists with different metadata",
                 input.stage_id
             )));
@@ -4306,7 +4306,7 @@ impl GooseStore {
     pub fn external_sleep_stage(
         &self,
         stage_id: &str,
-    ) -> GooseResult<Option<ExternalSleepStageRow>> {
+    ) -> OpenVitalsResult<Option<ExternalSleepStageRow>> {
         validate_required("stage_id", stage_id)?;
         self.conn
             .query_row(
@@ -4328,13 +4328,13 @@ impl GooseStore {
                 external_sleep_stage_from_row,
             )
             .optional()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn external_sleep_stages_for_session(
         &self,
         sleep_id: &str,
-    ) -> GooseResult<Vec<ExternalSleepStageRow>> {
+    ) -> OpenVitalsResult<Vec<ExternalSleepStageRow>> {
         validate_required("sleep_id", sleep_id)?;
         let mut statement = self.conn.prepare(
             r#"
@@ -4355,13 +4355,13 @@ impl GooseStore {
         )?;
         let rows = statement.query_map(params![sleep_id], external_sleep_stage_from_row)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn insert_sleep_correction_label(
         &self,
         input: SleepCorrectionLabelInput<'_>,
-    ) -> GooseResult<bool> {
+    ) -> OpenVitalsResult<bool> {
         validate_sleep_correction_label_input(&input)?;
         if let Some(existing) = self.sleep_correction_label(input.label_id)? {
             if existing.sleep_id == input.sleep_id.map(str::to_string)
@@ -4375,7 +4375,7 @@ impl GooseStore {
             {
                 return Ok(false);
             }
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "sleep correction label {} already exists with different metadata",
                 input.label_id
             )));
@@ -4413,7 +4413,7 @@ impl GooseStore {
     pub fn sleep_correction_label(
         &self,
         label_id: &str,
-    ) -> GooseResult<Option<SleepCorrectionLabelRow>> {
+    ) -> OpenVitalsResult<Option<SleepCorrectionLabelRow>> {
         validate_required("label_id", label_id)?;
         self.conn
             .query_row(
@@ -4436,14 +4436,14 @@ impl GooseStore {
                 sleep_correction_label_from_row,
             )
             .optional()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn sleep_correction_labels_between(
         &self,
         start_time_unix_ms: i64,
         end_time_unix_ms: i64,
-    ) -> GooseResult<Vec<SleepCorrectionLabelRow>> {
+    ) -> OpenVitalsResult<Vec<SleepCorrectionLabelRow>> {
         validate_non_negative("start_time_unix_ms", start_time_unix_ms)?;
         validate_non_negative("end_time_unix_ms", end_time_unix_ms)?;
         validate_window_order(start_time_unix_ms, end_time_unix_ms)?;
@@ -4471,10 +4471,10 @@ impl GooseStore {
             sleep_correction_label_from_row,
         )?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
-    pub fn activity_label(&self, label_id: &str) -> GooseResult<Option<ActivityLabelRow>> {
+    pub fn activity_label(&self, label_id: &str) -> OpenVitalsResult<Option<ActivityLabelRow>> {
         validate_required("label_id", label_id)?;
         self.conn
             .query_row(
@@ -4495,16 +4495,16 @@ impl GooseStore {
                 activity_label_from_row,
             )
             .optional()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn activity_labels_for_session(
         &self,
         activity_session_id: &str,
-    ) -> GooseResult<Vec<ActivityLabelRow>> {
+    ) -> OpenVitalsResult<Vec<ActivityLabelRow>> {
         validate_required("activity_session_id", activity_session_id)?;
         if self.activity_session(activity_session_id)?.is_none() {
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "activity session {} not found",
                 activity_session_id
             )));
@@ -4527,10 +4527,10 @@ impl GooseStore {
         )?;
         let rows = statement.query_map(params![activity_session_id], activity_label_from_row)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
-    pub fn activity_labels_by_type(&self, label_type: &str) -> GooseResult<Vec<ActivityLabelRow>> {
+    pub fn activity_labels_by_type(&self, label_type: &str) -> OpenVitalsResult<Vec<ActivityLabelRow>> {
         validate_required("label_type", label_type)?;
         validate_activity_label_type(label_type)?;
         let mut statement = self.conn.prepare(
@@ -4551,10 +4551,10 @@ impl GooseStore {
         )?;
         let rows = statement.query_map(params![label_type], activity_label_from_row)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
-    pub fn raw_evidence(&self, evidence_id: &str) -> GooseResult<Option<RawEvidenceRow>> {
+    pub fn raw_evidence(&self, evidence_id: &str) -> OpenVitalsResult<Option<RawEvidenceRow>> {
         self.conn
             .query_row(
                 r#"
@@ -4585,10 +4585,10 @@ impl GooseStore {
                 },
             )
             .optional()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
-    pub fn raw_evidence_between(&self, start: &str, end: &str) -> GooseResult<Vec<RawEvidenceRow>> {
+    pub fn raw_evidence_between(&self, start: &str, end: &str) -> OpenVitalsResult<Vec<RawEvidenceRow>> {
         validate_required("start", start)?;
         validate_required("end", end)?;
 
@@ -4622,10 +4622,10 @@ impl GooseStore {
         })?;
 
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
-    pub fn raw_evidence_payload_bytes(&self) -> GooseResult<i64> {
+    pub fn raw_evidence_payload_bytes(&self) -> OpenVitalsResult<i64> {
         Ok(self.conn.query_row(
             r#"
             SELECT COALESCE(SUM(LENGTH(payload_hex) / 2), 0)
@@ -4640,7 +4640,7 @@ impl GooseStore {
     pub fn compact_raw_evidence_payloads_to_limit(
         &self,
         limit_bytes: i64,
-    ) -> GooseResult<RawEvidencePayloadRetentionReport> {
+    ) -> OpenVitalsResult<RawEvidencePayloadRetentionReport> {
         validate_non_negative("limit_bytes", limit_bytes)?;
         let before_bytes = self.raw_evidence_payload_bytes()?;
         if before_bytes <= limit_bytes {
@@ -4698,7 +4698,7 @@ impl GooseStore {
         &self,
         start: &str,
         end: &str,
-    ) -> GooseResult<Vec<DecodedFrameRow>> {
+    ) -> OpenVitalsResult<Vec<DecodedFrameRow>> {
         validate_required("start", start)?;
         validate_required("end", end)?;
 
@@ -4733,10 +4733,10 @@ impl GooseStore {
         let rows = statement.query_map(params![start, end], decoded_frame_from_row)?;
 
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
-    pub fn decoded_frame(&self, frame_id: &str) -> GooseResult<Option<DecodedFrameRow>> {
+    pub fn decoded_frame(&self, frame_id: &str) -> OpenVitalsResult<Option<DecodedFrameRow>> {
         validate_required("frame_id", frame_id)?;
         self.conn
             .query_row(
@@ -4769,13 +4769,13 @@ impl GooseStore {
                 decoded_frame_from_row,
             )
             .optional()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn upsert_algorithm_definition(
         &self,
         definition: &AlgorithmDefinitionRecord,
-    ) -> GooseResult<()> {
+    ) -> OpenVitalsResult<()> {
         validate_required("algorithm_id", &definition.algorithm_id)?;
         validate_required("version", &definition.version)?;
         validate_required("metric_family", &definition.metric_family)?;
@@ -4842,7 +4842,7 @@ impl GooseStore {
         &self,
         algorithm_id: &str,
         version: &str,
-    ) -> GooseResult<Option<AlgorithmDefinitionRecord>> {
+    ) -> OpenVitalsResult<Option<AlgorithmDefinitionRecord>> {
         self.conn
             .query_row(
                 r#"
@@ -4881,13 +4881,13 @@ impl GooseStore {
                 },
             )
             .optional()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn set_algorithm_preference(
         &self,
         preference: &AlgorithmPreferenceRecord,
-    ) -> GooseResult<()> {
+    ) -> OpenVitalsResult<()> {
         validate_required("scope", &preference.scope)?;
         validate_required("metric_family", &preference.metric_family)?;
         validate_required("algorithm_id", &preference.algorithm_id)?;
@@ -4896,13 +4896,13 @@ impl GooseStore {
         let Some(definition) =
             self.algorithm_definition(&preference.algorithm_id, &preference.version)?
         else {
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "algorithm definition {}@{} must exist before it can be selected",
                 preference.algorithm_id, preference.version
             )));
         };
         if definition.metric_family != preference.metric_family {
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "algorithm {}@{} belongs to metric family {}, not {}",
                 preference.algorithm_id,
                 preference.version,
@@ -4938,7 +4938,7 @@ impl GooseStore {
         &self,
         scope: &str,
         metric_family: &str,
-    ) -> GooseResult<Option<AlgorithmPreferenceRecord>> {
+    ) -> OpenVitalsResult<Option<AlgorithmPreferenceRecord>> {
         validate_required("scope", scope)?;
         validate_required("metric_family", metric_family)?;
 
@@ -4960,13 +4960,13 @@ impl GooseStore {
                 },
             )
             .optional()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn algorithm_preferences(
         &self,
         scope: Option<&str>,
-    ) -> GooseResult<Vec<AlgorithmPreferenceRecord>> {
+    ) -> OpenVitalsResult<Vec<AlgorithmPreferenceRecord>> {
         if let Some(scope) = scope {
             validate_required("scope", scope)?;
             let mut statement = self.conn.prepare(
@@ -4980,7 +4980,7 @@ impl GooseStore {
             let rows = statement.query_map(params![scope], algorithm_preference_from_row)?;
             return rows
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(GooseError::from);
+                .map_err(OpenVitalsError::from);
         }
 
         let mut statement = self.conn.prepare(
@@ -4992,10 +4992,10 @@ impl GooseStore {
         )?;
         let rows = statement.query_map([], algorithm_preference_from_row)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
-    pub fn insert_algorithm_run(&self, run: &AlgorithmRunRecord) -> GooseResult<bool> {
+    pub fn insert_algorithm_run(&self, run: &AlgorithmRunRecord) -> OpenVitalsResult<bool> {
         validate_required("run_id", &run.run_id)?;
         validate_required("algorithm_id", &run.algorithm_id)?;
         validate_required("version", &run.version)?;
@@ -5035,17 +5035,17 @@ impl GooseStore {
         Ok(changed > 0)
     }
 
-    fn insert_metric_rows_for_algorithm_run(&self, run: &AlgorithmRunRecord) -> GooseResult<()> {
+    fn insert_metric_rows_for_algorithm_run(&self, run: &AlgorithmRunRecord) -> OpenVitalsResult<()> {
         let definition = self
             .algorithm_definition(&run.algorithm_id, &run.version)?
             .ok_or_else(|| {
-                GooseError::message(format!(
+                OpenVitalsError::message(format!(
                     "missing algorithm definition {} {}",
                     run.algorithm_id, run.version
                 ))
             })?;
         let output: Value = serde_json::from_str(&run.output_json).map_err(|error| {
-            GooseError::message(format!("output_json is not valid JSON: {error}"))
+            OpenVitalsError::message(format!("output_json is not valid JSON: {error}"))
         })?;
         let Some(output_object) = output.as_object() else {
             return Ok(());
@@ -5129,7 +5129,7 @@ impl GooseStore {
         Ok(())
     }
 
-    pub fn algorithm_run(&self, run_id: &str) -> GooseResult<Option<AlgorithmRunRecord>> {
+    pub fn algorithm_run(&self, run_id: &str) -> OpenVitalsResult<Option<AlgorithmRunRecord>> {
         self.conn
             .query_row(
                 r#"
@@ -5160,14 +5160,14 @@ impl GooseStore {
                 },
             )
             .optional()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn algorithm_runs_overlapping(
         &self,
         start: &str,
         end: &str,
-    ) -> GooseResult<Vec<AlgorithmRunRecord>> {
+    ) -> OpenVitalsResult<Vec<AlgorithmRunRecord>> {
         validate_required("start", start)?;
         validate_required("end", end)?;
 
@@ -5201,10 +5201,10 @@ impl GooseStore {
         })?;
 
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
-    pub fn metric_values_for_run(&self, run_id: &str) -> GooseResult<Vec<MetricValueRecord>> {
+    pub fn metric_values_for_run(&self, run_id: &str) -> OpenVitalsResult<Vec<MetricValueRecord>> {
         validate_required("run_id", run_id)?;
         let mut statement = self.conn.prepare(
             r#"
@@ -5235,13 +5235,13 @@ impl GooseStore {
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn metric_components_for_run(
         &self,
         run_id: &str,
-    ) -> GooseResult<Vec<MetricComponentRecord>> {
+    ) -> OpenVitalsResult<Vec<MetricComponentRecord>> {
         validate_required("run_id", run_id)?;
         let mut statement = self.conn.prepare(
             r#"
@@ -5268,10 +5268,10 @@ impl GooseStore {
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
-    pub fn insert_calibration_run(&self, run: &CalibrationRunRecord) -> GooseResult<bool> {
+    pub fn insert_calibration_run(&self, run: &CalibrationRunRecord) -> OpenVitalsResult<bool> {
         validate_required("calibration_run_id", &run.calibration_run_id)?;
         validate_required("algorithm_id", &run.algorithm_id)?;
         validate_required("version", &run.version)?;
@@ -5314,7 +5314,7 @@ impl GooseStore {
     pub fn calibration_run(
         &self,
         calibration_run_id: &str,
-    ) -> GooseResult<Option<CalibrationRunRecord>> {
+    ) -> OpenVitalsResult<Option<CalibrationRunRecord>> {
         self.conn
             .query_row(
                 r#"
@@ -5349,14 +5349,14 @@ impl GooseStore {
                 },
             )
             .optional()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn calibration_runs_overlapping(
         &self,
         start: &str,
         end: &str,
-    ) -> GooseResult<Vec<CalibrationRunRecord>> {
+    ) -> OpenVitalsResult<Vec<CalibrationRunRecord>> {
         validate_required("start", start)?;
         validate_required("end", end)?;
 
@@ -5394,10 +5394,10 @@ impl GooseStore {
         })?;
 
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
-    pub fn insert_calibration_label(&self, input: CalibrationLabelInput<'_>) -> GooseResult<bool> {
+    pub fn insert_calibration_label(&self, input: CalibrationLabelInput<'_>) -> OpenVitalsResult<bool> {
         validate_required("label_id", input.label_id)?;
         validate_required("metric_family", input.metric_family)?;
         validate_required("label_source", input.label_source)?;
@@ -5405,20 +5405,20 @@ impl GooseStore {
         validate_required("unit", input.unit)?;
         validate_json_object("provenance_json", input.provenance_json)?;
         if !input.value.is_finite() {
-            return Err(GooseError::message("value must be finite"));
+            return Err(OpenVitalsError::message("value must be finite"));
         }
         if !is_allowed_calibration_label_source(input.label_source) {
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "unsupported label_source {}",
                 input.label_source
             )));
         }
         let parsed_provenance: serde_json::Value = serde_json::from_str(input.provenance_json)
             .map_err(|error| {
-                GooseError::message(format!("provenance_json must be valid JSON: {error}"))
+                OpenVitalsError::message(format!("provenance_json must be valid JSON: {error}"))
             })?;
         if parsed_provenance == serde_json::json!({}) {
-            return Err(GooseError::message("provenance_json must not be empty"));
+            return Err(OpenVitalsError::message("provenance_json must not be empty"));
         }
 
         if let Some(existing) = self.calibration_label(input.label_id)? {
@@ -5434,7 +5434,7 @@ impl GooseStore {
             if existing == new_row {
                 return Ok(false);
             }
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "calibration label {} already exists with different metadata",
                 input.label_id
             )));
@@ -5465,7 +5465,7 @@ impl GooseStore {
         Ok(true)
     }
 
-    pub fn calibration_label(&self, label_id: &str) -> GooseResult<Option<CalibrationLabelRow>> {
+    pub fn calibration_label(&self, label_id: &str) -> OpenVitalsResult<Option<CalibrationLabelRow>> {
         validate_required("label_id", label_id)?;
         self.conn
             .query_row(
@@ -5485,14 +5485,14 @@ impl GooseStore {
                 calibration_label_from_row,
             )
             .optional()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn calibration_labels_between(
         &self,
         start: &str,
         end: &str,
-    ) -> GooseResult<Vec<CalibrationLabelRow>> {
+    ) -> OpenVitalsResult<Vec<CalibrationLabelRow>> {
         validate_required("start", start)?;
         validate_required("end", end)?;
         let mut statement = self.conn.prepare(
@@ -5512,13 +5512,13 @@ impl GooseStore {
         )?;
         let rows = statement.query_map(params![start, end], calibration_label_from_row)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn upsert_command_validation_record(
         &self,
         record: &CommandValidationRecord,
-    ) -> GooseResult<()> {
+    ) -> OpenVitalsResult<()> {
         validate_required("command", &record.command)?;
         validate_required("risk_gate", &record.risk_gate)?;
         validate_command_report_json(record)?;
@@ -5549,7 +5549,7 @@ impl GooseStore {
     pub fn command_validation_record(
         &self,
         command: &str,
-    ) -> GooseResult<Option<CommandValidationRecord>> {
+    ) -> OpenVitalsResult<Option<CommandValidationRecord>> {
         validate_required("command", command)?;
         self.conn
             .query_row(
@@ -5562,10 +5562,10 @@ impl GooseStore {
                 command_validation_record_from_row,
             )
             .optional()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
-    pub fn command_validation_records(&self) -> GooseResult<Vec<CommandValidationRecord>> {
+    pub fn command_validation_records(&self) -> OpenVitalsResult<Vec<CommandValidationRecord>> {
         let mut statement = self.conn.prepare(
             r#"
             SELECT command, risk_gate, direct_send_ready, report_json
@@ -5575,10 +5575,10 @@ impl GooseStore {
         )?;
         let rows = statement.query_map([], command_validation_record_from_row)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
-    pub fn insert_debug_session(&self, session: &DebugSessionRow) -> GooseResult<bool> {
+    pub fn insert_debug_session(&self, session: &DebugSessionRow) -> OpenVitalsResult<bool> {
         validate_required("session_id", &session.session_id)?;
         validate_required("bridge_url", &session.bridge_url)?;
         validate_required("bind_host", &session.bind_host)?;
@@ -5588,7 +5588,7 @@ impl GooseStore {
             if existing == *session {
                 return Ok(false);
             }
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "debug session {} already exists with different metadata",
                 session.session_id
             )));
@@ -5621,7 +5621,7 @@ impl GooseStore {
         Ok(true)
     }
 
-    pub fn debug_session(&self, session_id: &str) -> GooseResult<Option<DebugSessionRow>> {
+    pub fn debug_session(&self, session_id: &str) -> OpenVitalsResult<Option<DebugSessionRow>> {
         validate_required("session_id", session_id)?;
         self.conn
             .query_row(
@@ -5642,14 +5642,14 @@ impl GooseStore {
                 debug_session_from_row,
             )
             .optional()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn debug_sessions_between(
         &self,
         start_unix_ms: i64,
         end_unix_ms: i64,
-    ) -> GooseResult<Vec<DebugSessionRow>> {
+    ) -> OpenVitalsResult<Vec<DebugSessionRow>> {
         validate_non_negative("start_unix_ms", start_unix_ms)?;
         validate_positive("end_unix_ms", end_unix_ms)?;
         let mut statement = self.conn.prepare(
@@ -5671,10 +5671,10 @@ impl GooseStore {
         let rows =
             statement.query_map(params![start_unix_ms, end_unix_ms], debug_session_from_row)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
-    pub fn insert_debug_command(&self, command: &DebugCommandRow) -> GooseResult<bool> {
+    pub fn insert_debug_command(&self, command: &DebugCommandRow) -> OpenVitalsResult<bool> {
         validate_required("command_id", &command.command_id)?;
         validate_required("session_id", &command.session_id)?;
         validate_required("schema", &command.schema)?;
@@ -5686,7 +5686,7 @@ impl GooseStore {
             if existing == *command {
                 return Ok(false);
             }
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "debug command {} already exists with different metadata",
                 command.command_id
             )));
@@ -5717,7 +5717,7 @@ impl GooseStore {
         Ok(true)
     }
 
-    pub fn debug_command(&self, command_id: &str) -> GooseResult<Option<DebugCommandRow>> {
+    pub fn debug_command(&self, command_id: &str) -> OpenVitalsResult<Option<DebugCommandRow>> {
         validate_required("command_id", command_id)?;
         self.conn
             .query_row(
@@ -5737,13 +5737,13 @@ impl GooseStore {
                 debug_command_from_row,
             )
             .optional()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn debug_commands_for_session(
         &self,
         session_id: &str,
-    ) -> GooseResult<Vec<DebugCommandRow>> {
+    ) -> OpenVitalsResult<Vec<DebugCommandRow>> {
         validate_required("session_id", session_id)?;
         let mut statement = self.conn.prepare(
             r#"
@@ -5762,14 +5762,14 @@ impl GooseStore {
         )?;
         let rows = statement.query_map(params![session_id], debug_command_from_row)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn debug_commands_between(
         &self,
         start_unix_ms: i64,
         end_unix_ms: i64,
-    ) -> GooseResult<Vec<DebugCommandRow>> {
+    ) -> OpenVitalsResult<Vec<DebugCommandRow>> {
         validate_non_negative("start_unix_ms", start_unix_ms)?;
         validate_positive("end_unix_ms", end_unix_ms)?;
         let mut statement = self.conn.prepare(
@@ -5790,13 +5790,13 @@ impl GooseStore {
         let rows =
             statement.query_map(params![start_unix_ms, end_unix_ms], debug_command_from_row)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
-    pub fn next_debug_event_sequence(&self, session_id: &str) -> GooseResult<i64> {
+    pub fn next_debug_event_sequence(&self, session_id: &str) -> OpenVitalsResult<i64> {
         validate_required("session_id", session_id)?;
         if self.debug_session(session_id)?.is_none() {
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "debug session {session_id} not found"
             )));
         }
@@ -5808,7 +5808,7 @@ impl GooseStore {
         Ok(max_sequence.unwrap_or(0) + 1)
     }
 
-    pub fn insert_debug_event(&self, event: &DebugEventRow) -> GooseResult<bool> {
+    pub fn insert_debug_event(&self, event: &DebugEventRow) -> OpenVitalsResult<bool> {
         validate_required("session_id", &event.session_id)?;
         validate_required("schema", &event.schema)?;
         validate_required("source", &event.source)?;
@@ -5835,13 +5835,13 @@ impl GooseStore {
             .optional()?;
         if let Some((previous_sequence, previous_time)) = previous {
             if event.sequence <= previous_sequence {
-                return Err(GooseError::message(format!(
+                return Err(OpenVitalsError::message(format!(
                     "debug event sequence {} is not after previous sequence {}",
                     event.sequence, previous_sequence
                 )));
             }
             if event.time_unix_ms < previous_time {
-                return Err(GooseError::message(format!(
+                return Err(OpenVitalsError::message(format!(
                     "debug event time {} is before previous event time {}",
                     event.time_unix_ms, previous_time
                 )));
@@ -5879,7 +5879,7 @@ impl GooseStore {
         Ok(changed > 0)
     }
 
-    pub fn debug_events_for_session(&self, session_id: &str) -> GooseResult<Vec<DebugEventRow>> {
+    pub fn debug_events_for_session(&self, session_id: &str) -> OpenVitalsResult<Vec<DebugEventRow>> {
         validate_required("session_id", session_id)?;
         let mut statement = self.conn.prepare(
             r#"
@@ -5901,14 +5901,14 @@ impl GooseStore {
         )?;
         let rows = statement.query_map(params![session_id], debug_event_from_row)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn debug_events_between(
         &self,
         start_unix_ms: i64,
         end_unix_ms: i64,
-    ) -> GooseResult<Vec<DebugEventRow>> {
+    ) -> OpenVitalsResult<Vec<DebugEventRow>> {
         validate_non_negative("start_unix_ms", start_unix_ms)?;
         validate_positive("end_unix_ms", end_unix_ms)?;
         let mut statement = self.conn.prepare(
@@ -5932,7 +5932,7 @@ impl GooseStore {
         let rows =
             statement.query_map(params![start_unix_ms, end_unix_ms], debug_event_from_row)?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
     pub fn debug_events_after_sequence(
@@ -5940,11 +5940,11 @@ impl GooseStore {
         session_id: &str,
         after_sequence: i64,
         limit: Option<usize>,
-    ) -> GooseResult<Vec<DebugEventRow>> {
+    ) -> OpenVitalsResult<Vec<DebugEventRow>> {
         validate_required("session_id", session_id)?;
         validate_non_negative("after_sequence", after_sequence)?;
         let limit = i64::try_from(limit.unwrap_or(1000))
-            .map_err(|_| GooseError::message("limit is too large"))?;
+            .map_err(|_| OpenVitalsError::message("limit is too large"))?;
         validate_positive("limit", limit)?;
         let mut statement = self.conn.prepare(
             r#"
@@ -5970,40 +5970,40 @@ impl GooseStore {
             debug_event_from_row,
         )?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
-    pub fn table_count(&self, table: &str) -> GooseResult<i64> {
+    pub fn table_count(&self, table: &str) -> OpenVitalsResult<i64> {
         if !is_known_table(table) {
-            return Err(GooseError::message(format!("unknown table: {table}")));
+            return Err(OpenVitalsError::message(format!("unknown table: {table}")));
         }
         let query = format!("SELECT COUNT(*) FROM {table}");
         Ok(self.conn.query_row(&query, [], |row| row.get(0))?)
     }
 
-    pub fn table_columns(&self, table: &str) -> GooseResult<BTreeSet<String>> {
+    pub fn table_columns(&self, table: &str) -> OpenVitalsResult<BTreeSet<String>> {
         if !is_known_table(table) {
-            return Err(GooseError::message(format!("unknown table: {table}")));
+            return Err(OpenVitalsError::message(format!("unknown table: {table}")));
         }
         self.table_columns_unchecked(table)
     }
 
-    pub fn foreign_keys_enabled(&self) -> GooseResult<bool> {
+    pub fn foreign_keys_enabled(&self) -> OpenVitalsResult<bool> {
         let enabled: i64 = self
             .conn
             .query_row("PRAGMA foreign_keys", [], |row| row.get(0))?;
         Ok(enabled != 0)
     }
 
-    pub fn integrity_check(&self) -> GooseResult<String> {
+    pub fn integrity_check(&self) -> OpenVitalsResult<String> {
         self.conn
             .query_row("PRAGMA integrity_check", [], |row| row.get(0))
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 }
 
-impl GooseStore {
-    fn ensure_raw_evidence_columns(&self) -> GooseResult<()> {
+impl OpenVitalsStore {
+    fn ensure_raw_evidence_columns(&self) -> OpenVitalsResult<()> {
         let columns = self.table_columns_unchecked("raw_evidence")?;
         for (column, ddl) in [(
             "capture_session_id",
@@ -6017,7 +6017,7 @@ impl GooseStore {
         Ok(())
     }
 
-    fn ensure_decoded_frame_columns(&self) -> GooseResult<()> {
+    fn ensure_decoded_frame_columns(&self) -> OpenVitalsResult<()> {
         let columns = self.table_columns_unchecked("decoded_frames")?;
         for (column, ddl) in [
             ("packet_type_name", "packet_type_name TEXT"),
@@ -6034,7 +6034,7 @@ impl GooseStore {
         Ok(())
     }
 
-    fn ensure_algorithm_definition_columns(&self) -> GooseResult<()> {
+    fn ensure_algorithm_definition_columns(&self) -> OpenVitalsResult<()> {
         let columns = self.table_columns_unchecked("algorithm_definitions")?;
         for (column, ddl) in [
             ("display_name", "display_name TEXT NOT NULL DEFAULT ''"),
@@ -6060,7 +6060,7 @@ impl GooseStore {
         Ok(())
     }
 
-    fn ensure_daily_activity_metric_multi_row_source_kind(&self) -> GooseResult<()> {
+    fn ensure_daily_activity_metric_multi_row_source_kind(&self) -> OpenVitalsResult<()> {
         if !self.daily_activity_metrics_has_source_kind_unique_constraint()? {
             return Ok(());
         }
@@ -6141,11 +6141,11 @@ impl GooseStore {
         Ok(())
     }
 
-    fn daily_activity_metrics_has_source_kind_unique_constraint(&self) -> GooseResult<bool> {
+    fn daily_activity_metrics_has_source_kind_unique_constraint(&self) -> OpenVitalsResult<bool> {
         self.table_has_source_kind_unique_constraint("daily_activity_metrics")
     }
 
-    fn ensure_daily_recovery_metric_multi_row_source_kind(&self) -> GooseResult<()> {
+    fn ensure_daily_recovery_metric_multi_row_source_kind(&self) -> OpenVitalsResult<()> {
         if !self.daily_recovery_metrics_has_source_kind_unique_constraint()? {
             return Ok(());
         }
@@ -6226,11 +6226,11 @@ impl GooseStore {
         Ok(())
     }
 
-    fn daily_recovery_metrics_has_source_kind_unique_constraint(&self) -> GooseResult<bool> {
+    fn daily_recovery_metrics_has_source_kind_unique_constraint(&self) -> OpenVitalsResult<bool> {
         self.table_has_source_kind_unique_constraint("daily_recovery_metrics")
     }
 
-    fn table_has_source_kind_unique_constraint(&self, table: &str) -> GooseResult<bool> {
+    fn table_has_source_kind_unique_constraint(&self, table: &str) -> OpenVitalsResult<bool> {
         let mut statement = self.conn.prepare(&format!("PRAGMA index_list({table})"))?;
         let rows = statement.query_map([], |row| {
             Ok((row.get::<_, String>(1)?, row.get::<_, i64>(2)? != 0))
@@ -6249,7 +6249,7 @@ impl GooseStore {
         Ok(false)
     }
 
-    fn ensure_step_counter_sample_columns(&self) -> GooseResult<()> {
+    fn ensure_step_counter_sample_columns(&self) -> OpenVitalsResult<()> {
         let columns = self.table_columns_unchecked("step_counter_samples")?;
         for (column, ddl) in [
             ("cadence_spm", "cadence_spm REAL"),
@@ -6265,21 +6265,21 @@ impl GooseStore {
         Ok(())
     }
 
-    fn table_columns_unchecked(&self, table: &str) -> GooseResult<BTreeSet<String>> {
+    fn table_columns_unchecked(&self, table: &str) -> OpenVitalsResult<BTreeSet<String>> {
         let mut statement = self.conn.prepare(&format!("PRAGMA table_info({table})"))?;
         let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
         rows.collect::<Result<BTreeSet<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 
-    fn index_columns_unchecked(&self, index_name: &str) -> GooseResult<Vec<String>> {
+    fn index_columns_unchecked(&self, index_name: &str) -> OpenVitalsResult<Vec<String>> {
         let escaped = index_name.replace('\'', "''");
         let mut statement = self
             .conn
             .prepare(&format!("PRAGMA index_info('{escaped}')"))?;
         let rows = statement.query_map([], |row| row.get::<_, String>(2))?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(GooseError::from)
+            .map_err(OpenVitalsError::from)
     }
 }
 
@@ -6316,45 +6316,45 @@ fn metric_output_unit(name: &str) -> &'static str {
     }
 }
 
-fn validate_required(name: &str, value: &str) -> GooseResult<()> {
+fn validate_required(name: &str, value: &str) -> OpenVitalsResult<()> {
     if value.trim().is_empty() {
-        Err(GooseError::message(format!("{name} is required")))
+        Err(OpenVitalsError::message(format!("{name} is required")))
     } else {
         Ok(())
     }
 }
 
-fn validate_optional_required(name: &str, value: Option<&str>) -> GooseResult<()> {
+fn validate_optional_required(name: &str, value: Option<&str>) -> OpenVitalsResult<()> {
     if let Some(value) = value {
         validate_required(name, value)?;
     }
     Ok(())
 }
 
-fn validate_json(name: &str, value: &str) -> GooseResult<()> {
+fn validate_json(name: &str, value: &str) -> OpenVitalsResult<()> {
     serde_json::from_str::<serde_json::Value>(value)
-        .map_err(|error| GooseError::message(format!("{name} must be valid JSON: {error}")))?;
+        .map_err(|error| OpenVitalsError::message(format!("{name} must be valid JSON: {error}")))?;
     Ok(())
 }
 
-fn validate_command_report_json(record: &CommandValidationRecord) -> GooseResult<()> {
+fn validate_command_report_json(record: &CommandValidationRecord) -> OpenVitalsResult<()> {
     let parsed = serde_json::from_str::<serde_json::Value>(&record.report_json)
-        .map_err(|error| GooseError::message(format!("report_json must be valid JSON: {error}")))?;
+        .map_err(|error| OpenVitalsError::message(format!("report_json must be valid JSON: {error}")))?;
     let Some(report_command) = parsed.get("command").and_then(serde_json::Value::as_str) else {
-        return Err(GooseError::message("report_json must contain command"));
+        return Err(OpenVitalsError::message("report_json must contain command"));
     };
     if report_command != record.command {
-        return Err(GooseError::message(format!(
+        return Err(OpenVitalsError::message(format!(
             "report_json command {report_command} does not match record command {}",
             record.command
         )));
     }
 
     let Some(report_risk_gate) = parsed.get("risk_gate").and_then(serde_json::Value::as_str) else {
-        return Err(GooseError::message("report_json must contain risk_gate"));
+        return Err(OpenVitalsError::message("report_json must contain risk_gate"));
     };
     if report_risk_gate != record.risk_gate {
-        return Err(GooseError::message(format!(
+        return Err(OpenVitalsError::message(format!(
             "report_json risk_gate {report_risk_gate} does not match record risk_gate {}",
             record.risk_gate
         )));
@@ -6364,12 +6364,12 @@ fn validate_command_report_json(record: &CommandValidationRecord) -> GooseResult
         .get("direct_send_ready")
         .and_then(serde_json::Value::as_bool)
     else {
-        return Err(GooseError::message(
+        return Err(OpenVitalsError::message(
             "report_json must contain direct_send_ready",
         ));
     };
     if report_ready != record.direct_send_ready {
-        return Err(GooseError::message(format!(
+        return Err(OpenVitalsError::message(format!(
             "report_json direct_send_ready {report_ready} does not match record direct_send_ready {}",
             record.direct_send_ready
         )));
@@ -6377,49 +6377,49 @@ fn validate_command_report_json(record: &CommandValidationRecord) -> GooseResult
     Ok(())
 }
 
-fn validate_json_object(name: &str, value: &str) -> GooseResult<()> {
+fn validate_json_object(name: &str, value: &str) -> OpenVitalsResult<()> {
     let parsed = serde_json::from_str::<serde_json::Value>(value)
-        .map_err(|error| GooseError::message(format!("{name} must be valid JSON: {error}")))?;
+        .map_err(|error| OpenVitalsError::message(format!("{name} must be valid JSON: {error}")))?;
     if !parsed.is_object() {
-        return Err(GooseError::message(format!("{name} must be a JSON object")));
+        return Err(OpenVitalsError::message(format!("{name} must be a JSON object")));
     }
     Ok(())
 }
 
-fn validate_no_official_whoop_label_marker(name: &str, value: &str) -> GooseResult<()> {
+fn validate_no_official_whoop_label_marker(name: &str, value: &str) -> OpenVitalsResult<()> {
     let parsed = serde_json::from_str::<Value>(value)
-        .map_err(|error| GooseError::message(format!("{name} must be valid JSON: {error}")))?;
+        .map_err(|error| OpenVitalsError::message(format!("{name} must be valid JSON: {error}")))?;
     if value_contains_official_whoop_label_marker(&parsed) {
-        return Err(GooseError::message(format!(
+        return Err(OpenVitalsError::message(format!(
             "{name} must not contain official WHOOP label markers for formatted local metrics",
         )));
     }
     Ok(())
 }
 
-fn validate_no_official_whoop_label_text(name: &str, value: &str) -> GooseResult<()> {
+fn validate_no_official_whoop_label_text(name: &str, value: &str) -> OpenVitalsResult<()> {
     if is_official_whoop_label_token(value) {
-        return Err(GooseError::message(format!(
+        return Err(OpenVitalsError::message(format!(
             "{name} must not identify official WHOOP labels as a formatted metric source",
         )));
     }
     Ok(())
 }
 
-fn validate_no_platform_metric_source_marker(name: &str, value: &str) -> GooseResult<()> {
+fn validate_no_platform_metric_source_marker(name: &str, value: &str) -> OpenVitalsResult<()> {
     let parsed = serde_json::from_str::<Value>(value)
-        .map_err(|error| GooseError::message(format!("{name} must be valid JSON: {error}")))?;
+        .map_err(|error| OpenVitalsError::message(format!("{name} must be valid JSON: {error}")))?;
     if value_contains_platform_metric_source_marker(&parsed, None) {
-        return Err(GooseError::message(format!(
+        return Err(OpenVitalsError::message(format!(
             "{name} must not contain HealthKit, Health Connect, Apple Health, or platform-import markers as formatted metric sources",
         )));
     }
     Ok(())
 }
 
-fn validate_no_platform_metric_source_text(name: &str, value: &str) -> GooseResult<()> {
+fn validate_no_platform_metric_source_text(name: &str, value: &str) -> OpenVitalsResult<()> {
     if is_platform_metric_source_token(value, None) {
-        return Err(GooseError::message(format!(
+        return Err(OpenVitalsError::message(format!(
             "{name} must not identify HealthKit, Health Connect, Apple Health, or platform imports as a formatted metric source",
         )));
     }
@@ -6526,12 +6526,12 @@ fn normalized_marker(value: &str) -> String {
         .replace([' ', '-', '.', ':'], "_")
 }
 
-fn validate_external_sleep_stage_summary_json(value: &str) -> GooseResult<()> {
+fn validate_external_sleep_stage_summary_json(value: &str) -> OpenVitalsResult<()> {
     let parsed = serde_json::from_str::<serde_json::Value>(value).map_err(|error| {
-        GooseError::message(format!("stage_summary_json must be valid JSON: {error}"))
+        OpenVitalsError::message(format!("stage_summary_json must be valid JSON: {error}"))
     })?;
     let Some(object) = parsed.as_object() else {
-        return Err(GooseError::message(
+        return Err(OpenVitalsError::message(
             "stage_summary_json must be a JSON object",
         ));
     };
@@ -6542,29 +6542,29 @@ fn validate_external_sleep_stage_summary_json(value: &str) -> GooseResult<()> {
         .get("minutes_by_stage")
         .and_then(serde_json::Value::as_object)
     else {
-        return Err(GooseError::message(
+        return Err(OpenVitalsError::message(
             "stage_summary_json must contain minutes_by_stage object",
         ));
     };
     if minutes_by_stage.is_empty() {
-        return Err(GooseError::message(
+        return Err(OpenVitalsError::message(
             "stage_summary_json minutes_by_stage must not be empty",
         ));
     }
     for (stage, minutes) in minutes_by_stage {
         if stage.trim().is_empty() {
-            return Err(GooseError::message(
+            return Err(OpenVitalsError::message(
                 "stage_summary_json stage names must not be empty",
             ));
         }
         validate_external_sleep_stage_summary_key(stage)?;
         let Some(minutes) = minutes.as_f64() else {
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "stage_summary_json minutes_by_stage.{stage} must be a number",
             )));
         };
         if !minutes.is_finite() || minutes < 0.0 {
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "stage_summary_json minutes_by_stage.{stage} must be finite and non-negative",
             )));
         }
@@ -6572,45 +6572,45 @@ fn validate_external_sleep_stage_summary_json(value: &str) -> GooseResult<()> {
     Ok(())
 }
 
-fn validate_external_sleep_stage_summary_key(stage: &str) -> GooseResult<()> {
+fn validate_external_sleep_stage_summary_key(stage: &str) -> OpenVitalsResult<()> {
     let normalized = stage.trim().to_ascii_lowercase().replace([' ', '-'], "_");
     if ALLOWED_EXTERNAL_SLEEP_STAGE_SUMMARY_KEYS.contains(&normalized.as_str()) {
         Ok(())
     } else {
-        Err(GooseError::message(format!(
+        Err(OpenVitalsError::message(format!(
             "stage_summary_json minutes_by_stage.{stage} stage must be recognized"
         )))
     }
 }
 
-fn validate_non_negative(name: &str, value: i64) -> GooseResult<()> {
+fn validate_non_negative(name: &str, value: i64) -> OpenVitalsResult<()> {
     if value < 0 {
-        Err(GooseError::message(format!("{name} must be non-negative")))
+        Err(OpenVitalsError::message(format!("{name} must be non-negative")))
     } else {
         Ok(())
     }
 }
 
-fn validate_optional_non_negative_i64(name: &str, value: Option<i64>) -> GooseResult<()> {
+fn validate_optional_non_negative_i64(name: &str, value: Option<i64>) -> OpenVitalsResult<()> {
     if let Some(value) = value {
         validate_non_negative(name, value)?;
     }
     Ok(())
 }
 
-fn validate_optional_finite_f64(name: &str, value: Option<f64>) -> GooseResult<()> {
+fn validate_optional_finite_f64(name: &str, value: Option<f64>) -> OpenVitalsResult<()> {
     if let Some(value) = value {
         if !value.is_finite() {
-            return Err(GooseError::message(format!("{name} must be finite")));
+            return Err(OpenVitalsError::message(format!("{name} must be finite")));
         }
     }
     Ok(())
 }
 
-fn validate_optional_non_negative_f64(name: &str, value: Option<f64>) -> GooseResult<()> {
+fn validate_optional_non_negative_f64(name: &str, value: Option<f64>) -> OpenVitalsResult<()> {
     if let Some(value) = value {
         if !value.is_finite() || value < 0.0 {
-            return Err(GooseError::message(format!(
+            return Err(OpenVitalsError::message(format!(
                 "{name} must be finite and non-negative",
             )));
         }
@@ -6618,17 +6618,17 @@ fn validate_optional_non_negative_f64(name: &str, value: Option<f64>) -> GooseRe
     Ok(())
 }
 
-fn validate_positive(name: &str, value: i64) -> GooseResult<()> {
+fn validate_positive(name: &str, value: i64) -> OpenVitalsResult<()> {
     if value <= 0 {
-        Err(GooseError::message(format!("{name} must be positive")))
+        Err(OpenVitalsError::message(format!("{name} must be positive")))
     } else {
         Ok(())
     }
 }
 
-fn validate_window_order(start_time_unix_ms: i64, end_time_unix_ms: i64) -> GooseResult<()> {
+fn validate_window_order(start_time_unix_ms: i64, end_time_unix_ms: i64) -> OpenVitalsResult<()> {
     if end_time_unix_ms <= start_time_unix_ms {
-        Err(GooseError::message(
+        Err(OpenVitalsError::message(
             "end_time_unix_ms must be greater than start_time_unix_ms",
         ))
     } else {
@@ -6636,26 +6636,26 @@ fn validate_window_order(start_time_unix_ms: i64, end_time_unix_ms: i64) -> Goos
     }
 }
 
-fn validate_allowed(name: &str, value: &str, allowed: &[&str]) -> GooseResult<()> {
+fn validate_allowed(name: &str, value: &str, allowed: &[&str]) -> OpenVitalsResult<()> {
     if allowed.contains(&value) {
         Ok(())
     } else {
-        Err(GooseError::message(format!(
+        Err(OpenVitalsError::message(format!(
             "{name} must be one of: {}",
             allowed.join(", ")
         )))
     }
 }
 
-fn validate_activity_type(activity_type: &str) -> GooseResult<()> {
+fn validate_activity_type(activity_type: &str) -> OpenVitalsResult<()> {
     validate_allowed("activity_type", activity_type, &ALLOWED_ACTIVITY_TYPES)
 }
 
-fn validate_sync_status(sync_status: &str) -> GooseResult<()> {
+fn validate_sync_status(sync_status: &str) -> OpenVitalsResult<()> {
     validate_allowed("sync_status", sync_status, &ALLOWED_ACTIVITY_SYNC_STATUSES)
 }
 
-fn validate_activity_detection_method(detection_method: &str) -> GooseResult<()> {
+fn validate_activity_detection_method(detection_method: &str) -> OpenVitalsResult<()> {
     validate_allowed(
         "detection_method",
         detection_method,
@@ -6663,7 +6663,7 @@ fn validate_activity_detection_method(detection_method: &str) -> GooseResult<()>
     )
 }
 
-fn validate_activity_interval_type(interval_type: &str) -> GooseResult<()> {
+fn validate_activity_interval_type(interval_type: &str) -> OpenVitalsResult<()> {
     validate_allowed(
         "interval_type",
         interval_type,
@@ -6671,19 +6671,19 @@ fn validate_activity_interval_type(interval_type: &str) -> GooseResult<()> {
     )
 }
 
-fn validate_activity_label_type(label_type: &str) -> GooseResult<()> {
+fn validate_activity_label_type(label_type: &str) -> OpenVitalsResult<()> {
     validate_allowed("label_type", label_type, &ALLOWED_ACTIVITY_LABEL_TYPES)
 }
 
-fn validate_activity_metric_unit(unit: &str) -> GooseResult<()> {
+fn validate_activity_metric_unit(unit: &str) -> OpenVitalsResult<()> {
     validate_allowed("unit", unit, &ALLOWED_ACTIVITY_METRIC_UNITS)
 }
 
-fn validate_metric_source_kind(source_kind: &str) -> GooseResult<()> {
+fn validate_metric_source_kind(source_kind: &str) -> OpenVitalsResult<()> {
     validate_allowed("source_kind", source_kind, &ALLOWED_METRIC_SOURCE_KINDS)
 }
 
-fn validate_metric_provenance_scope(metric_scope: &str) -> GooseResult<()> {
+fn validate_metric_provenance_scope(metric_scope: &str) -> OpenVitalsResult<()> {
     validate_allowed(
         "metric_scope",
         metric_scope,
@@ -6691,11 +6691,11 @@ fn validate_metric_provenance_scope(metric_scope: &str) -> GooseResult<()> {
     )
 }
 
-fn validate_external_sleep_platform(platform: &str) -> GooseResult<()> {
+fn validate_external_sleep_platform(platform: &str) -> OpenVitalsResult<()> {
     validate_allowed("platform", platform, &ALLOWED_EXTERNAL_SLEEP_PLATFORMS)
 }
 
-fn validate_external_sleep_stage_kind(stage_kind: &str) -> GooseResult<()> {
+fn validate_external_sleep_stage_kind(stage_kind: &str) -> OpenVitalsResult<()> {
     validate_allowed(
         "stage_kind",
         stage_kind,
@@ -6703,7 +6703,7 @@ fn validate_external_sleep_stage_kind(stage_kind: &str) -> GooseResult<()> {
     )
 }
 
-fn validate_sleep_correction_label_type(label_type: &str) -> GooseResult<()> {
+fn validate_sleep_correction_label_type(label_type: &str) -> OpenVitalsResult<()> {
     validate_allowed(
         "label_type",
         label_type,
@@ -6711,21 +6711,21 @@ fn validate_sleep_correction_label_type(label_type: &str) -> GooseResult<()> {
     )
 }
 
-fn validate_confidence(name: &str, confidence: f64) -> GooseResult<()> {
+fn validate_confidence(name: &str, confidence: f64) -> OpenVitalsResult<()> {
     if !confidence.is_finite() {
-        return Err(GooseError::message(format!("{name} must be finite")));
+        return Err(OpenVitalsError::message(format!("{name} must be finite")));
     }
     if !(0.0..=1.0).contains(&confidence) {
-        return Err(GooseError::message(format!(
+        return Err(OpenVitalsError::message(format!(
             "{name} must be between 0.0 and 1.0",
         )));
     }
     Ok(())
 }
 
-fn validate_unavailable_metric_confidence(source_kind: &str, confidence: f64) -> GooseResult<()> {
+fn validate_unavailable_metric_confidence(source_kind: &str, confidence: f64) -> OpenVitalsResult<()> {
     if source_kind == "unavailable" && confidence != 0.0 {
-        return Err(GooseError::message(
+        return Err(OpenVitalsError::message(
             "unavailable formatted metrics must have confidence 0.0",
         ));
     }
@@ -6735,9 +6735,9 @@ fn validate_unavailable_metric_confidence(source_kind: &str, confidence: f64) ->
 fn validate_unavailable_metric_provenance_confidence(
     source_kind: &str,
     confidence: Option<f64>,
-) -> GooseResult<()> {
+) -> OpenVitalsResult<()> {
     if source_kind == "unavailable" && confidence.unwrap_or(0.0) != 0.0 {
-        return Err(GooseError::message(
+        return Err(OpenVitalsError::message(
             "unavailable metric provenance must have confidence 0.0",
         ));
     }
@@ -6745,9 +6745,9 @@ fn validate_unavailable_metric_provenance_confidence(
 }
 
 fn validate_activity_session_input(
-    _store: &GooseStore,
+    _store: &OpenVitalsStore,
     input: &ActivitySessionInput<'_>,
-) -> GooseResult<()> {
+) -> OpenVitalsResult<()> {
     validate_required("session_id", input.session_id)?;
     validate_required("source", input.source)?;
     validate_non_negative("start_time_unix_ms", input.start_time_unix_ms)?;
@@ -6774,14 +6774,14 @@ fn validate_activity_session_input(
 }
 
 fn validate_activity_metric_input(
-    _store: &GooseStore,
+    _store: &OpenVitalsStore,
     input: &ActivityMetricInput<'_>,
-) -> GooseResult<()> {
+) -> OpenVitalsResult<()> {
     validate_required("metric_id", input.metric_id)?;
     validate_required("activity_session_id", input.activity_session_id)?;
     validate_required("metric_name", input.metric_name)?;
     if !input.value.is_finite() {
-        return Err(GooseError::message("value must be finite"));
+        return Err(OpenVitalsError::message("value must be finite"));
     }
     validate_required("unit", input.unit)?;
     validate_activity_metric_unit(input.unit)?;
@@ -6793,7 +6793,7 @@ fn validate_activity_metric_input(
     Ok(())
 }
 
-fn validate_daily_activity_metric_input(input: &DailyActivityMetricInput<'_>) -> GooseResult<()> {
+fn validate_daily_activity_metric_input(input: &DailyActivityMetricInput<'_>) -> OpenVitalsResult<()> {
     validate_required("daily_metric_id", input.daily_metric_id)?;
     validate_required("date_key", input.date_key)?;
     validate_required("timezone", input.timezone)?;
@@ -6829,7 +6829,7 @@ fn validate_daily_activity_metric_input(input: &DailyActivityMetricInput<'_>) ->
     Ok(())
 }
 
-fn validate_hourly_activity_metric_input(input: &HourlyActivityMetricInput<'_>) -> GooseResult<()> {
+fn validate_hourly_activity_metric_input(input: &HourlyActivityMetricInput<'_>) -> OpenVitalsResult<()> {
     validate_required("hourly_metric_id", input.hourly_metric_id)?;
     validate_required("date_key", input.date_key)?;
     validate_required("timezone", input.timezone)?;
@@ -6865,7 +6865,7 @@ fn validate_hourly_activity_metric_input(input: &HourlyActivityMetricInput<'_>) 
     Ok(())
 }
 
-fn validate_daily_recovery_metric_input(input: &DailyRecoveryMetricInput<'_>) -> GooseResult<()> {
+fn validate_daily_recovery_metric_input(input: &DailyRecoveryMetricInput<'_>) -> OpenVitalsResult<()> {
     validate_required("daily_metric_id", input.daily_metric_id)?;
     validate_required("date_key", input.date_key)?;
     validate_required("timezone", input.timezone)?;
@@ -6911,18 +6911,18 @@ fn validate_activity_formatted_metric_values(
     resting_kcal: Option<f64>,
     total_kcal: Option<f64>,
     average_cadence_spm: Option<f64>,
-) -> GooseResult<()> {
+) -> OpenVitalsResult<()> {
     let has_metric_value =
         steps.is_some() || active_kcal.is_some() || resting_kcal.is_some() || total_kcal.is_some();
     let has_any_value = has_metric_value || average_cadence_spm.is_some();
     if source_kind == "unavailable" {
         if has_any_value {
-            return Err(GooseError::message(
+            return Err(OpenVitalsError::message(
                 "unavailable activity metrics must not carry metric values",
             ));
         }
     } else if !has_metric_value {
-        return Err(GooseError::message(
+        return Err(OpenVitalsError::message(
             "available activity metrics must include steps or calorie values",
         ));
     }
@@ -6936,7 +6936,7 @@ fn validate_recovery_formatted_metric_values(
     respiratory_rate_rpm: Option<f64>,
     oxygen_saturation_percent: Option<f64>,
     skin_temperature_delta_c: Option<f64>,
-) -> GooseResult<()> {
+) -> OpenVitalsResult<()> {
     let has_metric_value = resting_hr_bpm.is_some()
         || hrv_rmssd_ms.is_some()
         || respiratory_rate_rpm.is_some()
@@ -6944,12 +6944,12 @@ fn validate_recovery_formatted_metric_values(
         || skin_temperature_delta_c.is_some();
     if source_kind == "unavailable" {
         if has_metric_value {
-            return Err(GooseError::message(
+            return Err(OpenVitalsError::message(
                 "unavailable recovery metrics must not carry metric values",
             ));
         }
     } else if !has_metric_value {
-        return Err(GooseError::message(
+        return Err(OpenVitalsError::message(
             "available recovery metrics must include at least one recovery value",
         ));
     }
@@ -6957,9 +6957,9 @@ fn validate_recovery_formatted_metric_values(
 }
 
 fn validate_metric_provenance_input(
-    store: &GooseStore,
+    store: &OpenVitalsStore,
     input: &MetricProvenanceInput<'_>,
-) -> GooseResult<()> {
+) -> OpenVitalsResult<()> {
     validate_required("provenance_id", input.provenance_id)?;
     validate_required("metric_scope", input.metric_scope)?;
     validate_metric_provenance_scope(input.metric_scope)?;
@@ -6987,15 +6987,15 @@ fn validate_metric_provenance_input(
 }
 
 fn validate_metric_provenance_target(
-    store: &GooseStore,
+    store: &OpenVitalsStore,
     input: &MetricProvenanceInput<'_>,
-) -> GooseResult<()> {
+) -> OpenVitalsResult<()> {
     let metric_source_kind = match input.metric_scope {
         "daily_activity" => store
             .daily_activity_metric(input.metric_id)?
             .map(|metric| metric.source_kind)
             .ok_or_else(|| {
-                GooseError::message(
+                OpenVitalsError::message(
                     "metric_provenance metric_id must reference existing daily_activity metric",
                 )
             })?,
@@ -7003,7 +7003,7 @@ fn validate_metric_provenance_target(
             .daily_recovery_metric(input.metric_id)?
             .map(|metric| metric.source_kind)
             .ok_or_else(|| {
-                GooseError::message(
+                OpenVitalsError::message(
                     "metric_provenance metric_id must reference existing daily_recovery metric",
                 )
             })?,
@@ -7011,14 +7011,14 @@ fn validate_metric_provenance_target(
             .hourly_activity_metric(input.metric_id)?
             .map(|metric| metric.source_kind)
             .ok_or_else(|| {
-                GooseError::message(
+                OpenVitalsError::message(
                     "metric_provenance metric_id must reference existing hourly_activity metric",
                 )
             })?,
         _ => unreachable!("metric_scope was validated before target lookup"),
     };
     if metric_source_kind != input.source_kind {
-        return Err(GooseError::message(format!(
+        return Err(OpenVitalsError::message(format!(
             "metric_provenance source_kind must match {} metric source_kind",
             input.metric_scope
         )));
@@ -7026,7 +7026,7 @@ fn validate_metric_provenance_target(
     Ok(())
 }
 
-fn validate_metric_debug_feature_input(input: &MetricDebugFeatureInput<'_>) -> GooseResult<()> {
+fn validate_metric_debug_feature_input(input: &MetricDebugFeatureInput<'_>) -> OpenVitalsResult<()> {
     validate_required("feature_id", input.feature_id)?;
     validate_required("metric_family", input.metric_family)?;
     validate_required("feature_name", input.feature_name)?;
@@ -7045,7 +7045,7 @@ fn validate_metric_debug_feature_input(input: &MetricDebugFeatureInput<'_>) -> G
     Ok(())
 }
 
-fn validate_step_counter_sample_input(input: &StepCounterSampleInput<'_>) -> GooseResult<()> {
+fn validate_step_counter_sample_input(input: &StepCounterSampleInput<'_>) -> OpenVitalsResult<()> {
     validate_required("sample_id", input.sample_id)?;
     validate_non_negative("sample_time_unix_ms", input.sample_time_unix_ms)?;
     validate_non_negative("counter_value", input.counter_value)?;
@@ -7054,7 +7054,7 @@ fn validate_step_counter_sample_input(input: &StepCounterSampleInput<'_>) -> Goo
     validate_required("source_kind", input.source_kind)?;
     validate_metric_source_kind(input.source_kind)?;
     if input.source_kind != "device_counter" {
-        return Err(GooseError::message(
+        return Err(OpenVitalsError::message(
             "source_kind for step_counter_samples must be device_counter",
         ));
     }
@@ -7069,9 +7069,9 @@ fn validate_step_counter_sample_input(input: &StepCounterSampleInput<'_>) -> Goo
 }
 
 fn validate_activity_interval_input(
-    _store: &GooseStore,
+    _store: &OpenVitalsStore,
     input: &ActivityIntervalInput<'_>,
-) -> GooseResult<()> {
+) -> OpenVitalsResult<()> {
     validate_required("interval_id", input.interval_id)?;
     validate_required("activity_session_id", input.activity_session_id)?;
     validate_required("interval_type", input.interval_type)?;
@@ -7086,9 +7086,9 @@ fn validate_activity_interval_input(
 }
 
 fn validate_activity_label_input(
-    _store: &GooseStore,
+    _store: &OpenVitalsStore,
     input: &ActivityLabelInput<'_>,
-) -> GooseResult<()> {
+) -> OpenVitalsResult<()> {
     validate_required("label_id", input.label_id)?;
     validate_required("activity_session_id", input.activity_session_id)?;
     validate_required("label_type", input.label_type)?;
@@ -7102,7 +7102,7 @@ fn validate_activity_label_input(
     Ok(())
 }
 
-fn validate_external_sleep_session_input(input: &ExternalSleepSessionInput<'_>) -> GooseResult<()> {
+fn validate_external_sleep_session_input(input: &ExternalSleepSessionInput<'_>) -> OpenVitalsResult<()> {
     validate_required("sleep_id", input.sleep_id)?;
     validate_required("source", input.source)?;
     validate_required("platform", input.platform)?;
@@ -7119,13 +7119,13 @@ fn validate_external_sleep_session_input(input: &ExternalSleepSessionInput<'_>) 
 }
 
 fn validate_external_sleep_stage_input(
-    store: &GooseStore,
+    store: &OpenVitalsStore,
     input: &ExternalSleepStageInput<'_>,
-) -> GooseResult<()> {
+) -> OpenVitalsResult<()> {
     validate_required("stage_id", input.stage_id)?;
     validate_required("sleep_id", input.sleep_id)?;
     let Some(session) = store.external_sleep_session(input.sleep_id)? else {
-        return Err(GooseError::message(format!(
+        return Err(OpenVitalsError::message(format!(
             "external sleep session {} not found",
             input.sleep_id
         )));
@@ -7138,7 +7138,7 @@ fn validate_external_sleep_stage_input(
     if input.start_time_unix_ms < session.start_time_unix_ms
         || input.end_time_unix_ms > session.end_time_unix_ms
     {
-        return Err(GooseError::message(format!(
+        return Err(OpenVitalsError::message(format!(
             "external sleep stage {} must be within parent sleep session {}",
             input.stage_id, input.sleep_id
         )));
@@ -7148,7 +7148,7 @@ fn validate_external_sleep_stage_input(
     Ok(())
 }
 
-fn validate_sleep_correction_label_input(input: &SleepCorrectionLabelInput<'_>) -> GooseResult<()> {
+fn validate_sleep_correction_label_input(input: &SleepCorrectionLabelInput<'_>) -> OpenVitalsResult<()> {
     validate_required("label_id", input.label_id)?;
     validate_optional_required("sleep_id", input.sleep_id)?;
     validate_required("label_type", input.label_type)?;
@@ -7537,7 +7537,7 @@ fn device_type_name(device_type: DeviceType) -> &'static str {
         DeviceType::Gen4 => "GEN_4",
         DeviceType::Maverick => "MAVERICK",
         DeviceType::Puffin => "PUFFIN",
-        DeviceType::Goose => "GOOSE",
+        DeviceType::OpenVitals => "OPENVITALS",
     }
 }
 
@@ -7547,7 +7547,7 @@ fn is_known_table(table: &str) -> bool {
 
 pub fn known_tables() -> &'static [&'static str] {
     &[
-        "goose_schema_migrations",
+        "open_vitals_schema_migrations",
         "raw_evidence",
         "decoded_frames",
         "algorithm_definitions",
