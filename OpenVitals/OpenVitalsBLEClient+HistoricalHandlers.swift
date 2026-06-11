@@ -55,6 +55,55 @@ extension OpenVitalsBLEClient {
     historicalPacketCount = historicalPacketsReceivedThisSync
   }
 
+  func flushCoalescedHistoricalDataPackets(
+    reason: String,
+    runID: UUID? = nil,
+    at date: Date = Date(),
+    force: Bool = false,
+    rescheduleIdle: Bool = true
+  ) {
+    if let runID, historicalSyncRunID != runID {
+      return
+    }
+
+    historicalDataPacketFlushLock.lock()
+    let packetCount = pendingHistoricalDataPacketCount
+    pendingHistoricalDataPacketCount = 0
+    historicalDataPacketFlushWorkItem?.cancel()
+    historicalDataPacketFlushWorkItem = nil
+    historicalDataPacketFlushLock.unlock()
+
+    guard packetCount > 0, isHistoricalSyncing else {
+      return
+    }
+
+    historicalPacketsReceivedThisSync += packetCount
+    publishHistoricalPacketCountIfNeeded(force: force, at: date)
+    if rescheduleIdle {
+      scheduleHistoricalIdleCompletion(reason: reason)
+    }
+    notifyHistoricalSyncProgress(
+      status: "syncing",
+      detail: "Received historical packet \(historicalPacketsReceivedThisSync)",
+      terminal: false,
+      failed: false
+    )
+    record(
+      level: .debug,
+      source: "ble.sync",
+      title: "historical_sync.packet.batch",
+      body: "batch=\(packetCount) total=\(historicalPacketsReceivedThisSync) reason=\(reason)"
+    )
+  }
+
+  func resetCoalescedHistoricalDataPackets() {
+    historicalDataPacketFlushLock.lock()
+    pendingHistoricalDataPacketCount = 0
+    historicalDataPacketFlushWorkItem?.cancel()
+    historicalDataPacketFlushWorkItem = nil
+    historicalDataPacketFlushLock.unlock()
+  }
+
   func handleAlarmValue(_ value: Data, characteristic: CBCharacteristic) {
     guard notificationCharacteristicIDs.contains(characteristic.uuid) else {
       return
@@ -89,14 +138,16 @@ extension OpenVitalsBLEClient {
         continue
       }
 
-      let result = commandResultName(payload[4])
+      let resultCode = payload[4]
+      let result = commandResultName(resultCode)
+      let resultSummary = "\(result)(\(resultCode))"
       let responseHex = Data(payload).hexString
       if payload[2] == 96 || payload[2] == 97 {
         handleHighFrequencyHistorySyncCommandResponse(payload, commandName: commandName, result: result)
         continue
       }
 
-      lastPhysiologyCommandSummary = "\(commandName) seq \(payload[3]) \(result)"
+      lastPhysiologyCommandSummary = "\(commandName) seq \(payload[3]) \(resultSummary)"
       physiologyCaptureStatus = lastPhysiologyCommandSummary
       record(
         source: "ble.sensor",
@@ -376,6 +427,11 @@ extension OpenVitalsBLEClient {
       return
     }
 
+    flushCoalescedHistoricalDataPackets(
+      reason: "historical_command_response",
+      force: true
+    )
+
     let resultCode = payload[4]
     let result = commandResultName(resultCode)
     let detail = historicalResponseDetail(command: pending.kind, payload: payload)
@@ -526,6 +582,11 @@ extension OpenVitalsBLEClient {
       return
     }
 
+    flushCoalescedHistoricalDataPackets(
+      reason: "historical_metadata_\(kind.name)",
+      force: true
+    )
+
     record(source: "ble.sync", title: "historical_sync.metadata", body: kind.name)
     notifyHistoricalSyncProgress(status: "syncing", detail: "Metadata \(kind.name)", terminal: false, failed: false)
     scheduleHistoricalIdleCompletion(reason: "historical_metadata_idle")
@@ -595,6 +656,13 @@ extension OpenVitalsBLEClient {
     historicalIdleWorkItem?.cancel()
     historicalRangeRetryWorkItem?.cancel()
     readySyncWorkItem?.cancel()
+    let completedAt = Date()
+    flushCoalescedHistoricalDataPackets(
+      reason: "historical_sync_complete_\(reason)",
+      at: completedAt,
+      force: true,
+      rescheduleIdle: false
+    )
     let sawHistoricalMetadata = historyStartReceived || historyEndReceived || historyCompleteReceived
     pendingHistoricalCommand = nil
     historyEndAckQueued = false
@@ -607,7 +675,6 @@ extension OpenVitalsBLEClient {
     historicalRangeRetryCount = 0
     historicalTransferRequestAttemptCount = 0
     historicalDataResultAckEnabled = true
-    let completedAt = Date()
     let rangeOnly = historicalRangePollOnly
     isHistoricalSyncing = false
     historicalRangePollOnly = false
@@ -632,6 +699,11 @@ extension OpenVitalsBLEClient {
     historicalIdleWorkItem?.cancel()
     historicalRangeRetryWorkItem?.cancel()
     readySyncWorkItem?.cancel()
+    flushCoalescedHistoricalDataPackets(
+      reason: "historical_sync_failed",
+      force: true,
+      rescheduleIdle: false
+    )
     pendingHistoricalCommand = nil
     historyEndAckQueued = false
     historyEndAckSentThisBurst = false

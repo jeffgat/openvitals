@@ -58,17 +58,20 @@ fn run() -> open_vitals_core::OpenVitalsResult<()> {
 
 fn optional_f64(args: &[String], name: &str) -> open_vitals_core::OpenVitalsResult<Option<f64>> {
     value(args, name)?.map_or(Ok(None), |raw| {
-        raw.parse::<f64>()
-            .map(Some)
-            .map_err(|error| OpenVitalsError::message(format!("invalid {name} value {raw}: {error}")))
+        raw.parse::<f64>().map(Some).map_err(|error| {
+            OpenVitalsError::message(format!("invalid {name} value {raw}: {error}"))
+        })
     })
 }
 
-fn optional_usize(args: &[String], name: &str) -> open_vitals_core::OpenVitalsResult<Option<usize>> {
+fn optional_usize(
+    args: &[String],
+    name: &str,
+) -> open_vitals_core::OpenVitalsResult<Option<usize>> {
     value(args, name)?.map_or(Ok(None), |raw| {
-        raw.parse::<usize>()
-            .map(Some)
-            .map_err(|error| OpenVitalsError::message(format!("invalid {name} value {raw}: {error}")))
+        raw.parse::<usize>().map(Some).map_err(|error| {
+            OpenVitalsError::message(format!("invalid {name} value {raw}: {error}"))
+        })
     })
 }
 

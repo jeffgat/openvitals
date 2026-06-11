@@ -1,7 +1,7 @@
 import Foundation
 import UIKit
 
-struct CaptureFrameWriteEnqueueResult {
+struct CaptureFrameWriteEnqueueResult: Sendable {
   let acceptedFrameCount: Int
   let droppedFrameCount: Int
   let queuedRowCount: Int
@@ -15,7 +15,7 @@ struct CaptureFrameWriteEnqueueResult {
   }
 }
 
-struct CaptureFrameEnqueueSnapshot {
+struct CaptureFrameEnqueueSnapshot: Sendable {
   let batchCount: Int
   let acceptedFrameCount: Int
   let droppedFrameCount: Int
@@ -33,7 +33,7 @@ struct CaptureFrameEnqueueSnapshot {
   }
 }
 
-struct CaptureFrameWriteResult {
+struct CaptureFrameWriteResult: Sendable {
   let batchCount: Int
   let frameCount: Int
   let rawInserted: Int
@@ -48,7 +48,7 @@ struct CaptureFrameWriteResult {
   let importTimingSummary: String?
 }
 
-struct CapturedFrameWriteRow {
+struct CapturedFrameWriteRow: Sendable {
   let evidenceID: String
   let frameID: String
   let source: String
@@ -184,7 +184,7 @@ final class CaptureFrameWriteQueue: @unchecked Sendable {
   private let databasePath: String
   private let maxQueuedRows: Int
   private let maxBatchRows: Int
-  private let coalesceDelay: TimeInterval = 0.05
+  private let coalesceDelay: TimeInterval = 0.25
   private let completionCoalesceDelay: TimeInterval = 1
   private var pendingRows: [CapturedFrameWriteRow] = []
   private var latestCompletion: (@MainActor (CaptureFrameWriteResult) -> Void)?

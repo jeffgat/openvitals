@@ -122,6 +122,10 @@ struct MoreRouteStatus {
 enum MoreStatusKind: String, CaseIterable {
   case ready
   case pending
+  case waiting
+  case listening
+  case inProgress = "in progress"
+  case notRun = "not run"
   case blocked
   case unavailable
   case stale
@@ -131,19 +135,17 @@ enum MoreStatusKind: String, CaseIterable {
   }
 
   var tint: Color {
-    switch self {
-    case .ready: .green
-    case .pending: .blue
-    case .blocked: .orange
-    case .unavailable: .gray
-    case .stale: .yellow
-    }
+    OpenVitalsTheme.statusTint(self)
   }
 
   var systemImage: String {
     switch self {
     case .ready: "checkmark.circle.fill"
     case .pending: "clock.fill"
+    case .waiting: "hourglass"
+    case .listening: "dot.radiowaves.left.and.right"
+    case .inProgress: "arrow.triangle.2.circlepath"
+    case .notRun: "circle"
     case .blocked: "exclamationmark.triangle.fill"
     case .unavailable: "minus.circle.fill"
     case .stale: "arrow.clockwise.circle.fill"

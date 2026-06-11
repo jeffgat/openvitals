@@ -66,7 +66,10 @@ fn run() -> open_vitals_core::OpenVitalsResult<()> {
     }
 }
 
-fn optional_usize(args: &[String], name: &str) -> open_vitals_core::OpenVitalsResult<Option<usize>> {
+fn optional_usize(
+    args: &[String],
+    name: &str,
+) -> open_vitals_core::OpenVitalsResult<Option<usize>> {
     Ok(value(args, name)?
         .map(|raw| {
             raw.parse::<usize>()

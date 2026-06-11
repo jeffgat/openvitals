@@ -113,15 +113,36 @@ extension MoreDataStore {
   }
 
   func validateExportArtifacts() {
-    let artifactValidation = Self.validateRawExportArtifacts(
-      bridge: bridge,
-      bundlePath: rawBundlePath,
-      zipPath: rawZipPath
-    )
-    rawBundleValidation = artifactValidation.bundleValidation
-    rawZipValidation = artifactValidation.zipValidation
-    privacyLintStatus = artifactValidation.privacyLint
-    sanitizedPrivacyStatus = artifactValidation.sanitizedPrivacy
+    let bundlePath = rawBundlePath
+    let zipPath = rawZipPath
+    rawBundleValidation = "Validating bundle..."
+    rawZipValidation = zipPath == "No zip" ? "No zip to validate" : "Validating zip..."
+    privacyLintStatus = "Linting export..."
+    sanitizedPrivacyStatus = "No sanitized copy"
+    OpenVitalsRustBridge.performInBackground(qos: .userInitiated, {
+      Self.validateRawExportArtifacts(
+        bridge: OpenVitalsRustBridge(),
+        bundlePath: bundlePath,
+        zipPath: zipPath
+      )
+    }) { [weak self] result in
+      guard let self else {
+        return
+      }
+      switch result {
+      case .success(let artifactValidation):
+        rawBundleValidation = artifactValidation.bundleValidation
+        rawZipValidation = artifactValidation.zipValidation
+        privacyLintStatus = artifactValidation.privacyLint
+        sanitizedPrivacyStatus = artifactValidation.sanitizedPrivacy
+      case .failure(let error):
+        let message = Self.errorSummary(error)
+        rawBundleValidation = "Validation failed: \(message)"
+        rawZipValidation = "Validation failed: \(message)"
+        privacyLintStatus = "Privacy lint failed: \(message)"
+        sanitizedPrivacyStatus = "No sanitized copy"
+      }
+    }
   }
 
   func validationStatusKind(_ summary: String) -> MoreStatusKind {
@@ -142,17 +163,26 @@ extension MoreDataStore {
       return
     }
 
-    do {
-      let value = try bridge.request(
+    algorithmPreferenceStatus = "Persisting defaults..."
+    let databasePath = databasePath
+    OpenVitalsRustBridge.performInBackground(qos: .utility, {
+      try OpenVitalsRustBridge().request(
         method: "settings.apply_default_algorithm_preferences",
         args: [
           "database_path": databasePath,
           "scope": "primary",
         ]
       )
-      algorithmPreferenceStatus = "Defaults persisted: \(Self.shortBridgeSummary(value))"
-    } catch {
-      algorithmPreferenceStatus = "Defaults failed: \(Self.errorSummary(error))"
+    }) { [weak self] result in
+      guard let self else {
+        return
+      }
+      switch result {
+      case .success(let value):
+        algorithmPreferenceStatus = "Defaults persisted: \(Self.shortBridgeSummary(value))"
+      case .failure(let error):
+        algorithmPreferenceStatus = "Defaults failed: \(Self.errorSummary(error))"
+      }
     }
   }
 
@@ -162,8 +192,10 @@ extension MoreDataStore {
       return
     }
 
-    do {
-      let value = try bridge.request(
+    algorithmPreferenceStatus = "Saving preference..."
+    let databasePath = databasePath
+    OpenVitalsRustBridge.performInBackground(qos: .utility, {
+      try OpenVitalsRustBridge().request(
         method: "settings.set_algorithm_preference",
         args: [
           "database_path": databasePath,
@@ -174,40 +206,60 @@ extension MoreDataStore {
           "register_built_ins": true,
         ]
       )
-      algorithmPreferenceStatus = "Preference saved: \(Self.shortBridgeSummary(value))"
-    } catch {
-      algorithmPreferenceStatus = "Preference save failed: \(Self.errorSummary(error))"
+    }) { [weak self] result in
+      guard let self else {
+        return
+      }
+      switch result {
+      case .success(let value):
+        algorithmPreferenceStatus = "Preference saved: \(Self.shortBridgeSummary(value))"
+      case .failure(let error):
+        algorithmPreferenceStatus = "Preference save failed: \(Self.errorSummary(error))"
+      }
     }
   }
 
   func runFrameParseProbe() {
-    do {
-      let value = try bridge.request(
+    frameParseStatus = "Parsing frame..."
+    OpenVitalsRustBridge.performInBackground(qos: .utility, {
+      try OpenVitalsRustBridge().request(
         method: "protocol.parse_frame_hex",
         args: [
           "device_type": "OPENVITALS",
           "frame_hex": OpenVitalsHello.clientHelloFrameHex,
         ]
       )
-      frameParseStatus = "Parsed \(Self.firstString(value, keys: ["packet_type_name", "packet_type"]) ?? "frame")"
-      frameCRCStatus = Self.firstString(value, keys: ["crc_status", "crc", "checksum"]) ?? "CRC accepted by parser"
-      framePayloadStatus = Self.shortBridgeSummary(value["parsed_payload"] as? [String: Any] ?? value)
-      let warnings = (value["warnings"] as? [Any])?.count ?? 0
-      frameWarningsStatus = warnings == 0 ? "No warnings" : "\(warnings) warnings"
-      frameTimelineStatus = "Timeline generation waits for decoded frame rows"
-    } catch {
-      frameParseStatus = "Parse failed: \(Self.errorSummary(error))"
+    }) { [weak self] result in
+      guard let self else {
+        return
+      }
+      switch result {
+      case .success(let value):
+        frameParseStatus = "Parsed \(Self.firstString(value, keys: ["packet_type_name", "packet_type"]) ?? "frame")"
+        frameCRCStatus = Self.firstString(value, keys: ["crc_status", "crc", "checksum"]) ?? "CRC accepted by parser"
+        framePayloadStatus = Self.shortBridgeSummary(value["parsed_payload"] as? [String: Any] ?? value)
+        let warnings = (value["warnings"] as? [Any])?.count ?? 0
+        frameWarningsStatus = warnings == 0 ? "No warnings" : "\(warnings) warnings"
+        frameTimelineStatus = "Timeline generation waits for decoded frame rows"
+      case .failure(let error):
+        frameParseStatus = "Parse failed: \(Self.errorSummary(error))"
+      }
     }
   }
 
   func startDebugSession() {
-    do {
-      let value = try bridge.request(
+    debugWebSocketStatus = "Starting debug session..."
+    debugNextAction = "Creating local debug session"
+    let databasePath = databasePath
+    let debugSessionID = debugSessionID
+    let startedAtMs = Self.unixMilliseconds(Date())
+    OpenVitalsRustBridge.performInBackground(qos: .utility, {
+      try OpenVitalsRustBridge().request(
         method: "debug.start_session",
         args: [
           "database_path": databasePath,
           "session_id": debugSessionID,
-          "started_at_unix_ms": Self.unixMilliseconds(Date()),
+          "started_at_unix_ms": startedAtMs,
           "bridge": [
             "url": "ws://127.0.0.1:8765",
             "bind_host": "127.0.0.1",
@@ -218,66 +270,107 @@ extension MoreDataStore {
           ],
         ]
       )
-      debugWebSocketStatus = "Session \(debugSessionID.prefix(12)) started"
-      debugNextAction = Self.shortBridgeSummary(value)
-    } catch {
-      debugWebSocketStatus = "Debug session failed: \(Self.errorSummary(error))"
-      debugNextAction = "Check database path and Rust bridge"
+    }) { [weak self] result in
+      guard let self else {
+        return
+      }
+      switch result {
+      case .success(let value):
+        debugWebSocketStatus = "Session \(debugSessionID.prefix(12)) started"
+        debugNextAction = Self.shortBridgeSummary(value)
+      case .failure(let error):
+        debugWebSocketStatus = "Debug session failed: \(Self.errorSummary(error))"
+        debugNextAction = "Check database path and Rust bridge"
+      }
     }
   }
 
   func refreshDebugSnapshot() {
-    do {
-      let value = try bridge.request(
+    debugNextAction = "Refreshing debug snapshot..."
+    let databasePath = databasePath
+    let debugSessionID = debugSessionID
+    OpenVitalsRustBridge.performInBackground(qos: .utility, {
+      try OpenVitalsRustBridge().request(
         method: "debug.session_snapshot",
         args: [
           "database_path": databasePath,
           "session_id": debugSessionID,
         ]
       )
-      debugNextAction = Self.shortBridgeSummary(value)
-    } catch {
-      debugNextAction = "Snapshot failed: \(Self.errorSummary(error))"
+    }) { [weak self] result in
+      guard let self else {
+        return
+      }
+      switch result {
+      case .success(let value):
+        debugNextAction = Self.shortBridgeSummary(value)
+      case .failure(let error):
+        debugNextAction = "Snapshot failed: \(Self.errorSummary(error))"
+      }
     }
   }
 
   func runUICoverageAudit() {
-    do {
-      let value = try bridge.request(method: "ui_coverage.audit")
-      uiCoverageStatus = Self.passSummary(value, fallback: Self.shortBridgeSummary(value))
-      deferredSurfaceStatus = Self.firstString(value, keys: ["deferred_surfaces", "missing_surfaces", "blocked_surfaces"]) ?? "See audit output"
-    } catch {
-      uiCoverageStatus = "Coverage audit failed: \(Self.errorSummary(error))"
-      deferredSurfaceStatus = "Audit unavailable"
+    uiCoverageStatus = "Running coverage audit..."
+    OpenVitalsRustBridge.performInBackground(qos: .utility, {
+      try OpenVitalsRustBridge().request(method: "ui_coverage.audit")
+    }) { [weak self] result in
+      guard let self else {
+        return
+      }
+      switch result {
+      case .success(let value):
+        uiCoverageStatus = Self.passSummary(value, fallback: Self.shortBridgeSummary(value))
+        deferredSurfaceStatus = Self.firstString(value, keys: ["deferred_surfaces", "missing_surfaces", "blocked_surfaces"]) ?? "See audit output"
+      case .failure(let error):
+        uiCoverageStatus = "Coverage audit failed: \(Self.errorSummary(error))"
+        deferredSurfaceStatus = "Audit unavailable"
+      }
     }
   }
 
   func runPropertySuite() {
-    do {
-      let value = try bridge.request(
+    propertySuiteStatus = "Running property suite..."
+    OpenVitalsRustBridge.performInBackground(qos: .utility, {
+      try OpenVitalsRustBridge().request(
         method: "diagnostics.property_suite",
         args: [
           "seed": 42,
           "cases_per_group": 16,
         ]
       )
-      propertySuiteStatus = Self.passSummary(value, fallback: Self.shortBridgeSummary(value))
-    } catch {
-      propertySuiteStatus = "Property suite failed: \(Self.errorSummary(error))"
+    }) { [weak self] result in
+      guard let self else {
+        return
+      }
+      switch result {
+      case .success(let value):
+        propertySuiteStatus = Self.passSummary(value, fallback: Self.shortBridgeSummary(value))
+      case .failure(let error):
+        propertySuiteStatus = "Property suite failed: \(Self.errorSummary(error))"
+      }
     }
   }
 
   func runPerfBudget() {
-    do {
-      let value = try bridge.request(
+    perfBudgetStatus = "Running perf budget..."
+    OpenVitalsRustBridge.performInBackground(qos: .utility, {
+      try OpenVitalsRustBridge().request(
         method: "diagnostics.perf_budget",
         args: [
           "scale": 1,
         ]
       )
-      perfBudgetStatus = Self.passSummary(value, fallback: Self.shortBridgeSummary(value))
-    } catch {
-      perfBudgetStatus = "Perf budget failed: \(Self.errorSummary(error))"
+    }) { [weak self] result in
+      guard let self else {
+        return
+      }
+      switch result {
+      case .success(let value):
+        perfBudgetStatus = Self.passSummary(value, fallback: Self.shortBridgeSummary(value))
+      case .failure(let error):
+        perfBudgetStatus = "Perf budget failed: \(Self.errorSummary(error))"
+      }
     }
   }
 
@@ -286,33 +379,53 @@ extension MoreDataStore {
       commandCapturePlanStatus = "Blocked: local database unavailable"
       return
     }
-    do {
-      let value = try bridge.request(
+    commandCapturePlanStatus = "Generating capture plan..."
+    let databasePath = databasePath
+    let rawExportStart = rawExportStart
+    let rawExportEnd = rawExportEnd
+    let timezone = TimeZone.current.identifier
+    OpenVitalsRustBridge.performInBackground(qos: .utility, {
+      try OpenVitalsRustBridge().request(
         method: "capture.arrival_plan",
         args: [
           "database_path": databasePath,
           "start": rawExportStart,
           "end": rawExportEnd,
-          "timezone": TimeZone.current.identifier,
+          "timezone": timezone,
           "min_owned_captures": 1,
           "require_owned_captures": true,
           "require_scores_ready": true,
         ]
       )
-      commandCapturePlanStatus = Self.captureArrivalPlanSummary(value)
-    } catch {
-      commandCapturePlanStatus = "Capture plan failed: \(Self.errorSummary(error))"
+    }) { [weak self] result in
+      guard let self else {
+        return
+      }
+      switch result {
+      case .success(let value):
+        commandCapturePlanStatus = Self.captureArrivalPlanSummary(value)
+      case .failure(let error):
+        commandCapturePlanStatus = "Capture plan failed: \(Self.errorSummary(error))"
+      }
     }
   }
 
   func loadCommandDefinitions() {
-    do {
-      let value = try bridge.requestValue(method: "commands.definitions")
-      commandGroups = MoreCommandGroup.groups(from: value)
-      commandGateSweepStatus = "Definitions loaded"
-    } catch {
-      commandGateSweepStatus = "Command definitions failed: \(Self.errorSummary(error))"
-      commandGroups = MoreCommandGroup.defaults
+    commandGateSweepStatus = "Loading definitions..."
+    OpenVitalsRustBridge.performInBackground(qos: .utility, {
+      try OpenVitalsRustBridge().requestValue(method: "commands.definitions")
+    }) { [weak self] result in
+      guard let self else {
+        return
+      }
+      switch result {
+      case .success(let value):
+        commandGroups = MoreCommandGroup.groups(from: value)
+        commandGateSweepStatus = "Definitions loaded"
+      case .failure(let error):
+        commandGateSweepStatus = "Command definitions failed: \(Self.errorSummary(error))"
+        commandGroups = MoreCommandGroup.defaults
+      }
     }
   }
 

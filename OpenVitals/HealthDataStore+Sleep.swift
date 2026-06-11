@@ -64,7 +64,7 @@ extension HealthDataStore {
           endLabel: end.map(timeLabel) ?? "--",
           durationMinutes: duration,
           confidence: doubleValue(row["confidence_0_to_1"]),
-          source: .bridge("sleep_v1 output stage_segments")
+          source: .bridge("sleep score output stage_segments")
         )
       }
     }
@@ -84,7 +84,7 @@ extension HealthDataStore {
         endLabel: "--",
         durationMinutes: minutes,
         confidence: doubleValue(output["stage_segment_confidence_0_to_1"]),
-        source: .bridge("sleep_v1 output stage_minutes")
+        source: .bridge("sleep score output stage_minutes")
       )
     }
   }

@@ -6,10 +6,11 @@ use serde_json::{Value, json};
 use crate::{
     OpenVitalsError, OpenVitalsResult,
     metrics::{
-        OPENVITALS_HRV_V0_ID, OPENVITALS_HRV_V0_VERSION, OPENVITALS_SLEEP_V0_ID, OPENVITALS_SLEEP_V0_VERSION,
-        OPENVITALS_SLEEP_V1_ID, OPENVITALS_SLEEP_V1_VERSION, OPENVITALS_STRAIN_V0_ID, OPENVITALS_STRAIN_V0_VERSION,
-        OPENVITALS_STRESS_V0_ID, OPENVITALS_STRESS_V0_VERSION, HrvInput, SleepInput, SleepV1Input,
-        StrainInput, StressInput, open_vitals_hrv_v0, open_vitals_sleep_v0, open_vitals_sleep_v1, open_vitals_strain_v0,
+        HrvInput, OPENVITALS_HRV_V0_ID, OPENVITALS_HRV_V0_VERSION, OPENVITALS_SLEEP_V0_ID,
+        OPENVITALS_SLEEP_V0_VERSION, OPENVITALS_SLEEP_V1_ID, OPENVITALS_SLEEP_V1_VERSION,
+        OPENVITALS_STRAIN_V0_ID, OPENVITALS_STRAIN_V0_VERSION, OPENVITALS_STRESS_V0_ID,
+        OPENVITALS_STRESS_V0_VERSION, SleepInput, SleepV1Input, StrainInput, StressInput,
+        open_vitals_hrv_v0, open_vitals_sleep_v0, open_vitals_sleep_v1, open_vitals_strain_v0,
         open_vitals_stress_v0,
     },
     reference::{
@@ -84,7 +85,9 @@ pub struct AlgorithmComparisonNextAction {
     pub action: String,
 }
 
-pub fn compare_hrv_open_vitals_to_reference(input: &HrvInput) -> OpenVitalsResult<AlgorithmComparisonReport> {
+pub fn compare_hrv_open_vitals_to_reference(
+    input: &HrvInput,
+) -> OpenVitalsResult<AlgorithmComparisonReport> {
     let open_vitals = open_vitals_hrv_v0(input);
     let reference = reference_hrv_time_domain(input);
     let mut deltas = Vec::new();
@@ -92,7 +95,9 @@ pub fn compare_hrv_open_vitals_to_reference(input: &HrvInput) -> OpenVitalsResul
     let mut errors = prefixed_errors("openVitals", &open_vitals.errors);
     errors.extend(prefixed_errors("reference", &reference.errors));
 
-    if let (Some(open_vitals_output), Some(reference_output)) = (&open_vitals.output, &reference.output) {
+    if let (Some(open_vitals_output), Some(reference_output)) =
+        (&open_vitals.output, &reference.output)
+    {
         push_delta(
             &mut deltas,
             "mean_nn_ms",
@@ -168,7 +173,9 @@ pub fn compare_sleep_open_vitals_to_reference(
     let mut errors = prefixed_errors("openVitals", &open_vitals.errors);
     errors.extend(prefixed_errors("reference", &reference.errors));
 
-    if let (Some(open_vitals_output), Some(reference_output)) = (&open_vitals.output, &reference.output) {
+    if let (Some(open_vitals_output), Some(reference_output)) =
+        (&open_vitals.output, &reference.output)
+    {
         push_delta(
             &mut deltas,
             "time_in_bed_minutes",
@@ -278,7 +285,9 @@ pub fn compare_sleep_v1_open_vitals_to_reference(
     let mut errors = prefixed_errors("openVitals", &open_vitals.errors);
     errors.extend(prefixed_errors("reference", &reference.errors));
 
-    if let (Some(open_vitals_output), Some(reference_output)) = (&open_vitals.output, &reference.output) {
+    if let (Some(open_vitals_output), Some(reference_output)) =
+        (&open_vitals.output, &reference.output)
+    {
         push_delta(
             &mut deltas,
             "time_in_bed_minutes",
@@ -363,8 +372,10 @@ pub fn compare_sleep_v1_open_vitals_to_reference(
                 .to_string(),
             "open_vitals_output.rolling_sleep_debt_minutes depends on prior nights and sleep need"
                 .to_string(),
-            "open_vitals_output.model_status has no benchmark-only actigraphy equivalent".to_string(),
-            "open_vitals_output.stage_segments are heuristic and require label calibration".to_string(),
+            "open_vitals_output.model_status has no benchmark-only actigraphy equivalent"
+                .to_string(),
+            "open_vitals_output.stage_segments are heuristic and require label calibration"
+                .to_string(),
         ],
         open_vitals_output: serialize_optional("openVitals sleep v1 output", &open_vitals.output)?,
         reference_output: serialize_optional("reference sleep output", &reference.output)?,
@@ -428,7 +439,9 @@ pub fn compare_sleep_v1_open_vitals_to_external_reference_report(
         ));
     }
 
-    if let (Some(open_vitals_output), Some(_reference_output)) = (&open_vitals.output, &reference.output) {
+    if let (Some(open_vitals_output), Some(_reference_output)) =
+        (&open_vitals.output, &reference.output)
+    {
         push_sleep_external_delta(
             &mut deltas,
             &mut non_comparable_fields,
@@ -588,7 +601,9 @@ pub fn compare_sleep_open_vitals_to_external_reference_report(
         ));
     }
 
-    if let (Some(open_vitals_output), Some(_reference_output)) = (&open_vitals.output, &reference.output) {
+    if let (Some(open_vitals_output), Some(_reference_output)) =
+        (&open_vitals.output, &reference.output)
+    {
         push_sleep_external_delta(
             &mut deltas,
             &mut non_comparable_fields,
@@ -709,7 +724,9 @@ pub fn compare_strain_open_vitals_to_reference(
     let mut errors = prefixed_errors("openVitals", &open_vitals.errors);
     errors.extend(prefixed_errors("reference", &reference.errors));
 
-    if let (Some(open_vitals_output), Some(reference_output)) = (&open_vitals.output, &reference.output) {
+    if let (Some(open_vitals_output), Some(reference_output)) =
+        (&open_vitals.output, &reference.output)
+    {
         push_delta(
             &mut deltas,
             "zone_load",
@@ -733,9 +750,12 @@ pub fn compare_strain_open_vitals_to_reference(
         end_time: &input.end_time,
         deltas,
         non_comparable_fields: vec![
-            "open_vitals_output.score_0_to_21 has no Edwards-zone-load score equivalent".to_string(),
-            "open_vitals_output.average_hr_reserve_fraction is not part of Edwards zone load".to_string(),
-            "reference_output.edwards_load_per_hour is not emitted by OpenVitals strain v0".to_string(),
+            "open_vitals_output.score_0_to_21 has no Edwards-zone-load score equivalent"
+                .to_string(),
+            "open_vitals_output.average_hr_reserve_fraction is not part of Edwards zone load"
+                .to_string(),
+            "reference_output.edwards_load_per_hour is not emitted by OpenVitals strain v0"
+                .to_string(),
         ],
         open_vitals_output: serialize_optional("openVitals strain output", &open_vitals.output)?,
         reference_output: serialize_optional("reference strain output", &reference.output)?,
@@ -762,7 +782,9 @@ pub fn compare_stress_open_vitals_to_reference(
     let mut errors = prefixed_errors("openVitals", &open_vitals.errors);
     errors.extend(prefixed_errors("reference", &reference.errors));
 
-    if let (Some(open_vitals_output), Some(reference_output)) = (&open_vitals.output, &reference.output) {
+    if let (Some(open_vitals_output), Some(reference_output)) =
+        (&open_vitals.output, &reference.output)
+    {
         push_delta(
             &mut deltas,
             "heart_rate_elevation_score",

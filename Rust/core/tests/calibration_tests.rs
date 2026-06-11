@@ -223,7 +223,10 @@ fn applies_passed_calibration_model_to_local_open_vitals_score() {
         application.next_actions
     );
     assert_close(application.calibrated_score.unwrap(), 79.0);
-    assert_eq!(application.output_kind, "open_vitals_calibrated_local_score");
+    assert_eq!(
+        application.output_kind,
+        "open_vitals_calibrated_local_score"
+    );
     assert!(application.official_labels_are_labels);
     assert_eq!(
         application.provenance["label_policy"],

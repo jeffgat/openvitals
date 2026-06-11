@@ -76,8 +76,9 @@ pub fn bind_debug_ws_listener(options: &DebugWsServerOptions) -> OpenVitalsResul
     let address = addresses
         .next()
         .ok_or_else(|| OpenVitalsError::message("debug bind address did not resolve"))?;
-    TcpListener::bind(address)
-        .map_err(|error| OpenVitalsError::io(format!("{}:{}", options.bind_host, options.port), error))
+    TcpListener::bind(address).map_err(|error| {
+        OpenVitalsError::io(format!("{}:{}", options.bind_host, options.port), error)
+    })
 }
 
 pub fn serve_debug_ws_listener_once(
@@ -201,7 +202,9 @@ fn validate_server_options(options: &DebugWsServerOptions) -> OpenVitalsResult<(
         return Err(OpenVitalsError::message("token is required"));
     }
     if options.poll_interval_ms == 0 {
-        return Err(OpenVitalsError::message("poll_interval_ms must be positive"));
+        return Err(OpenVitalsError::message(
+            "poll_interval_ms must be positive",
+        ));
     }
     if options.idle_timeout_ms == 0 {
         return Err(OpenVitalsError::message("idle_timeout_ms must be positive"));
@@ -257,7 +260,10 @@ fn error_response(status: StatusCode, message: &str) -> ErrorResponse {
         .unwrap_or_else(|_| tungstenite::http::Response::new(Some(message.to_string())))
 }
 
-fn debug_ws_url(listener: &TcpListener, options: &DebugWsServerOptions) -> OpenVitalsResult<String> {
+fn debug_ws_url(
+    listener: &TcpListener,
+    options: &DebugWsServerOptions,
+) -> OpenVitalsResult<String> {
     let address = listener
         .local_addr()
         .map_err(|error| OpenVitalsError::io(&options.database_path, error))?;

@@ -823,7 +823,9 @@ fn validate_decision(
     issues: &mut Vec<String>,
 ) {
     if open_vitals_area.trim().is_empty() {
-        issues.push(format!("{surface_kind}_rule_open_vitals_area_required:{rule_id}"));
+        issues.push(format!(
+            "{surface_kind}_rule_open_vitals_area_required:{rule_id}"
+        ));
     }
     if status.requires_reason() && reason.is_none_or(|value| value.trim().is_empty()) {
         issues.push(format!("{surface_kind}_rule_reason_required:{rule_id}"));

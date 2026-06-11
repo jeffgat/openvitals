@@ -10,11 +10,11 @@
   "schema": "open_vitals.strain-input.v1",
   "consent": "synthetic-no-user-data",
   "sensitivity": "public-test-fixture",
-  "notes": "Zone load is 140, HR reserve fraction is 0.5, weighted output is 8.05 on a 0-21 scale.",
+  "notes": "Zone load is 140, HR reserve fraction is 0.5, nonlinear weighted output is 8.73104974192709 on a 0-21 scale.",
   "expected": {
     "algorithm_id": "open_vitals.strain.v0",
     "version": "0.1.0",
-    "score_0_to_21": 8.05,
+    "score_0_to_21": 8.73104974192709,
     "zone_load": 140.0,
     "average_hr_reserve_fraction": 0.5
   }

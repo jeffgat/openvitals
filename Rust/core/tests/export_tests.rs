@@ -11,9 +11,9 @@ use open_vitals_core::{
     export::{RawExportFilters, RawExportOptions, export_raw_timeframe, validate_export_bundle},
     fixtures::build_fixture_index,
     metrics::{
-        OPENVITALS_SLEEP_V1_ID, HrvInput, SleepInput, SleepModelStatusInput, SleepV1Input,
-        algorithm_run_record, built_in_algorithm_definitions, open_vitals_hrv_v0, open_vitals_sleep_v1,
-        hrv_run_record,
+        HrvInput, OPENVITALS_SLEEP_V1_ID, SleepInput, SleepModelStatusInput, SleepV1Input,
+        algorithm_run_record, built_in_algorithm_definitions, hrv_run_record, open_vitals_hrv_v0,
+        open_vitals_sleep_v1,
     },
     protocol::{DeviceType, PACKET_TYPE_REALTIME_RAW_DATA, build_v5_payload_frame},
     store::{
@@ -21,7 +21,7 @@ use open_vitals_core::{
         AlgorithmDefinitionRecord, AlgorithmRunRecord, CalibrationLabelInput, CalibrationRunRecord,
         CalibrationRunTimes, CaptureSessionInput, CommandValidationRecord,
         DailyActivityMetricInput, DailyRecoveryMetricInput, DebugCommandRow, DebugEventRow,
-        DebugSessionRow, OpenVitalsStore, HourlyActivityMetricInput, MetricProvenanceInput,
+        DebugSessionRow, HourlyActivityMetricInput, MetricProvenanceInput, OpenVitalsStore,
     },
 };
 use rusqlite::Connection;
@@ -444,7 +444,8 @@ fn exports_sqlite_timeframe_to_jsonl_csv_and_sqlite_bundle() {
         .insert_debug_session(&DebugSessionRow {
             session_id: "debug-export-session".to_string(),
             started_at_unix_ms: 1779840000000,
-            bridge_url: "ws://127.0.0.1:49152/open-vitals-debug/stream?token=secret-token".to_string(),
+            bridge_url: "ws://127.0.0.1:49152/open-vitals-debug/stream?token=secret-token"
+                .to_string(),
             bind_host: "127.0.0.1".to_string(),
             token_required: true,
             token_present: true,
@@ -1263,7 +1264,7 @@ fn raw_export_preserves_sleep_v1_output_components_and_open_vitals_provenance() 
     assert_eq!(output["quality_flags"], serde_json::json!([]));
     assert_eq!(
         output["provenance"]["score_policy"],
-        "weighted_sleep_v1_components_with_fragmentation_guardrails"
+        "research_weighted_sleep_v1_components_with_confidence_metadata_and_fragmentation_guardrails"
     );
     assert_eq!(output["components"].as_array().unwrap().len(), 7);
     assert_eq!(
@@ -1274,7 +1275,7 @@ fn raw_export_preserves_sleep_v1_output_components_and_open_vitals_provenance() 
         serde_json::from_str(algorithm_run["provenance_json"].as_str().unwrap()).unwrap();
     assert_eq!(
         run_provenance["provenance"]["score_policy"],
-        "weighted_sleep_v1_components_with_fragmentation_guardrails"
+        "research_weighted_sleep_v1_components_with_confidence_metadata_and_fragmentation_guardrails"
     );
 
     let metric_components =
@@ -2823,7 +2824,10 @@ fn raw_export_filters_algorithm_outputs_and_labels() {
     assert_eq!(report.metric_component_rows, 4);
     assert_eq!(report.calibration_label_rows, 1);
     assert_eq!(report.manifest.filters.metric_families, vec!["hrv"]);
-    assert_eq!(report.manifest.filters.algorithm_ids, vec!["open_vitals.hrv.v0"]);
+    assert_eq!(
+        report.manifest.filters.algorithm_ids,
+        vec!["open_vitals.hrv.v0"]
+    );
 
     let algorithm_runs = fs::read_to_string(export_dir.join("data/algorithm_runs.jsonl")).unwrap();
     let metric_values = fs::read_to_string(export_dir.join("data/metric_values.jsonl")).unwrap();
@@ -2901,7 +2905,9 @@ fn raw_export_filters_metric_feature_reports_by_metric_family() {
 fn raw_export_filters_capture_session_rows() {
     let tempdir = tempfile::tempdir().unwrap();
     let db_path = tempdir.path().join("open_vitals.sqlite");
-    let export_dir = tempdir.path().join("filtered-capture-session.openvitalsbundle");
+    let export_dir = tempdir
+        .path()
+        .join("filtered-capture-session.openvitalsbundle");
     let store = OpenVitalsStore::open(&db_path).unwrap();
 
     for session_id in ["capture-session-a", "capture-session-b"] {
@@ -3018,7 +3024,9 @@ fn raw_export_filters_capture_session_rows() {
 fn raw_export_filters_packet_type_and_sensor_source_rows() {
     let tempdir = tempfile::tempdir().unwrap();
     let db_path = tempdir.path().join("open_vitals.sqlite");
-    let export_dir = tempdir.path().join("filtered-packet-signal.openvitalsbundle");
+    let export_dir = tempdir
+        .path()
+        .join("filtered-packet-signal.openvitalsbundle");
     let store = OpenVitalsStore::open(&db_path).unwrap();
 
     let frames = vec![

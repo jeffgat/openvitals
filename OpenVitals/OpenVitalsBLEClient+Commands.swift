@@ -456,7 +456,7 @@ extension OpenVitalsBLEClient {
       data: command.payload
     )
     if updatePhysiologyStatus {
-      lastPhysiologyCommandSummary = "\(command.name) seq \(sequence) sent"
+      lastPhysiologyCommandSummary = "\(command.name) seq \(sequence) sent payload=\(Data(command.payload).hexString)"
     } else if command.commandNumber == 96 || command.commandNumber == 97 {
       lastHighFrequencyHistorySyncResponse = "\(command.name) seq \(sequence) sent"
     }

@@ -21,7 +21,9 @@ fn main() {
 fn run() -> open_vitals_core::OpenVitalsResult<()> {
     let args = args();
     let Some(database_path) = value(&args, "--db")? else {
-        return Err(OpenVitalsError::message("missing --db <open_vitals.sqlite>"));
+        return Err(OpenVitalsError::message(
+            "missing --db <open_vitals.sqlite>",
+        ));
     };
     let Some(input_path) = path_value(&args, "--input")? else {
         return Err(OpenVitalsError::message(
@@ -49,9 +51,9 @@ fn run() -> open_vitals_core::OpenVitalsResult<()> {
 
 fn optional_f64(args: &[String], name: &str) -> open_vitals_core::OpenVitalsResult<Option<f64>> {
     value(args, name)?.map_or(Ok(None), |raw| {
-        raw.parse::<f64>()
-            .map(Some)
-            .map_err(|error| OpenVitalsError::message(format!("invalid {name} value {raw}: {error}")))
+        raw.parse::<f64>().map(Some).map_err(|error| {
+            OpenVitalsError::message(format!("invalid {name} value {raw}: {error}"))
+        })
     })
 }
 

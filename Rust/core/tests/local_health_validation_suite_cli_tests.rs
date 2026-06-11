@@ -32,18 +32,19 @@ fn local_health_validation_suite_accepts_raw_export_directory_bundle() {
     let sqlite_sha256 = write_raw_export_manifest(&bundle_dir, &db);
     write_steps_unavailable_manifest(&manifest_path);
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--raw-export-bundle")
-            .arg(&bundle_dir)
-            .arg("--manifest")
-            .arg(&manifest_path)
-            .arg("--markdown-output")
-            .arg(&markdown_output_path)
-            .arg("--review-output")
-            .arg(&review_output_path)
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--raw-export-bundle")
+    .arg(&bundle_dir)
+    .arg("--manifest")
+    .arg(&manifest_path)
+    .arg("--markdown-output")
+    .arg(&markdown_output_path)
+    .arg("--review-output")
+    .arg(&review_output_path)
+    .output()
+    .unwrap();
 
     assert!(
         output.status.success(),
@@ -179,14 +180,15 @@ fn local_health_validation_suite_accepts_raw_export_zip_bundle() {
         "OpenVitals Raw Export 2026-06-02/data/open_vitals.sqlite",
     );
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--bundle")
-            .arg(&zip_path)
-            .arg("--manifest")
-            .arg(&manifest_path)
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--bundle")
+    .arg(&zip_path)
+    .arg("--manifest")
+    .arg(&manifest_path)
+    .output()
+    .unwrap();
 
     assert!(
         output.status.success(),
@@ -359,23 +361,24 @@ fn local_health_validation_suite_scaffolds_manifest_from_raw_export_bundle() {
     drop(store);
     write_raw_export_manifest(&bundle_dir, &db);
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--raw-export-bundle")
-            .arg(&bundle_dir)
-            .arg("--scaffold-manifest")
-            .arg("--manifest-id")
-            .arg("walk-capture-scaffold")
-            .arg("--timezone")
-            .arg("Europe/London")
-            .arg("--output")
-            .arg(&output_path)
-            .arg("--review-output")
-            .arg(&review_output_path)
-            .arg("--markdown-output")
-            .arg(&runbook_output_path)
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--raw-export-bundle")
+    .arg(&bundle_dir)
+    .arg("--scaffold-manifest")
+    .arg("--manifest-id")
+    .arg("walk-capture-scaffold")
+    .arg("--timezone")
+    .arg("Europe/London")
+    .arg("--output")
+    .arg(&output_path)
+    .arg("--review-output")
+    .arg(&review_output_path)
+    .arg("--markdown-output")
+    .arg(&runbook_output_path)
+    .output()
+    .unwrap();
 
     assert!(
         output.status.success(),
@@ -704,17 +707,18 @@ fn local_health_validation_scaffold_leaves_multi_session_cases_unbound() {
     }
     drop(store);
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--database")
-            .arg(&db)
-            .arg("--scaffold-manifest")
-            .arg("--manifest-id")
-            .arg("multi-session-capture-scaffold")
-            .arg("--timezone")
-            .arg("Europe/London")
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--database")
+    .arg(&db)
+    .arg("--scaffold-manifest")
+    .arg("--manifest-id")
+    .arg("multi-session-capture-scaffold")
+    .arg("--timezone")
+    .arg("Europe/London")
+    .output()
+    .unwrap();
 
     assert!(
         output.status.success(),
@@ -1277,14 +1281,15 @@ fn local_health_validation_suite_flags_raw_export_capture_case_without_packet_wi
     )
     .unwrap();
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--raw-export-bundle")
-            .arg(&bundle_dir)
-            .arg("--manifest")
-            .arg(&manifest_path)
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--raw-export-bundle")
+    .arg(&bundle_dir)
+    .arg("--manifest")
+    .arg(&manifest_path)
+    .output()
+    .unwrap();
 
     assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -1439,14 +1444,15 @@ fn local_health_validation_suite_flags_raw_export_capture_case_without_case_wind
     )
     .unwrap();
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--raw-export-bundle")
-            .arg(&bundle_dir)
-            .arg("--manifest")
-            .arg(&manifest_path)
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--raw-export-bundle")
+    .arg(&bundle_dir)
+    .arg("--manifest")
+    .arg(&manifest_path)
+    .output()
+    .unwrap();
 
     assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -1610,14 +1616,15 @@ fn local_health_validation_suite_reports_raw_export_case_capture_session_mismatc
     )
     .unwrap();
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--raw-export-bundle")
-            .arg(&bundle_dir)
-            .arg("--manifest")
-            .arg(&manifest_path)
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--raw-export-bundle")
+    .arg(&bundle_dir)
+    .arg("--manifest")
+    .arg(&manifest_path)
+    .output()
+    .unwrap();
 
     assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -1993,14 +2000,15 @@ fn local_health_validation_suite_flags_raw_export_case_with_unrelated_packet_fam
     )
     .unwrap();
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--raw-export-bundle")
-            .arg(&bundle_dir)
-            .arg("--manifest")
-            .arg(&manifest_path)
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--raw-export-bundle")
+    .arg(&bundle_dir)
+    .arg("--manifest")
+    .arg(&manifest_path)
+    .output()
+    .unwrap();
 
     assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -2087,14 +2095,15 @@ fn local_health_validation_suite_rejects_case_window_outside_raw_export_time_win
     write_raw_export_manifest(&bundle_dir, &db);
     write_steps_unavailable_manifest_for_day(&manifest_path, "2026-06-04");
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--raw-export-bundle")
-            .arg(&bundle_dir)
-            .arg("--manifest")
-            .arg(&manifest_path)
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--raw-export-bundle")
+    .arg(&bundle_dir)
+    .arg("--manifest")
+    .arg(&manifest_path)
+    .output()
+    .unwrap();
 
     assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -2139,14 +2148,15 @@ fn local_health_validation_suite_rejects_raw_export_bundle_with_malformed_sqlite
     .unwrap();
     write_steps_unavailable_manifest(&manifest_path);
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--raw-export-bundle")
-            .arg(&bundle_dir)
-            .arg("--manifest")
-            .arg(&manifest_path)
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--raw-export-bundle")
+    .arg(&bundle_dir)
+    .arg("--manifest")
+    .arg(&manifest_path)
+    .output()
+    .unwrap();
 
     assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -2191,14 +2201,15 @@ fn local_health_validation_suite_rejects_raw_export_bundle_with_unmarked_officia
     .unwrap();
     write_steps_unavailable_manifest(&manifest_path);
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--raw-export-bundle")
-            .arg(&bundle_dir)
-            .arg("--manifest")
-            .arg(&manifest_path)
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--raw-export-bundle")
+    .arg(&bundle_dir)
+    .arg("--manifest")
+    .arg(&manifest_path)
+    .output()
+    .unwrap();
 
     assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -2241,14 +2252,15 @@ fn local_health_validation_suite_rejects_raw_export_bundle_with_sqlite_sha_misma
     .unwrap();
     write_steps_unavailable_manifest(&manifest_path);
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--raw-export-bundle")
-            .arg(&bundle_dir)
-            .arg("--manifest")
-            .arg(&manifest_path)
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--raw-export-bundle")
+    .arg(&bundle_dir)
+    .arg("--manifest")
+    .arg(&manifest_path)
+    .output()
+    .unwrap();
 
     assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -2503,14 +2515,15 @@ fn local_health_validation_suite_runs_step_energy_and_recovery_sensor_cases() {
     )
     .unwrap();
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--database")
-            .arg(&db)
-            .arg("--manifest")
-            .arg(&manifest_path)
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--database")
+    .arg(&db)
+    .arg("--manifest")
+    .arg(&manifest_path)
+    .output()
+    .unwrap();
 
     assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -2894,7 +2907,10 @@ fn local_health_validation_suite_runs_step_energy_and_recovery_sensor_cases() {
     assert_eq!(step_record["official_label_value"], 97);
     assert_eq!(step_record["manual_label_value"], 100);
     assert_eq!(step_record["input_packet_count"], 0);
-    assert_eq!(step_record["algorithm_id"], "open_vitals.steps.device_counter.v0");
+    assert_eq!(
+        step_record["algorithm_id"],
+        "open_vitals.steps.device_counter.v0"
+    );
     assert_eq!(step["metric_records"][0]["metric_name"], "steps");
 
     let daily_step_rollup_record = metric_record(metric_records, "walk-step-daily-rollup", "steps");
@@ -3322,14 +3338,15 @@ fn local_health_validation_suite_reports_capture_session_evidence_readiness() {
     )
     .unwrap();
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--database")
-            .arg(&db)
-            .arg("--manifest")
-            .arg(&manifest_path)
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--database")
+    .arg(&db)
+    .arg("--manifest")
+    .arg(&manifest_path)
+    .output()
+    .unwrap();
 
     assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -3536,18 +3553,19 @@ fn local_health_validation_suite_imports_capture_sqlite_before_running_cases() {
     )
     .unwrap();
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--database")
-            .arg(&db)
-            .arg("--manifest")
-            .arg(&manifest_path)
-            .arg("--output")
-            .arg(&output_path)
-            .arg("--review-output")
-            .arg(&review_output_path)
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--database")
+    .arg(&db)
+    .arg("--manifest")
+    .arg(&manifest_path)
+    .arg("--output")
+    .arg(&output_path)
+    .arg("--review-output")
+    .arg(&review_output_path)
+    .output()
+    .unwrap();
 
     assert!(
         output.status.success(),
@@ -3773,14 +3791,15 @@ fn local_health_validation_suite_applies_manifest_case_defaults() {
     )
     .unwrap();
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--database")
-            .arg(&db)
-            .arg("--manifest")
-            .arg(&manifest_path)
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--database")
+    .arg(&db)
+    .arg("--manifest")
+    .arg(&manifest_path)
+    .output()
+    .unwrap();
 
     assert!(
         output.status.success(),
@@ -3901,14 +3920,15 @@ fn local_health_validation_suite_requires_capture_session_binding_for_labeled_ac
     )
     .unwrap();
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--database")
-            .arg(&db)
-            .arg("--manifest")
-            .arg(&manifest_path)
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--database")
+    .arg(&db)
+    .arg("--manifest")
+    .arg(&manifest_path)
+    .output()
+    .unwrap();
 
     assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -4058,14 +4078,15 @@ fn local_health_validation_suite_blocks_raw_motion_writes_for_partial_capture_se
     )
     .unwrap();
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--database")
-            .arg(&db)
-            .arg("--manifest")
-            .arg(&manifest_path)
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--database")
+    .arg(&db)
+    .arg("--manifest")
+    .arg(&manifest_path)
+    .output()
+    .unwrap();
 
     assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -4129,14 +4150,15 @@ fn local_health_validation_suite_rejects_metric_writes_for_label_only_validation
     )
     .unwrap();
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--database")
-            .arg(&db)
-            .arg("--manifest")
-            .arg(&manifest_path)
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--database")
+    .arg(&db)
+    .arg("--manifest")
+    .arg(&manifest_path)
+    .output()
+    .unwrap();
 
     assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -4331,14 +4353,15 @@ fn local_health_validation_suite_reports_step_discovery_without_labels() {
     )
     .unwrap();
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--database")
-            .arg(&db)
-            .arg("--manifest")
-            .arg(&manifest_path)
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--database")
+    .arg(&db)
+    .arg("--manifest")
+    .arg(&manifest_path)
+    .output()
+    .unwrap();
 
     assert!(
         output.status.success(),
@@ -4538,14 +4561,15 @@ fn local_health_validation_suite_keeps_hidden_step_counter_candidate_unavailable
     )
     .unwrap();
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--database")
-            .arg(&db)
-            .arg("--manifest")
-            .arg(&manifest_path)
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--database")
+    .arg(&db)
+    .arg("--manifest")
+    .arg(&manifest_path)
+    .output()
+    .unwrap();
 
     assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -4670,14 +4694,15 @@ fn local_health_validation_suite_reports_rhr_rollup_without_labels() {
     )
     .unwrap();
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--database")
-            .arg(&db)
-            .arg("--manifest")
-            .arg(&manifest_path)
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--database")
+    .arg(&db)
+    .arg("--manifest")
+    .arg(&manifest_path)
+    .output()
+    .unwrap();
 
     assert!(
         output.status.success(),
@@ -4815,14 +4840,15 @@ fn local_health_validation_suite_reports_energy_rollup_without_labels() {
     )
     .unwrap();
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--database")
-            .arg(&db)
-            .arg("--manifest")
-            .arg(&manifest_path)
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--database")
+    .arg(&db)
+    .arg("--manifest")
+    .arg(&manifest_path)
+    .output()
+    .unwrap();
 
     assert!(
         output.status.success(),
@@ -4900,16 +4926,17 @@ fn local_health_validation_example_manifest_covers_controlled_step_matrix() {
         .join("../..")
         .join("docs/local-health-validation-manifest.example.json");
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--database")
-            .arg(&db)
-            .arg("--manifest")
-            .arg(&manifest_path)
-            .arg("--review-output")
-            .arg(&review_output_path)
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--database")
+    .arg(&db)
+    .arg("--manifest")
+    .arg(&manifest_path)
+    .arg("--review-output")
+    .arg(&review_output_path)
+    .output()
+    .unwrap();
 
     assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -5233,16 +5260,17 @@ fn local_health_validation_suite_rejects_unmarked_official_labels() {
     )
     .unwrap();
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-local-health-validation-suite"))
-            .arg("--database")
-            .arg(&db)
-            .arg("--manifest")
-            .arg(&manifest_path)
-            .arg("--review-output")
-            .arg(&review_output_path)
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-local-health-validation-suite"
+    ))
+    .arg("--database")
+    .arg(&db)
+    .arg("--manifest")
+    .arg(&manifest_path)
+    .arg("--review-output")
+    .arg(&review_output_path)
+    .output()
+    .unwrap();
 
     assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -5357,7 +5385,9 @@ fn zip_open_vitals_database(zip_path: &Path, database_path: &Path, archive_path:
         .unix_permissions(0o644);
     let bytes = fs::read(database_path).unwrap();
     let sqlite_sha256 = sha256_hex(&bytes);
-    let prefix = archive_path.strip_suffix("data/open_vitals.sqlite").unwrap_or("");
+    let prefix = archive_path
+        .strip_suffix("data/open_vitals.sqlite")
+        .unwrap_or("");
     writer
         .start_file(format!("{prefix}manifest.json"), options)
         .unwrap();

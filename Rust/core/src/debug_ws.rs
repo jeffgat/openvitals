@@ -347,8 +347,9 @@ pub fn start_debug_command(
             command_issues.join(", ")
         )));
     }
-    let args_json = serde_json::to_string(&input.command.args)
-        .map_err(|error| OpenVitalsError::message(format!("cannot serialize command args: {error}")))?;
+    let args_json = serde_json::to_string(&input.command.args).map_err(|error| {
+        OpenVitalsError::message(format!("cannot serialize command args: {error}"))
+    })?;
     store.insert_debug_command(&DebugCommandRow {
         command_id: input.command.command_id.clone(),
         session_id: input.session_id.clone(),
@@ -457,8 +458,9 @@ pub fn append_debug_event(
             event_issues.join(", ")
         )));
     }
-    let data_json = serde_json::to_string(&event.data)
-        .map_err(|error| OpenVitalsError::message(format!("cannot serialize event data: {error}")))?;
+    let data_json = serde_json::to_string(&event.data).map_err(|error| {
+        OpenVitalsError::message(format!("cannot serialize event data: {error}"))
+    })?;
     store.insert_debug_event(&DebugEventRow {
         session_id: event.session_id.clone(),
         sequence: u64_to_i64("sequence", event.sequence)?,
@@ -798,8 +800,9 @@ fn is_allowed_level(level: &str) -> bool {
 }
 
 fn command_from_row(row: DebugCommandRow) -> OpenVitalsResult<DebugCommandEnvelope> {
-    let args = serde_json::from_str::<serde_json::Value>(&row.args_json)
-        .map_err(|error| OpenVitalsError::message(format!("cannot parse command args JSON: {error}")))?;
+    let args = serde_json::from_str::<serde_json::Value>(&row.args_json).map_err(|error| {
+        OpenVitalsError::message(format!("cannot parse command args JSON: {error}"))
+    })?;
     Ok(DebugCommandEnvelope {
         schema: row.schema,
         command_id: row.command_id,
@@ -810,8 +813,9 @@ fn command_from_row(row: DebugCommandRow) -> OpenVitalsResult<DebugCommandEnvelo
 }
 
 pub fn debug_event_envelope_from_row(row: DebugEventRow) -> OpenVitalsResult<DebugEventEnvelope> {
-    let data = serde_json::from_str::<serde_json::Value>(&row.data_json)
-        .map_err(|error| OpenVitalsError::message(format!("cannot parse event data JSON: {error}")))?;
+    let data = serde_json::from_str::<serde_json::Value>(&row.data_json).map_err(|error| {
+        OpenVitalsError::message(format!("cannot parse event data JSON: {error}"))
+    })?;
     Ok(DebugEventEnvelope {
         schema: row.schema,
         session_id: row.session_id,
@@ -838,7 +842,9 @@ fn object_value(value: serde_json::Value, name: &str) -> OpenVitalsResult<serde_
     if value.is_object() {
         Ok(value)
     } else {
-        Err(OpenVitalsError::message(format!("{name} must be a JSON object")))
+        Err(OpenVitalsError::message(format!(
+            "{name} must be a JSON object"
+        )))
     }
 }
 

@@ -14,12 +14,14 @@ fn main() {
 
 fn run() -> open_vitals_core::OpenVitalsResult<()> {
     let args = args();
-    let source = path_value(&args, "--capture-sqlite")?
-        .ok_or_else(|| open_vitals_core::OpenVitalsError::message("missing required --capture-sqlite path"))?;
+    let source = path_value(&args, "--capture-sqlite")?.ok_or_else(|| {
+        open_vitals_core::OpenVitalsError::message("missing required --capture-sqlite path")
+    })?;
     let db = default_path(&args, "--db", "open_vitals.sqlite")?;
     let output = path_value(&args, "--output")?;
-    let session_id = value(&args, "--session-id")?
-        .ok_or_else(|| open_vitals_core::OpenVitalsError::message("missing required --session-id value"))?;
+    let session_id = value(&args, "--session-id")?.ok_or_else(|| {
+        open_vitals_core::OpenVitalsError::message("missing required --session-id value")
+    })?;
     let device_model =
         value(&args, "--device-model")?.unwrap_or_else(|| "WHOOP 5.0 OpenVitals".to_string());
     let sensitivity =

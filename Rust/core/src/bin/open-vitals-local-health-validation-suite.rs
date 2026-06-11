@@ -150,7 +150,9 @@ impl Drop for ResolvedValidationDatabase {
     }
 }
 
-fn raw_export_bundle_path_value(args: &[String]) -> open_vitals_core::OpenVitalsResult<Option<PathBuf>> {
+fn raw_export_bundle_path_value(
+    args: &[String],
+) -> open_vitals_core::OpenVitalsResult<Option<PathBuf>> {
     let raw_export_bundle = path_value(args, "--raw-export-bundle")?;
     let bundle = path_value(args, "--bundle")?;
     if raw_export_bundle.is_some() && bundle.is_some() {
@@ -739,7 +741,10 @@ fn capture_session_sql_list(capture_session_ids: &[String]) -> String {
         .join(",")
 }
 
-fn sqlite_table_exists(connection: &Connection, table_name: &str) -> open_vitals_core::OpenVitalsResult<bool> {
+fn sqlite_table_exists(
+    connection: &Connection,
+    table_name: &str,
+) -> open_vitals_core::OpenVitalsResult<bool> {
     connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
@@ -796,7 +801,8 @@ fn audit_raw_export_zip_manifest(
     let prefix = raw_export_zip_entry_prefix(sqlite_archive_entry);
     let manifest_archive_entry = format!("{prefix}manifest.json");
     let manifest_raw = (|| -> open_vitals_core::OpenVitalsResult<String> {
-        let file = File::open(bundle_path).map_err(|source| OpenVitalsError::io(bundle_path, source))?;
+        let file =
+            File::open(bundle_path).map_err(|source| OpenVitalsError::io(bundle_path, source))?;
         let mut archive = ZipArchive::new(file).map_err(|error| {
             OpenVitalsError::message(format!(
                 "raw export bundle {} is not a readable zip: {error}",
@@ -1002,7 +1008,8 @@ struct ExtractedRawExportSqlite {
 fn extract_raw_export_sqlite_from_zip(
     bundle_path: &Path,
 ) -> open_vitals_core::OpenVitalsResult<ExtractedRawExportSqlite> {
-    let file = File::open(bundle_path).map_err(|source| OpenVitalsError::io(bundle_path, source))?;
+    let file =
+        File::open(bundle_path).map_err(|source| OpenVitalsError::io(bundle_path, source))?;
     let mut archive = ZipArchive::new(file).map_err(|error| {
         OpenVitalsError::message(format!(
             "raw export bundle {} is not a readable zip: {error}",
@@ -1022,9 +1029,10 @@ fn extract_raw_export_sqlite_from_zip(
         ))
     })?;
     let extracted_path = unique_validation_temp_path("raw-export-bundle");
-    let mut output =
-        File::create(&extracted_path).map_err(|source| OpenVitalsError::io(&extracted_path, source))?;
-    io::copy(&mut entry, &mut output).map_err(|source| OpenVitalsError::io(&extracted_path, source))?;
+    let mut output = File::create(&extracted_path)
+        .map_err(|source| OpenVitalsError::io(&extracted_path, source))?;
+    io::copy(&mut entry, &mut output)
+        .map_err(|source| OpenVitalsError::io(&extracted_path, source))?;
     Ok(ExtractedRawExportSqlite {
         path: extracted_path,
         archive_entry: entry_name,
@@ -1038,7 +1046,9 @@ fn raw_export_sqlite_zip_entry_name<R: io::Read + io::Seek>(
         .file_names()
         .filter_map(|name| {
             let normalized = name.replace('\\', "/");
-            if normalized == "data/open_vitals.sqlite" || normalized.ends_with("/data/open_vitals.sqlite") {
+            if normalized == "data/open_vitals.sqlite"
+                || normalized.ends_with("/data/open_vitals.sqlite")
+            {
                 Some(name.to_string())
             } else {
                 None
@@ -1530,13 +1540,17 @@ struct LocalHealthValidationNextAction {
 
 fn read_manifest_value(path: &Path) -> open_vitals_core::OpenVitalsResult<Value> {
     let raw = fs::read_to_string(path).map_err(|source| OpenVitalsError::io(path, source))?;
-    serde_json::from_str(&raw)
-        .map_err(|source| OpenVitalsError::message(format!("invalid validation manifest: {source}")))
+    serde_json::from_str(&raw).map_err(|source| {
+        OpenVitalsError::message(format!("invalid validation manifest: {source}"))
+    })
 }
 
-fn parse_manifest(value: Value) -> open_vitals_core::OpenVitalsResult<LocalHealthValidationManifest> {
-    serde_json::from_value(value)
-        .map_err(|source| OpenVitalsError::message(format!("invalid validation manifest: {source}")))
+fn parse_manifest(
+    value: Value,
+) -> open_vitals_core::OpenVitalsResult<LocalHealthValidationManifest> {
+    serde_json::from_value(value).map_err(|source| {
+        OpenVitalsError::message(format!("invalid validation manifest: {source}"))
+    })
 }
 
 fn run_manifest(
@@ -1666,7 +1680,10 @@ fn write_markdown_report(
     write_markdown_text(&markdown_report(report), path)
 }
 
-fn write_json_file<T: Serialize>(report: &T, path: &Path) -> open_vitals_core::OpenVitalsResult<()> {
+fn write_json_file<T: Serialize>(
+    report: &T,
+    path: &Path,
+) -> open_vitals_core::OpenVitalsResult<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|source| OpenVitalsError::io(parent, source))?;
     }
@@ -5070,7 +5087,9 @@ fn copy_capture_session_scope(
         .execute_batch(&format!(
             "ATTACH DATABASE {source_database_literal} AS source_db;"
         ))
-        .map_err(|error| OpenVitalsError::message(format!("cannot attach source database: {error}")))?;
+        .map_err(|error| {
+            OpenVitalsError::message(format!("cannot attach source database: {error}"))
+        })?;
 
     let copy_result = (|| -> open_vitals_core::OpenVitalsResult<()> {
         connection
@@ -5118,7 +5137,9 @@ fn copy_capture_session_scope(
                     "#
                 ))
                 .map_err(|error| {
-                    OpenVitalsError::message(format!("cannot copy scoped step-counter samples: {error}"))
+                    OpenVitalsError::message(format!(
+                        "cannot copy scoped step-counter samples: {error}"
+                    ))
                 })?;
         }
         Ok(())
@@ -5126,11 +5147,16 @@ fn copy_capture_session_scope(
 
     let detach_result = connection
         .execute_batch("DETACH DATABASE source_db;")
-        .map_err(|error| OpenVitalsError::message(format!("cannot detach source database: {error}")));
+        .map_err(|error| {
+            OpenVitalsError::message(format!("cannot detach source database: {error}"))
+        });
     copy_result.and(detach_result)
 }
 
-fn source_table_exists(connection: &Connection, table_name: &str) -> open_vitals_core::OpenVitalsResult<bool> {
+fn source_table_exists(
+    connection: &Connection,
+    table_name: &str,
+) -> open_vitals_core::OpenVitalsResult<bool> {
     connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM source_db.sqlite_master WHERE type='table' AND name=?1)",
@@ -5155,7 +5181,9 @@ fn persist_scoped_formatted_metric_writes(
         .execute_batch(&format!(
             "ATTACH DATABASE {scoped_database_literal} AS scoped_db;"
         ))
-        .map_err(|error| OpenVitalsError::message(format!("cannot attach scoped database: {error}")))?;
+        .map_err(|error| {
+            OpenVitalsError::message(format!("cannot attach scoped database: {error}"))
+        })?;
 
     let copy_result = (|| -> open_vitals_core::OpenVitalsResult<usize> {
         let mut changed = 0usize;
@@ -5179,7 +5207,9 @@ fn persist_scoped_formatted_metric_writes(
 
     let detach_result = connection
         .execute_batch("DETACH DATABASE scoped_db;")
-        .map_err(|error| OpenVitalsError::message(format!("cannot detach scoped database: {error}")));
+        .map_err(|error| {
+            OpenVitalsError::message(format!("cannot detach scoped database: {error}"))
+        });
     let changed = copy_result?;
     detach_result?;
     Ok(changed)

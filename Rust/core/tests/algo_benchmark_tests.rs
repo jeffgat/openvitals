@@ -202,7 +202,10 @@ fn algo_benchmark_reference_comparison_reports_runtime_and_coverage() {
 
     let report: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(output_path).unwrap()).unwrap();
-    assert_eq!(report["schema"], "open_vitals.algorithm-comparison-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.algorithm-comparison-report.v1"
+    );
     assert_eq!(report["pass"], true);
     assert!(report["runtime_ms"].as_f64().unwrap() >= 0.0);
     assert_eq!(report["data_coverage"]["input_ids_count"], 1);
@@ -278,7 +281,10 @@ fn algo_benchmark_reference_comparison_supports_sleep_v1_input() {
 
     let report: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(output_path).unwrap()).unwrap();
-    assert_eq!(report["schema"], "open_vitals.algorithm-comparison-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.algorithm-comparison-report.v1"
+    );
     assert_eq!(report["pass"], true);
     assert_eq!(report["open_vitals_algorithm_id"], "open_vitals.sleep.v1");
     assert_eq!(
@@ -322,7 +328,10 @@ fn algo_benchmark_reference_comparison_supports_stress() {
 
     let report: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(output_path).unwrap()).unwrap();
-    assert_eq!(report["schema"], "open_vitals.algorithm-comparison-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.algorithm-comparison-report.v1"
+    );
     assert_eq!(report["family"], "stress");
     assert_eq!(report["pass"], true);
     assert_eq!(
@@ -395,7 +404,10 @@ fn algo_benchmark_reference_comparison_accepts_external_sleep_report() {
 
     let report: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(output_path).unwrap()).unwrap();
-    assert_eq!(report["schema"], "open_vitals.algorithm-comparison-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.algorithm-comparison-report.v1"
+    );
     assert_eq!(report["family"], "sleep");
     assert_eq!(report["pass"], true);
     assert_eq!(report["reference_contract_valid"], true);
@@ -458,7 +470,10 @@ fn algo_benchmark_external_reference_report_requires_unit_contract() {
 
     let report: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(output_path).unwrap()).unwrap();
-    assert_eq!(report["schema"], "open_vitals.algorithm-comparison-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.algorithm-comparison-report.v1"
+    );
     assert_eq!(report["pass"], false);
     assert_eq!(report["reference_contract_valid"], false);
     assert_eq!(report["open_vitals_output_ready"], true);
@@ -521,7 +536,10 @@ fn algo_benchmark_reference_comparison_reports_next_actions_when_outputs_missing
 
     let report: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(output_path).unwrap()).unwrap();
-    assert_eq!(report["schema"], "open_vitals.algorithm-comparison-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.algorithm-comparison-report.v1"
+    );
     assert_eq!(report["pass"], false);
     assert!(
         report["next_actions"]

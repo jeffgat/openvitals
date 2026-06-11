@@ -12,7 +12,9 @@ use open_vitals_core::activity_candidates::{
 use open_vitals_core::activity_sessions::{
     ACTIVITY_SESSION_CORRECTION_SCOPE, activity_session_correction_plans,
 };
-use open_vitals_core::health_sync::{ActivitySyncCandidate, ActivitySyncMetric, HealthSyncSessionKind};
+use open_vitals_core::health_sync::{
+    ActivitySyncCandidate, ActivitySyncMetric, HealthSyncSessionKind,
+};
 use serde_json::json;
 
 fn provenance(source: &str, evidence_id: &str) -> ActivityEvidenceProvenance {

@@ -61,8 +61,9 @@ fn run() -> open_vitals_core::OpenVitalsResult<()> {
                     "cannot serialize emulator evidence: {source}"
                 ))
             })?;
-            fs::write(&evidence_output, json.as_bytes())
-                .map_err(|source| open_vitals_core::OpenVitalsError::io(&evidence_output, source))?;
+            fs::write(&evidence_output, json.as_bytes()).map_err(|source| {
+                open_vitals_core::OpenVitalsError::io(&evidence_output, source)
+            })?;
         }
         evidence.extend(emulator_report.evidence);
     }

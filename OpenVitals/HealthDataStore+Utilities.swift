@@ -124,7 +124,7 @@ extension HealthDataStore {
         "disturbance_motion_threshold_0_to_1": 0.20,
         "target_midpoint_minutes_since_midnight": 180.0,
         "history_import_in_progress": false,
-        "algorithm_id": "open_vitals.sleep.v1",
+        "algorithm_id": OpenVitalsPacketScoreAlgorithmID.sleep,
       ]) { _, new in new }
     )
   }

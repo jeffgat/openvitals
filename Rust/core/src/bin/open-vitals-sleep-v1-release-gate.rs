@@ -80,7 +80,9 @@ fn optional_json<T: serde::de::DeserializeOwned>(
     path_value(args, name)?.map_or(Ok(None), |path| read_json(&path).map(Some))
 }
 
-fn benchmark_reports(args: &[String]) -> open_vitals_core::OpenVitalsResult<Vec<AlgorithmComparisonReport>> {
+fn benchmark_reports(
+    args: &[String],
+) -> open_vitals_core::OpenVitalsResult<Vec<AlgorithmComparisonReport>> {
     let Some(raw_paths) = value(args, "--benchmark-comparison-reports")? else {
         return Ok(Vec::new());
     };
@@ -92,11 +94,14 @@ fn benchmark_reports(args: &[String]) -> open_vitals_core::OpenVitalsResult<Vec<
         .collect()
 }
 
-fn optional_usize(args: &[String], name: &str) -> open_vitals_core::OpenVitalsResult<Option<usize>> {
+fn optional_usize(
+    args: &[String],
+    name: &str,
+) -> open_vitals_core::OpenVitalsResult<Option<usize>> {
     value(args, name)?.map_or(Ok(None), |raw| {
-        raw.parse::<usize>()
-            .map(Some)
-            .map_err(|error| OpenVitalsError::message(format!("invalid {name} value {raw}: {error}")))
+        raw.parse::<usize>().map(Some).map_err(|error| {
+            OpenVitalsError::message(format!("invalid {name} value {raw}: {error}"))
+        })
     })
 }
 

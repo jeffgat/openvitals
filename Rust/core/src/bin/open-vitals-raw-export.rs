@@ -20,7 +20,8 @@ fn run() -> open_vitals_core::OpenVitalsResult<()> {
     let report_output = path_value(&args, "--output")?;
     let start = value(&args, "--start")?.unwrap_or_else(|| "0000-01-01T00:00:00Z".to_string());
     let end = value(&args, "--end")?.unwrap_or_else(|| "9999-12-31T23:59:59Z".to_string());
-    let app_version = value(&args, "--app-version")?.unwrap_or_else(|| "open-vitals-app/dev".to_string());
+    let app_version =
+        value(&args, "--app-version")?.unwrap_or_else(|| "open-vitals-app/dev".to_string());
     let core_version = value(&args, "--core-version")?.unwrap_or_else(|| {
         format!(
             "open-vitals-core/{}",

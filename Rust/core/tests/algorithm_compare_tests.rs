@@ -1,9 +1,11 @@
 use open_vitals_core::{
     algorithm_compare::{
         ALGORITHM_COMPARISON_SCHEMA, compare_hrv_open_vitals_to_reference,
-        compare_sleep_open_vitals_to_external_reference_report, compare_sleep_open_vitals_to_reference,
-        compare_sleep_v1_open_vitals_to_external_reference_report, compare_sleep_v1_open_vitals_to_reference,
-        compare_strain_open_vitals_to_reference, compare_stress_open_vitals_to_reference,
+        compare_sleep_open_vitals_to_external_reference_report,
+        compare_sleep_open_vitals_to_reference,
+        compare_sleep_v1_open_vitals_to_external_reference_report,
+        compare_sleep_v1_open_vitals_to_reference, compare_strain_open_vitals_to_reference,
+        compare_stress_open_vitals_to_reference,
     },
     metrics::{
         HrvInput, SleepInput, SleepModelStatusInput, SleepV1Input, StrainInput, StressInput,

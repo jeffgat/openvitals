@@ -12,25 +12,29 @@ fn metric_feature_report_cli_builds_motion_report_from_owned_capture() {
     let store = OpenVitalsStore::open(&db).unwrap();
     import_motion_frame(&store);
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
-        .arg("--method")
-        .arg("motion")
-        .arg("--database")
-        .arg(&db)
-        .arg("--start")
-        .arg("2026-05-30T00:00:00Z")
-        .arg("--end")
-        .arg("2026-05-31T00:00:00Z")
-        .arg("--min-owned-captures")
-        .arg("1")
-        .arg("--require-trusted-evidence")
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("motion")
+            .arg("--database")
+            .arg(&db)
+            .arg("--start")
+            .arg("2026-05-30T00:00:00Z")
+            .arg("--end")
+            .arg("2026-05-31T00:00:00Z")
+            .arg("--min-owned-captures")
+            .arg("1")
+            .arg("--require-trusted-evidence")
+            .output()
+            .unwrap();
 
     assert_success(&output);
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["schema"], "open_vitals.motion-feature-report.v1");
-    assert_eq!(report["generated_by"], "open-vitals-motion-feature-extractor");
+    assert_eq!(
+        report["generated_by"],
+        "open-vitals-motion-feature-extractor"
+    );
     assert_eq!(report["pass"], true);
     assert_eq!(report["feature_count"], 1);
     assert_eq!(report["trusted_feature_count"], 1);
@@ -43,20 +47,21 @@ fn metric_feature_report_cli_emits_heart_rate_blockers_without_trusted_evidence(
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
-        .arg("--method")
-        .arg("heart-rate")
-        .arg("--database")
-        .arg(&db)
-        .arg("--start")
-        .arg("2026-05-30T00:00:00Z")
-        .arg("--end")
-        .arg("2026-05-31T00:00:00Z")
-        .arg("--min-owned-captures")
-        .arg("1")
-        .arg("--require-trusted-evidence")
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("heart-rate")
+            .arg("--database")
+            .arg(&db)
+            .arg("--start")
+            .arg("2026-05-30T00:00:00Z")
+            .arg("--end")
+            .arg("2026-05-31T00:00:00Z")
+            .arg("--min-owned-captures")
+            .arg("1")
+            .arg("--require-trusted-evidence")
+            .output()
+            .unwrap();
 
     assert_failure(&output);
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -85,21 +90,25 @@ fn metric_feature_report_cli_runs_step_packet_discovery_alias() {
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
-        .arg("--method")
-        .arg("step-discovery")
-        .arg("--database")
-        .arg(&db)
-        .arg("--start-time-unix-ms")
-        .arg("1780355200000")
-        .arg("--end-time-unix-ms")
-        .arg("1780441600000")
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("step-discovery")
+            .arg("--database")
+            .arg(&db)
+            .arg("--start-time-unix-ms")
+            .arg("1780355200000")
+            .arg("--end-time-unix-ms")
+            .arg("1780441600000")
+            .output()
+            .unwrap();
 
     assert_failure(&output);
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["schema"], "open_vitals.step-packet-discovery-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.step-packet-discovery-report.v1"
+    );
     assert_eq!(report["pass"], false);
     assert_eq!(report["decoded_frame_count"], 0);
     assert!(
@@ -116,29 +125,33 @@ fn metric_feature_report_cli_runs_step_capture_validation_alias() {
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
-        .arg("--method")
-        .arg("step-validation")
-        .arg("--database")
-        .arg(&db)
-        .arg("--start-time-unix-ms")
-        .arg("1780355200000")
-        .arg("--end-time-unix-ms")
-        .arg("1780441600000")
-        .arg("--capture-kind")
-        .arg("100_counted_steps")
-        .arg("--manual-step-delta")
-        .arg("100")
-        .arg("--official-whoop-step-delta")
-        .arg("97")
-        .arg("--step-delta-tolerance")
-        .arg("5")
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("step-validation")
+            .arg("--database")
+            .arg(&db)
+            .arg("--start-time-unix-ms")
+            .arg("1780355200000")
+            .arg("--end-time-unix-ms")
+            .arg("1780441600000")
+            .arg("--capture-kind")
+            .arg("100_counted_steps")
+            .arg("--manual-step-delta")
+            .arg("100")
+            .arg("--official-whoop-step-delta")
+            .arg("97")
+            .arg("--step-delta-tolerance")
+            .arg("5")
+            .output()
+            .unwrap();
 
     assert_failure(&output);
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["schema"], "open_vitals.step-capture-validation-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.step-capture-validation-report.v1"
+    );
     assert_eq!(report["capture_kind"], "100_counted_steps");
     assert_eq!(report["manual_step_delta"], 100);
     assert_eq!(report["official_whoop_step_delta"], 97);
@@ -157,26 +170,33 @@ fn metric_feature_report_cli_runs_raw_motion_step_estimate_alias() {
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
-        .arg("--method")
-        .arg("raw-motion-steps")
-        .arg("--database")
-        .arg(&db)
-        .arg("--start")
-        .arg("2026-06-02T00:00:00Z")
-        .arg("--end")
-        .arg("2026-06-03T00:00:00Z")
-        .arg("--manual-step-delta")
-        .arg("100")
-        .arg("--step-delta-tolerance")
-        .arg("10")
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("raw-motion-steps")
+            .arg("--database")
+            .arg(&db)
+            .arg("--start")
+            .arg("2026-06-02T00:00:00Z")
+            .arg("--end")
+            .arg("2026-06-03T00:00:00Z")
+            .arg("--manual-step-delta")
+            .arg("100")
+            .arg("--step-delta-tolerance")
+            .arg("10")
+            .output()
+            .unwrap();
 
     assert_failure(&output);
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["schema"], "open_vitals.raw-motion-step-estimate-report.v1");
-    assert_eq!(report["algorithm_id"], "open_vitals.steps.raw_motion_estimate.v0");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.raw-motion-step-estimate-report.v1"
+    );
+    assert_eq!(
+        report["algorithm_id"],
+        "open_vitals.steps.raw_motion_estimate.v0"
+    );
     assert_eq!(report["source_kind_if_promoted"], "local_estimate");
     assert_eq!(report["manual_step_delta"], 100);
     assert!(
@@ -193,21 +213,25 @@ fn metric_feature_report_cli_runs_step_counter_ingest_alias() {
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
-        .arg("--method")
-        .arg("step-counter-ingest")
-        .arg("--database")
-        .arg(&db)
-        .arg("--start")
-        .arg("2026-06-02T00:00:00Z")
-        .arg("--end")
-        .arg("2026-06-03T00:00:00Z")
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("step-counter-ingest")
+            .arg("--database")
+            .arg(&db)
+            .arg("--start")
+            .arg("2026-06-02T00:00:00Z")
+            .arg("--end")
+            .arg("2026-06-03T00:00:00Z")
+            .output()
+            .unwrap();
 
     assert_failure(&output);
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["schema"], "open_vitals.step-counter-ingest-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.step-counter-ingest-report.v1"
+    );
     assert_eq!(report["pass"], false);
     assert!(
         report["issues"]
@@ -223,21 +247,22 @@ fn metric_feature_report_cli_runs_step_counter_daily_rollup_alias() {
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
-        .arg("--method")
-        .arg("step-rollup")
-        .arg("--database")
-        .arg(&db)
-        .arg("--date-key")
-        .arg("2026-06-02")
-        .arg("--timezone")
-        .arg("Europe/London")
-        .arg("--start-time-unix-ms")
-        .arg("1780355200000")
-        .arg("--end-time-unix-ms")
-        .arg("1780441600000")
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("step-rollup")
+            .arg("--database")
+            .arg(&db)
+            .arg("--date-key")
+            .arg("2026-06-02")
+            .arg("--timezone")
+            .arg("Europe/London")
+            .arg("--start-time-unix-ms")
+            .arg("1780355200000")
+            .arg("--end-time-unix-ms")
+            .arg("1780441600000")
+            .output()
+            .unwrap();
 
     assert_failure(&output);
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -261,21 +286,22 @@ fn metric_feature_report_cli_runs_step_counter_hourly_rollup_alias() {
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
-        .arg("--method")
-        .arg("hourly-step-rollup")
-        .arg("--database")
-        .arg(&db)
-        .arg("--date-key")
-        .arg("2026-06-02")
-        .arg("--timezone")
-        .arg("Europe/London")
-        .arg("--start-time-unix-ms")
-        .arg("1780387200000")
-        .arg("--end-time-unix-ms")
-        .arg("1780390800000")
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("hourly-step-rollup")
+            .arg("--database")
+            .arg(&db)
+            .arg("--date-key")
+            .arg("2026-06-02")
+            .arg("--timezone")
+            .arg("Europe/London")
+            .arg("--start-time-unix-ms")
+            .arg("1780387200000")
+            .arg("--end-time-unix-ms")
+            .arg("1780390800000")
+            .output()
+            .unwrap();
 
     assert_failure(&output);
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -299,24 +325,25 @@ fn metric_feature_report_cli_runs_activity_unavailable_status_alias() {
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
-        .arg("--method")
-        .arg("steps-unavailable-status")
-        .arg("--database")
-        .arg(&db)
-        .arg("--date-key")
-        .arg("2026-06-02")
-        .arg("--timezone")
-        .arg("Europe/London")
-        .arg("--start-time-unix-ms")
-        .arg("1780355200000")
-        .arg("--end-time-unix-ms")
-        .arg("1780441600000")
-        .arg("--min-step-samples")
-        .arg("2")
-        .arg("--write-metric")
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("steps-unavailable-status")
+            .arg("--database")
+            .arg(&db)
+            .arg("--date-key")
+            .arg("2026-06-02")
+            .arg("--timezone")
+            .arg("Europe/London")
+            .arg("--start-time-unix-ms")
+            .arg("1780355200000")
+            .arg("--end-time-unix-ms")
+            .arg("1780441600000")
+            .arg("--min-step-samples")
+            .arg("2")
+            .arg("--write-metric")
+            .output()
+            .unwrap();
 
     assert!(output.status.success(), "{output:?}");
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -347,23 +374,24 @@ fn metric_feature_report_cli_runs_resting_heart_rate_daily_rollup_alias() {
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
-        .arg("--method")
-        .arg("rhr-rollup")
-        .arg("--database")
-        .arg(&db)
-        .arg("--date-key")
-        .arg("2026-06-02")
-        .arg("--timezone")
-        .arg("Europe/London")
-        .arg("--start")
-        .arg("2026-06-02T00:00:00Z")
-        .arg("--end")
-        .arg("2026-06-03T00:00:00Z")
-        .arg("--min-samples")
-        .arg("2")
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("rhr-rollup")
+            .arg("--database")
+            .arg(&db)
+            .arg("--date-key")
+            .arg("2026-06-02")
+            .arg("--timezone")
+            .arg("Europe/London")
+            .arg("--start")
+            .arg("2026-06-02T00:00:00Z")
+            .arg("--end")
+            .arg("2026-06-03T00:00:00Z")
+            .arg("--min-samples")
+            .arg("2")
+            .output()
+            .unwrap();
 
     assert_failure(&output);
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -387,27 +415,28 @@ fn metric_feature_report_cli_runs_resting_heart_rate_capture_validation_alias() 
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
-        .arg("--method")
-        .arg("rhr-validation")
-        .arg("--database")
-        .arg(&db)
-        .arg("--date-key")
-        .arg("2026-06-02")
-        .arg("--timezone")
-        .arg("Europe/London")
-        .arg("--start")
-        .arg("2026-06-02T00:00:00Z")
-        .arg("--end")
-        .arg("2026-06-03T00:00:00Z")
-        .arg("--min-samples")
-        .arg("2")
-        .arg("--official-whoop-resting-hr-bpm")
-        .arg("56")
-        .arg("--rhr-tolerance-bpm")
-        .arg("3")
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("rhr-validation")
+            .arg("--database")
+            .arg(&db)
+            .arg("--date-key")
+            .arg("2026-06-02")
+            .arg("--timezone")
+            .arg("Europe/London")
+            .arg("--start")
+            .arg("2026-06-02T00:00:00Z")
+            .arg("--end")
+            .arg("2026-06-03T00:00:00Z")
+            .arg("--min-samples")
+            .arg("2")
+            .arg("--official-whoop-resting-hr-bpm")
+            .arg("56")
+            .arg("--rhr-tolerance-bpm")
+            .arg("3")
+            .output()
+            .unwrap();
 
     assert_failure(&output);
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -435,33 +464,37 @@ fn metric_feature_report_cli_runs_energy_daily_rollup_alias() {
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
-        .arg("--method")
-        .arg("energy-rollup")
-        .arg("--database")
-        .arg(&db)
-        .arg("--date-key")
-        .arg("2026-06-02")
-        .arg("--timezone")
-        .arg("Europe/London")
-        .arg("--start")
-        .arg("2026-06-02T00:00:00Z")
-        .arg("--end")
-        .arg("2026-06-03T00:00:00Z")
-        .arg("--profile-weight-kg")
-        .arg("80")
-        .arg("--resting-hr-bpm")
-        .arg("60")
-        .arg("--max-hr-bpm")
-        .arg("180")
-        .arg("--min-heart-rate-samples")
-        .arg("2")
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("energy-rollup")
+            .arg("--database")
+            .arg(&db)
+            .arg("--date-key")
+            .arg("2026-06-02")
+            .arg("--timezone")
+            .arg("Europe/London")
+            .arg("--start")
+            .arg("2026-06-02T00:00:00Z")
+            .arg("--end")
+            .arg("2026-06-03T00:00:00Z")
+            .arg("--profile-weight-kg")
+            .arg("80")
+            .arg("--resting-hr-bpm")
+            .arg("60")
+            .arg("--max-hr-bpm")
+            .arg("180")
+            .arg("--min-heart-rate-samples")
+            .arg("2")
+            .output()
+            .unwrap();
 
     assert_failure(&output);
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["schema"], "open_vitals.energy-daily-rollup-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.energy-daily-rollup-report.v1"
+    );
     assert_eq!(report["pass"], false);
     assert_eq!(report["daily_metric_written"], false);
     assert!(
@@ -478,30 +511,31 @@ fn metric_feature_report_cli_runs_energy_unavailable_status_alias() {
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
-        .arg("--method")
-        .arg("calories-unavailable-status")
-        .arg("--database")
-        .arg(&db)
-        .arg("--date-key")
-        .arg("2026-06-02")
-        .arg("--timezone")
-        .arg("Europe/London")
-        .arg("--start")
-        .arg("2026-06-02T00:00:00Z")
-        .arg("--end")
-        .arg("2026-06-03T00:00:00Z")
-        .arg("--profile-weight-kg")
-        .arg("80")
-        .arg("--resting-hr-bpm")
-        .arg("60")
-        .arg("--max-hr-bpm")
-        .arg("180")
-        .arg("--min-heart-rate-samples")
-        .arg("2")
-        .arg("--write-metric")
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("calories-unavailable-status")
+            .arg("--database")
+            .arg(&db)
+            .arg("--date-key")
+            .arg("2026-06-02")
+            .arg("--timezone")
+            .arg("Europe/London")
+            .arg("--start")
+            .arg("2026-06-02T00:00:00Z")
+            .arg("--end")
+            .arg("2026-06-03T00:00:00Z")
+            .arg("--profile-weight-kg")
+            .arg("80")
+            .arg("--resting-hr-bpm")
+            .arg("60")
+            .arg("--max-hr-bpm")
+            .arg("180")
+            .arg("--min-heart-rate-samples")
+            .arg("2")
+            .arg("--write-metric")
+            .output()
+            .unwrap();
 
     assert!(output.status.success(), "{output:?}");
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -538,33 +572,37 @@ fn metric_feature_report_cli_runs_energy_hourly_rollup_alias() {
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
-        .arg("--method")
-        .arg("hourly-energy-rollup")
-        .arg("--database")
-        .arg(&db)
-        .arg("--date-key")
-        .arg("2026-06-02")
-        .arg("--timezone")
-        .arg("Europe/London")
-        .arg("--start")
-        .arg("2026-06-02T12:00:00Z")
-        .arg("--end")
-        .arg("2026-06-02T13:00:00Z")
-        .arg("--profile-weight-kg")
-        .arg("80")
-        .arg("--resting-hr-bpm")
-        .arg("60")
-        .arg("--max-hr-bpm")
-        .arg("180")
-        .arg("--min-heart-rate-samples")
-        .arg("2")
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("hourly-energy-rollup")
+            .arg("--database")
+            .arg(&db)
+            .arg("--date-key")
+            .arg("2026-06-02")
+            .arg("--timezone")
+            .arg("Europe/London")
+            .arg("--start")
+            .arg("2026-06-02T12:00:00Z")
+            .arg("--end")
+            .arg("2026-06-02T13:00:00Z")
+            .arg("--profile-weight-kg")
+            .arg("80")
+            .arg("--resting-hr-bpm")
+            .arg("60")
+            .arg("--max-hr-bpm")
+            .arg("180")
+            .arg("--min-heart-rate-samples")
+            .arg("2")
+            .output()
+            .unwrap();
 
     assert_failure(&output);
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["schema"], "open_vitals.energy-hourly-rollup-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.energy-hourly-rollup-report.v1"
+    );
     assert_eq!(report["pass"], false);
     assert_eq!(report["hourly_metric_written"], false);
     assert!(
@@ -581,25 +619,26 @@ fn metric_feature_report_cli_runs_energy_capture_validation_alias() {
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
-        .arg("--method")
-        .arg("energy-validation")
-        .arg("--database")
-        .arg(&db)
-        .arg("--date-key")
-        .arg("2026-06-02")
-        .arg("--timezone")
-        .arg("Europe/London")
-        .arg("--start")
-        .arg("2026-06-02T00:00:00Z")
-        .arg("--end")
-        .arg("2026-06-03T00:00:00Z")
-        .arg("--official-whoop-total-kcal")
-        .arg("2100")
-        .arg("--energy-tolerance-kcal")
-        .arg("250")
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("energy-validation")
+            .arg("--database")
+            .arg(&db)
+            .arg("--date-key")
+            .arg("2026-06-02")
+            .arg("--timezone")
+            .arg("Europe/London")
+            .arg("--start")
+            .arg("2026-06-02T00:00:00Z")
+            .arg("--end")
+            .arg("2026-06-03T00:00:00Z")
+            .arg("--official-whoop-total-kcal")
+            .arg("2100")
+            .arg("--energy-tolerance-kcal")
+            .arg("250")
+            .output()
+            .unwrap();
 
     assert_failure(&output);
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -667,32 +706,36 @@ fn metric_feature_report_cli_runs_hrv_capture_validation_alias() {
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
-        .arg("--method")
-        .arg("hrv-validation")
-        .arg("--database")
-        .arg(&db)
-        .arg("--start")
-        .arg("2026-06-02T00:00:00Z")
-        .arg("--end")
-        .arg("2026-06-03T00:00:00Z")
-        .arg("--capture-kind")
-        .arg("overnight_rest")
-        .arg("--min-owned-captures")
-        .arg("1")
-        .arg("--require-trusted-evidence")
-        .arg("--min-rr-intervals-to-compute")
-        .arg("2")
-        .arg("--official-whoop-hrv-rmssd-ms")
-        .arg("42")
-        .arg("--hrv-tolerance-ms")
-        .arg("10")
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("hrv-validation")
+            .arg("--database")
+            .arg(&db)
+            .arg("--start")
+            .arg("2026-06-02T00:00:00Z")
+            .arg("--end")
+            .arg("2026-06-03T00:00:00Z")
+            .arg("--capture-kind")
+            .arg("overnight_rest")
+            .arg("--min-owned-captures")
+            .arg("1")
+            .arg("--require-trusted-evidence")
+            .arg("--min-rr-intervals-to-compute")
+            .arg("2")
+            .arg("--official-whoop-hrv-rmssd-ms")
+            .arg("42")
+            .arg("--hrv-tolerance-ms")
+            .arg("10")
+            .output()
+            .unwrap();
 
     assert_failure(&output);
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["schema"], "open_vitals.hrv-capture-validation-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.hrv-capture-validation-report.v1"
+    );
     assert_eq!(
         report["label_policy"],
         "official_whoop_values_are_validation_labels_not_inputs"
@@ -728,26 +771,27 @@ fn metric_feature_report_cli_runs_respiratory_rate_capture_validation_alias() {
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
-        .arg("--method")
-        .arg("respiratory-rate-validation")
-        .arg("--database")
-        .arg(&db)
-        .arg("--start")
-        .arg("2026-06-02T00:00:00Z")
-        .arg("--end")
-        .arg("2026-06-03T00:00:00Z")
-        .arg("--capture-kind")
-        .arg("overnight_rest")
-        .arg("--min-owned-captures")
-        .arg("1")
-        .arg("--require-trusted-evidence")
-        .arg("--official-whoop-respiratory-rate-rpm")
-        .arg("14.5")
-        .arg("--respiratory-rate-tolerance-rpm")
-        .arg("1")
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("respiratory-rate-validation")
+            .arg("--database")
+            .arg(&db)
+            .arg("--start")
+            .arg("2026-06-02T00:00:00Z")
+            .arg("--end")
+            .arg("2026-06-03T00:00:00Z")
+            .arg("--capture-kind")
+            .arg("overnight_rest")
+            .arg("--min-owned-captures")
+            .arg("1")
+            .arg("--require-trusted-evidence")
+            .arg("--official-whoop-respiratory-rate-rpm")
+            .arg("14.5")
+            .arg("--respiratory-rate-tolerance-rpm")
+            .arg("1")
+            .output()
+            .unwrap();
 
     assert_failure(&output);
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -787,26 +831,27 @@ fn metric_feature_report_cli_runs_oxygen_saturation_capture_validation_alias() {
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
-        .arg("--method")
-        .arg("spo2-validation")
-        .arg("--database")
-        .arg(&db)
-        .arg("--start")
-        .arg("2026-06-02T00:00:00Z")
-        .arg("--end")
-        .arg("2026-06-03T00:00:00Z")
-        .arg("--capture-kind")
-        .arg("overnight_rest")
-        .arg("--min-owned-captures")
-        .arg("1")
-        .arg("--require-trusted-evidence")
-        .arg("--official-whoop-spo2-percent")
-        .arg("97.0")
-        .arg("--spo2-tolerance-percent")
-        .arg("2.0")
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("spo2-validation")
+            .arg("--database")
+            .arg(&db)
+            .arg("--start")
+            .arg("2026-06-02T00:00:00Z")
+            .arg("--end")
+            .arg("2026-06-03T00:00:00Z")
+            .arg("--capture-kind")
+            .arg("overnight_rest")
+            .arg("--min-owned-captures")
+            .arg("1")
+            .arg("--require-trusted-evidence")
+            .arg("--official-whoop-spo2-percent")
+            .arg("97.0")
+            .arg("--spo2-tolerance-percent")
+            .arg("2.0")
+            .output()
+            .unwrap();
 
     assert_failure(&output);
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -847,26 +892,27 @@ fn metric_feature_report_cli_runs_temperature_capture_validation_alias() {
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
-        .arg("--method")
-        .arg("temperature-validation")
-        .arg("--database")
-        .arg(&db)
-        .arg("--start")
-        .arg("2026-06-02T00:00:00Z")
-        .arg("--end")
-        .arg("2026-06-03T00:00:00Z")
-        .arg("--capture-kind")
-        .arg("overnight_rest")
-        .arg("--min-owned-captures")
-        .arg("1")
-        .arg("--require-trusted-evidence")
-        .arg("--official-whoop-skin-temperature-delta-c")
-        .arg("0.2")
-        .arg("--skin-temperature-tolerance-c")
-        .arg("0.3")
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("temperature-validation")
+            .arg("--database")
+            .arg(&db)
+            .arg("--start")
+            .arg("2026-06-02T00:00:00Z")
+            .arg("--end")
+            .arg("2026-06-03T00:00:00Z")
+            .arg("--capture-kind")
+            .arg("overnight_rest")
+            .arg("--min-owned-captures")
+            .arg("1")
+            .arg("--require-trusted-evidence")
+            .arg("--official-whoop-skin-temperature-delta-c")
+            .arg("0.2")
+            .arg("--skin-temperature-tolerance-c")
+            .arg("0.3")
+            .output()
+            .unwrap();
 
     assert_failure(&output);
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -907,20 +953,21 @@ fn metric_feature_report_cli_runs_recovery_sensor_discovery_alias() {
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
-        .arg("--method")
-        .arg("recovery-sensors")
-        .arg("--database")
-        .arg(&db)
-        .arg("--start")
-        .arg("2026-06-02T00:00:00Z")
-        .arg("--end")
-        .arg("2026-06-03T00:00:00Z")
-        .arg("--min-owned-captures")
-        .arg("1")
-        .arg("--require-trusted-evidence")
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("recovery-sensors")
+            .arg("--database")
+            .arg(&db)
+            .arg("--start")
+            .arg("2026-06-02T00:00:00Z")
+            .arg("--end")
+            .arg("2026-06-03T00:00:00Z")
+            .arg("--min-owned-captures")
+            .arg("1")
+            .arg("--require-trusted-evidence")
+            .output()
+            .unwrap();
 
     assert_failure(&output);
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -949,27 +996,28 @@ fn metric_feature_report_cli_runs_recovery_unavailable_status_alias() {
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
-        .arg("--method")
-        .arg("recovery-unavailable-status")
-        .arg("--database")
-        .arg(&db)
-        .arg("--date-key")
-        .arg("2026-06-02")
-        .arg("--timezone")
-        .arg("Europe/London")
-        .arg("--start")
-        .arg("2026-06-02T00:00:00Z")
-        .arg("--end")
-        .arg("2026-06-02T08:00:00Z")
-        .arg("--min-owned-captures")
-        .arg("1")
-        .arg("--require-trusted-evidence")
-        .arg("--min-rr-intervals-to-compute")
-        .arg("2")
-        .arg("--write-metric")
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("recovery-unavailable-status")
+            .arg("--database")
+            .arg(&db)
+            .arg("--date-key")
+            .arg("2026-06-02")
+            .arg("--timezone")
+            .arg("Europe/London")
+            .arg("--start")
+            .arg("2026-06-02T00:00:00Z")
+            .arg("--end")
+            .arg("2026-06-02T08:00:00Z")
+            .arg("--min-owned-captures")
+            .arg("1")
+            .arg("--require-trusted-evidence")
+            .arg("--min-rr-intervals-to-compute")
+            .arg("2")
+            .arg("--write-metric")
+            .output()
+            .unwrap();
 
     assert!(output.status.success(), "{output:?}");
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -1007,27 +1055,28 @@ fn metric_feature_report_cli_runs_recovery_sensor_daily_rollup_alias_without_pro
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
-        .arg("--method")
-        .arg("recovery-sensor-rollup")
-        .arg("--database")
-        .arg(&db)
-        .arg("--date-key")
-        .arg("2026-06-02")
-        .arg("--timezone")
-        .arg("Europe/London")
-        .arg("--start")
-        .arg("2026-06-02T00:00:00Z")
-        .arg("--end")
-        .arg("2026-06-02T08:00:00Z")
-        .arg("--min-owned-captures")
-        .arg("1")
-        .arg("--require-trusted-evidence")
-        .arg("--min-rr-intervals-to-compute")
-        .arg("2")
-        .arg("--write-metric")
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("recovery-sensor-rollup")
+            .arg("--database")
+            .arg(&db)
+            .arg("--date-key")
+            .arg("2026-06-02")
+            .arg("--timezone")
+            .arg("Europe/London")
+            .arg("--start")
+            .arg("2026-06-02T00:00:00Z")
+            .arg("--end")
+            .arg("2026-06-02T08:00:00Z")
+            .arg("--min-owned-captures")
+            .arg("1")
+            .arg("--require-trusted-evidence")
+            .arg("--min-rr-intervals-to-compute")
+            .arg("2")
+            .arg("--write-metric")
+            .output()
+            .unwrap();
 
     assert_failure(&output);
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();

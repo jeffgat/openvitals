@@ -96,12 +96,16 @@ struct RecoveryV2OverviewPage: View {
 
               SleepV2SectionHeader(title: "Timeline", palette: palette)
 
-              RecoveryV2EmptyStateCard(
-                palette: palette,
-                systemImage: "timeline.selection",
-                title: "No recovery timeline",
-                value: "0 events"
-              )
+              if recoveryTimelineRows.isEmpty {
+                RecoveryV2EmptyStateCard(
+                  palette: palette,
+                  systemImage: "timeline.selection",
+                  title: "No recovery timeline",
+                  value: "0 events"
+                )
+              } else {
+                RecoveryV2TimelineSection(palette: palette, rows: recoveryTimelineRows)
+              }
 
               SleepV2SectionHeader(title: "Insights", palette: palette)
 
@@ -179,6 +183,10 @@ struct RecoveryV2OverviewPage: View {
     store.recoveryTrendOverviewRows()
   }
 
+  private var recoveryTimelineRows: [RecoveryTimelineRow] {
+    store.recoveryTimelineRows(for: selectedDate)
+  }
+
   private var dateLabel: String {
     let suffix = selectedDate.formatted(.dateTime.day().month(.abbreviated))
     let prefix = ScoreDateTimeline.dateLabel(for: selectedDate)
@@ -192,6 +200,79 @@ struct RecoveryV2OverviewPage: View {
   private func openCoachTip() {
     router.openCoach(prompt: coachTip.prompt)
     model.recordUIAction("coach.opened", detail: "recovery v2 inline tip")
+  }
+}
+
+struct RecoveryV2TimelineSection: View {
+  let palette: SleepV2Palette
+  let rows: [RecoveryTimelineRow]
+
+  var body: some View {
+    SleepV2Panel(palette: palette, padding: 0, radius: 18) {
+      VStack(spacing: 0) {
+        ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+          RecoveryV2TimelineRowView(palette: palette, row: row)
+          if index < rows.count - 1 {
+            Divider()
+              .overlay(palette.separator)
+              .padding(.leading, 58)
+          }
+        }
+      }
+    }
+  }
+}
+
+struct RecoveryV2TimelineRowView: View {
+  let palette: SleepV2Palette
+  let row: RecoveryTimelineRow
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 12) {
+      Image(systemName: row.systemImage)
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(iconColor)
+        .frame(width: 34, height: 34)
+        .background(iconColor.opacity(0.12), in: Circle())
+
+      VStack(alignment: .leading, spacing: 5) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+          Text(row.title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(palette.text)
+            .lineLimit(1)
+            .minimumScaleFactor(0.78)
+          Spacer(minLength: 8)
+          Text(row.value)
+            .font(.subheadline.weight(.semibold))
+            .fontDesign(.rounded)
+            .foregroundStyle(valueColor)
+            .lineLimit(1)
+            .minimumScaleFactor(0.72)
+        }
+
+        Text(row.detail)
+          .font(.caption)
+          .foregroundStyle(palette.secondaryText)
+          .lineLimit(2)
+          .fixedSize(horizontal: false, vertical: true)
+
+        Text(row.source.label)
+          .font(.caption2.weight(.medium))
+          .foregroundStyle(palette.mutedText)
+          .lineLimit(2)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+    }
+    .padding(14)
+  }
+
+  private var iconColor: Color {
+    row.source.kind == .unavailable ? palette.mutedText : palette.accent
+  }
+
+  private var valueColor: Color {
+    row.source.kind == .unavailable ? palette.secondaryText : palette.text
   }
 }
 

@@ -147,6 +147,7 @@ fn run() -> open_vitals_core::OpenVitalsResult<()> {
         ),
         ("--min-step-samples", "min_sample_count"),
         ("--min-peak-spacing-samples", "min_peak_spacing_samples"),
+        ("--max-frame-summaries", "max_frame_summaries"),
     ] {
         insert_usize_arg(&mut request_args, &args, arg, field)?;
     }
@@ -324,6 +325,14 @@ fn metric_bridge_method(value: &str) -> open_vitals_core::OpenVitalsResult<&'sta
         | "calories-validation"
         | "metrics.energy_capture_validation" => Ok("metrics.energy_capture_validation"),
         "hrv" | "hrv_features" | "metrics.hrv_features" => Ok("metrics.hrv_features"),
+        "beat-interval"
+        | "beat_interval"
+        | "beat_interval_candidate_scan"
+        | "rr-candidate-scan"
+        | "rr_candidate_scan"
+        | "k20-scan"
+        | "k20_scan"
+        | "metrics.beat_interval_candidate_scan" => Ok("metrics.beat_interval_candidate_scan"),
         "hrv-validation"
         | "hrv_capture_validation"
         | "hrv-capture-validation"
@@ -497,7 +506,10 @@ fn merge_args_json(
     Ok(())
 }
 
-fn merge_args_value(object: &mut Map<String, Value>, value: Value) -> open_vitals_core::OpenVitalsResult<()> {
+fn merge_args_value(
+    object: &mut Map<String, Value>,
+    value: Value,
+) -> open_vitals_core::OpenVitalsResult<()> {
     let Value::Object(extra) = value else {
         return Err(OpenVitalsError::message(
             "metric feature extra args must be a JSON object",

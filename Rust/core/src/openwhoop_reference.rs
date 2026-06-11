@@ -363,7 +363,9 @@ pub fn openwhoop_history_field_reference(
         .find(|reference| reference.field == field)
 }
 
-pub fn openwhoop_history_field_status(field: OpenWhoopHistoryField) -> Option<OpenVitalsSummaryStatus> {
+pub fn openwhoop_history_field_status(
+    field: OpenWhoopHistoryField,
+) -> Option<OpenVitalsSummaryStatus> {
     openwhoop_history_field_reference(field).map(|reference| reference.status)
 }
 
@@ -451,11 +453,17 @@ mod tests {
     fn history_field_table_marks_open_vitals_statuses() {
         let bpm = openwhoop_history_field_reference(OpenWhoopHistoryField::Bpm).unwrap();
         assert_eq!(bpm.status, OpenVitalsSummaryStatus::Matched);
-        assert_eq!(bpm.open_vitals_summary_kinds, &OPENVITALS_SUMMARIES_NORMAL_HISTORY);
+        assert_eq!(
+            bpm.open_vitals_summary_kinds,
+            &OPENVITALS_SUMMARIES_NORMAL_HISTORY
+        );
 
         let gravity = openwhoop_history_field_reference(OpenWhoopHistoryField::Gravity).unwrap();
         assert_eq!(gravity.status, OpenVitalsSummaryStatus::Conflicting);
-        assert_eq!(gravity.open_vitals_summary_kinds, &OPENVITALS_SUMMARIES_RAW_MOTION);
+        assert_eq!(
+            gravity.open_vitals_summary_kinds,
+            &OPENVITALS_SUMMARIES_RAW_MOTION
+        );
 
         let spo2 =
             openwhoop_history_field_reference(OpenWhoopHistoryField::Gen5Spo2Percentage).unwrap();

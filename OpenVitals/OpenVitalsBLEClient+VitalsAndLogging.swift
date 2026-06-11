@@ -211,7 +211,7 @@ extension OpenVitalsBLEClient {
     if shouldWriteOSLog(message) {
       writeOSLog(message)
     }
-    if onMessage != nil {
+    if onMessage != nil, shouldForwardMessageCallback(message) {
       diagnosticLogQueue.async { [weak self] in
         self?.onMessage?(message)
       }
@@ -256,15 +256,14 @@ extension OpenVitalsBLEClient {
       guard let data = line.data(using: .utf8) else {
         return
       }
-      for url in urls {
-        self.appendDiagnosticLogData(data, to: url)
-      }
+      self.bufferDiagnosticLogData(data, to: urls)
     }
   }
 
   @discardableResult
   func flushDiagnosticLogWrites() -> [String] {
     diagnosticLogQueue.sync {
+      flushPendingDiagnosticLogDataLocked(synchronize: true)
       var issues = Self.diagnosticLogSetupWarningSnapshot()
       let urls = uniqueLogURLs([diagnosticLogURL, diagnosticLogMirrorURL, overnightSideChannelLogURL].compactMap { $0 })
       issues.append(contentsOf: urls.compactMap { synchronizeDiagnosticLogFile($0) })
@@ -272,7 +271,43 @@ extension OpenVitalsBLEClient {
     }
   }
 
-  func appendDiagnosticLogData(_ data: Data, to url: URL) {
+  func bufferDiagnosticLogData(_ data: Data, to urls: [URL]) {
+    guard !data.isEmpty else {
+      return
+    }
+    for url in urls {
+      pendingDiagnosticLogDataByURL[url, default: Data()].append(data)
+    }
+    let bufferedBytes = pendingDiagnosticLogDataByURL.values.reduce(0) { $0 + $1.count }
+    if bufferedBytes >= Self.diagnosticLogMaxBufferedBytes {
+      flushPendingDiagnosticLogDataLocked(synchronize: false)
+    } else {
+      scheduleDiagnosticLogFlushLocked()
+    }
+  }
+
+  func scheduleDiagnosticLogFlushLocked() {
+    guard diagnosticLogFlushWorkItem == nil else {
+      return
+    }
+    let workItem = DispatchWorkItem { [weak self] in
+      self?.flushPendingDiagnosticLogDataLocked(synchronize: false)
+    }
+    diagnosticLogFlushWorkItem = workItem
+    diagnosticLogQueue.asyncAfter(deadline: .now() + Self.diagnosticLogFlushInterval, execute: workItem)
+  }
+
+  func flushPendingDiagnosticLogDataLocked(synchronize: Bool) {
+    diagnosticLogFlushWorkItem?.cancel()
+    diagnosticLogFlushWorkItem = nil
+    let pending = pendingDiagnosticLogDataByURL
+    pendingDiagnosticLogDataByURL.removeAll(keepingCapacity: true)
+    for (url, data) in pending where !data.isEmpty {
+      appendDiagnosticLogData(data, to: url, synchronize: synchronize)
+    }
+  }
+
+  func appendDiagnosticLogData(_ data: Data, to url: URL, synchronize: Bool = false) {
     do {
       try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
       try Self.applyDiagnosticLogProtection(to: url.deletingLastPathComponent())
@@ -286,7 +321,11 @@ extension OpenVitalsBLEClient {
       let handle = try FileHandle(forWritingTo: url)
       try handle.seekToEnd()
       try handle.write(contentsOf: data)
-      try Self.synchronizeAndCloseDiagnosticLogHandle(handle)
+      if synchronize {
+        try Self.synchronizeAndCloseDiagnosticLogHandle(handle)
+      } else {
+        try handle.close()
+      }
     } catch {
       logDiagnosticLogError(url: url, error: error)
     }
@@ -388,7 +427,7 @@ extension OpenVitalsBLEClient {
     }
     guard message.source == "ble.sync"
         || message.source == "respiratory.packet_watch"
-        || (consoleCaptureStatusEnabled && message.source == "health.packet_capture")
+        || (consoleCaptureStatusEnabled && message.source == "health.packet_capture" && !isHighVolumeDiagnostic(message))
         || message.level == .warn
         || message.level == .error else {
       return
@@ -430,7 +469,13 @@ extension OpenVitalsBLEClient {
     if source == "ble.sync" || source == "respiratory.packet_watch" {
       return true
     }
-    if source == "overnight.guard" || source == "app.lifecycle" || source == "health.packet_capture" {
+    if source == "overnight.guard" || source == "app.lifecycle" {
+      return true
+    }
+    if source == "health.packet_capture" {
+      return isLowVolumeHealthPacketCaptureRecord(title: title)
+    }
+    if source == "performance.pipeline" {
       return true
     }
     if isLowVolumeBLELifecycleRecord(source: source, title: title) {
@@ -494,6 +539,12 @@ extension OpenVitalsBLEClient {
        message.title == "data_packet.received" || message.title == "raw_stream_counted.captured" {
       return true
     }
+    if message.source == "health.packet_capture", message.title == "summary" {
+      return true
+    }
+    if message.source == "performance.pipeline", message.title == "rust.bridge.timing" {
+      return true
+    }
     if message.source == "rust" {
       if message.title == "capture.import.ok" {
         return true
@@ -541,7 +592,7 @@ extension OpenVitalsBLEClient {
       return true
     }
     if message.source == "health.packet_capture" {
-      return true
+      return isLowVolumeHealthPacketCaptureRecord(title: message.title)
     }
     if message.source == "respiratory.packet_watch" {
       return true
@@ -568,5 +619,16 @@ extension OpenVitalsBLEClient {
       return true
     }
     return false
+  }
+
+  func shouldForwardMessageCallback(_ message: OpenVitalsMessage) -> Bool {
+    if message.level == .warn || message.level == .error {
+      return true
+    }
+    return !isHighVolumeDiagnostic(message)
+  }
+
+  func isLowVolumeHealthPacketCaptureRecord(title: String) -> Bool {
+    title != "summary"
   }
 }

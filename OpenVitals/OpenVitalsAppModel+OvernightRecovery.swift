@@ -78,7 +78,7 @@ extension OpenVitalsAppModel {
       overnightGuardExportInProgress = false
       overnightGuardCanExportLastSession = false
       overnightGuardWarning = "Resumed previous overnight guard. Last heartbeat \(Self.overnightRecoveredStatusSummary(recovered)). Keep other apps for this device closed until OpenVitals final sync/export finishes."
-      refreshOvernightPowerState(reason: "resume", record: true)
+      _ = refreshOvernightPowerState(reason: "resume", record: true)
       refreshOvernightReadiness(reason: "resume", record: true)
       enqueueOvernightSQLiteSession(finalStatus: "active", notes: "resumed_unclean_session")
       writeOvernightGuardStatus(reason: "resumed_unclean_session")

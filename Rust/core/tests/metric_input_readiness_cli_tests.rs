@@ -2,23 +2,27 @@
 fn metric_input_readiness_cli_emits_machine_readable_blockers_from_database() {
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-input-readiness"))
-        .arg("--database")
-        .arg(&db)
-        .arg("--start")
-        .arg("2026-05-30T00:00:00Z")
-        .arg("--end")
-        .arg("2026-05-31T00:00:00Z")
-        .arg("--min-owned-captures")
-        .arg("1")
-        .arg("--require-owned-captures")
-        .arg("--require-scores-ready")
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-input-readiness"))
+            .arg("--database")
+            .arg(&db)
+            .arg("--start")
+            .arg("2026-05-30T00:00:00Z")
+            .arg("--end")
+            .arg("2026-05-31T00:00:00Z")
+            .arg("--min-owned-captures")
+            .arg("1")
+            .arg("--require-owned-captures")
+            .arg("--require-scores-ready")
+            .output()
+            .unwrap();
 
     assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["schema"], "open_vitals.metric-input-readiness-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.metric-input-readiness-report.v1"
+    );
     assert_eq!(report["generated_by"], "open-vitals-metric-input-readiness");
     assert_eq!(report["pass"], false);
     assert_eq!(report["require_scores_ready"], true);
@@ -72,16 +76,20 @@ fn metric_input_readiness_cli_accepts_saved_capture_correlation_report() {
     )
     .unwrap();
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-input-readiness"))
-        .arg("--capture-correlation")
-        .arg(&correlation_path)
-        .arg("--require-scores-ready")
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-input-readiness"))
+            .arg("--capture-correlation")
+            .arg(&correlation_path)
+            .arg("--require-scores-ready")
+            .output()
+            .unwrap();
 
     assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["schema"], "open_vitals.metric-input-readiness-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.metric-input-readiness-report.v1"
+    );
     assert_eq!(report["capture_correlation_pass"], false);
     assert!(
         report["issues"]

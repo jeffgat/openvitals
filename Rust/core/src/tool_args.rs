@@ -15,7 +15,9 @@ pub fn value(args: &[String], name: &str) -> OpenVitalsResult<Option<String>> {
     while let Some(arg) = iter.next() {
         if arg == name {
             let Some(value) = iter.next() else {
-                return Err(OpenVitalsError::message(format!("missing value for {name}")));
+                return Err(OpenVitalsError::message(format!(
+                    "missing value for {name}"
+                )));
             };
             return Ok(Some(value.clone()));
         }

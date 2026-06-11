@@ -57,26 +57,44 @@ struct HeartRateSeriesFile: Codable {
   let samples: [HeartRateSamplePoint]
 }
 
-final class HeartRateSeriesStore {
+final class HeartRateSeriesStore: @unchecked Sendable {
   static let shared = HeartRateSeriesStore()
   static let didUpdateNotification = Notification.Name("OpenVitalsHeartRateSeriesStoreDidUpdate")
 
   private static let retention: TimeInterval = 7 * 24 * 60 * 60
   private static let maxSamples = 100_000
   private static let persistDelay: TimeInterval = 1.0
+  private static let compactEveryAppendedSamples = 512
   private static let updateNotificationInterval: TimeInterval = 2.0
 
   private let url: URL
   private let stateLock = NSLock()
   private let writeQueue = DispatchQueue(label: "com.open_vitals.swift.heart-rate-series", qos: .utility)
   private var samples: [HeartRateSamplePoint]
+  private var pendingSamples: [HeartRateSamplePoint] = []
   private var pendingWrite: DispatchWorkItem?
+  private var appendedSinceCompaction = 0
+  private var needsCompaction = false
   private var lastNotificationAt = Date.distantPast
 
   init(url: URL = HeartRateSeriesStore.defaultURL()) {
     self.url = url
-    self.samples = Self.loadSamples(from: url)
-    prune(relativeTo: Date())
+    let loadedSamples = Self.loadSamples(from: url)
+    if loadedSamples.isEmpty {
+      let legacySamples = Self.loadSamples(from: Self.legacyURL(for: url))
+      self.samples = legacySamples
+      if !legacySamples.isEmpty {
+        self.needsCompaction = true
+      }
+    } else {
+      self.samples = loadedSamples
+    }
+    if prune(relativeTo: Date()) {
+      needsCompaction = true
+    }
+    if needsCompaction {
+      schedulePersist()
+    }
   }
 
   func append(bpm: Int, source: String, capturedAt: Date) -> Bool {
@@ -92,8 +110,13 @@ final class HeartRateSeriesStore {
       return false
     }
 
-    samples.append(HeartRateSamplePoint(bpm: bpm, source: source, capturedAt: capturedAt))
-    prune(relativeTo: capturedAt)
+    let sample = HeartRateSamplePoint(bpm: bpm, source: source, capturedAt: capturedAt)
+    samples.append(sample)
+    pendingSamples.append(sample)
+    appendedSinceCompaction += 1
+    if prune(relativeTo: capturedAt) || appendedSinceCompaction >= Self.compactEveryAppendedSamples {
+      needsCompaction = true
+    }
     schedulePersist()
     let shouldPostUpdate = markUpdateNotificationIfNeeded()
     stateLock.unlock()
@@ -230,13 +253,40 @@ final class HeartRateSeriesStore {
     return samples.last
   }
 
+  func removeAllPersistedSamples() {
+    stateLock.lock()
+    pendingWrite?.cancel()
+    pendingWrite = nil
+    samples.removeAll(keepingCapacity: false)
+    pendingSamples.removeAll(keepingCapacity: false)
+    appendedSinceCompaction = 0
+    needsCompaction = false
+    lastNotificationAt = Date.distantPast
+    let sampleURL = url
+    let legacySampleURL = Self.legacyURL(for: url)
+    stateLock.unlock()
+
+    try? FileManager.default.removeItem(at: sampleURL)
+    if legacySampleURL != sampleURL {
+      try? FileManager.default.removeItem(at: legacySampleURL)
+    }
+    NotificationCenter.default.post(name: Self.didUpdateNotification, object: self)
+  }
+
   private static func defaultURL() -> URL {
     let baseDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
       ?? FileManager.default.temporaryDirectory
     let directory = baseDirectory.appendingPathComponent("OpenVitals", isDirectory: true)
     try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     return directory
-      .appendingPathComponent("heart-rate-samples.json")
+      .appendingPathComponent("heart-rate-samples.jsonl")
+  }
+
+  private static func legacyURL(for url: URL) -> URL {
+    guard url.pathExtension == "jsonl" else {
+      return url
+    }
+    return url.deletingPathExtension().appendingPathExtension("json")
   }
 
   private static func loadSamples(from url: URL) -> [HeartRateSamplePoint] {
@@ -245,6 +295,19 @@ final class HeartRateSeriesStore {
     }
     let decoder = JSONDecoder()
     decoder.dateDecodingStrategy = .iso8601
+    if let text = String(data: data, encoding: .utf8), text.contains("\n") {
+      let samples = text
+        .split(whereSeparator: \.isNewline)
+        .compactMap { line -> HeartRateSamplePoint? in
+          guard let lineData = String(line).data(using: .utf8) else {
+            return nil
+          }
+          return try? decoder.decode(HeartRateSamplePoint.self, from: lineData)
+        }
+      if !samples.isEmpty {
+        return samples.sorted { $0.capturedAt < $1.capturedAt }
+      }
+    }
     if let file = try? decoder.decode(HeartRateSeriesFile.self, from: data) {
       return file.samples.sorted { $0.capturedAt < $1.capturedAt }
     }
@@ -252,8 +315,10 @@ final class HeartRateSeriesStore {
       .sorted { $0.capturedAt < $1.capturedAt } ?? []
   }
 
-  private func prune(relativeTo date: Date) {
+  @discardableResult
+  private func prune(relativeTo date: Date) -> Bool {
     let cutoff = date.addingTimeInterval(-Self.retention)
+    let beforeCount = samples.count
     if let firstKept = samples.firstIndex(where: { $0.capturedAt >= cutoff }), firstKept > 0 {
       samples.removeFirst(firstKept)
     } else if samples.allSatisfy({ $0.capturedAt < cutoff }) {
@@ -262,6 +327,7 @@ final class HeartRateSeriesStore {
     if samples.count > Self.maxSamples {
       samples.removeFirst(samples.count - Self.maxSamples)
     }
+    return samples.count != beforeCount
   }
 
   private func schedulePersist() {
@@ -276,25 +342,64 @@ final class HeartRateSeriesStore {
       self.stateLock.lock()
       self.pendingWrite = nil
       let url = self.url
-      let payload = HeartRateSeriesFile(version: 1, samples: self.samples)
+      let shouldCompact = self.needsCompaction
+      let samples = shouldCompact ? self.samples : self.pendingSamples
+      self.pendingSamples.removeAll(keepingCapacity: true)
+      if shouldCompact {
+        self.needsCompaction = false
+        self.appendedSinceCompaction = 0
+      }
       self.stateLock.unlock()
-      Self.persist(payload: payload, to: url)
+      if shouldCompact {
+        Self.rewrite(samples: samples, to: url)
+      } else {
+        Self.append(samples: samples, to: url)
+      }
     }
     pendingWrite = workItem
     writeQueue.asyncAfter(deadline: .now() + Self.persistDelay, execute: workItem)
   }
 
-  private static func persist(payload: HeartRateSeriesFile, to url: URL) {
+  private static func append(samples: [HeartRateSamplePoint], to url: URL) {
+    guard !samples.isEmpty else {
+      return
+    }
     do {
       let directory = url.deletingLastPathComponent()
       try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-      let encoder = JSONEncoder()
-      encoder.dateEncodingStrategy = .iso8601
-      let data = try encoder.encode(payload)
+      if !FileManager.default.fileExists(atPath: url.path) {
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+      }
+      let data = try jsonLinesData(samples)
+      let handle = try FileHandle(forWritingTo: url)
+      try handle.seekToEnd()
+      try handle.write(contentsOf: data)
+      try handle.close()
+    } catch {
+      NSLog("OpenVitals heart-rate sample append failed: \(String(describing: error))")
+    }
+  }
+
+  private static func rewrite(samples: [HeartRateSamplePoint], to url: URL) {
+    do {
+      let directory = url.deletingLastPathComponent()
+      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+      let data = try jsonLinesData(samples)
       try data.write(to: url, options: .atomic)
     } catch {
-      NSLog("OpenVitals heart-rate sample persist failed: \(String(describing: error))")
+      NSLog("OpenVitals heart-rate sample compact failed: \(String(describing: error))")
     }
+  }
+
+  private static func jsonLinesData(_ samples: [HeartRateSamplePoint]) throws -> Data {
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    var data = Data()
+    for sample in samples {
+      data.append(try encoder.encode(sample))
+      data.append(contentsOf: [0x0a])
+    }
+    return data
   }
 
   private func markUpdateNotificationIfNeeded() -> Bool {
@@ -344,23 +449,42 @@ final class HRVSeriesStore {
   private static let retention: TimeInterval = 14 * 24 * 60 * 60
   private static let maxSamples = 20_000
   private static let persistDelay: TimeInterval = 1.0
+  private static let compactEveryAppendedSamples = 256
   private static let updateNotificationInterval: TimeInterval = 2.0
 
   private let url: URL
   private let stateLock = NSLock()
   private let writeQueue = DispatchQueue(label: "com.open_vitals.swift.hrv-series", qos: .utility)
   private var samples: [HRVSamplePoint]
+  private var pendingSamples: [HRVSamplePoint] = []
   private var pendingWrite: DispatchWorkItem?
+  private var appendedSinceCompaction = 0
+  private var needsCompaction = false
   private var lastNotificationAt = Date.distantPast
 
   init(url: URL = HRVSeriesStore.defaultURL()) {
     self.url = url
-    self.samples = Self.loadSamples(from: url)
+    let loadedSamples = Self.loadSamples(from: url)
+    if loadedSamples.isEmpty {
+      let legacySamples = Self.loadSamples(from: Self.legacyURL(for: url))
+      self.samples = legacySamples
+      if !legacySamples.isEmpty {
+        self.needsCompaction = true
+      }
+    } else {
+      self.samples = loadedSamples
+    }
     if samples.isEmpty, let migratedSample = Self.loadPersistedLiveSample() {
       samples = [migratedSample]
+      pendingSamples = [migratedSample]
       schedulePersist()
     }
-    prune(relativeTo: Date())
+    if prune(relativeTo: Date()) {
+      needsCompaction = true
+    }
+    if needsCompaction {
+      schedulePersist()
+    }
   }
 
   func append(rmssdMS: Double, rrIntervalCount: Int, source: String, capturedAt: Date) -> Bool {
@@ -377,8 +501,13 @@ final class HRVSeriesStore {
       return false
     }
 
-    samples.append(HRVSamplePoint(rmssdMS: rmssdMS, rrIntervalCount: rrIntervalCount, source: source, capturedAt: capturedAt))
-    prune(relativeTo: capturedAt)
+    let sample = HRVSamplePoint(rmssdMS: rmssdMS, rrIntervalCount: rrIntervalCount, source: source, capturedAt: capturedAt)
+    samples.append(sample)
+    pendingSamples.append(sample)
+    appendedSinceCompaction += 1
+    if prune(relativeTo: capturedAt) || appendedSinceCompaction >= Self.compactEveryAppendedSamples {
+      needsCompaction = true
+    }
     schedulePersist()
     let shouldPostUpdate = markUpdateNotificationIfNeeded()
     stateLock.unlock()
@@ -433,13 +562,40 @@ final class HRVSeriesStore {
     )
   }
 
+  func removeAllPersistedSamples() {
+    stateLock.lock()
+    pendingWrite?.cancel()
+    pendingWrite = nil
+    samples.removeAll(keepingCapacity: false)
+    pendingSamples.removeAll(keepingCapacity: false)
+    appendedSinceCompaction = 0
+    needsCompaction = false
+    lastNotificationAt = Date.distantPast
+    let sampleURL = url
+    let legacySampleURL = Self.legacyURL(for: url)
+    stateLock.unlock()
+
+    try? FileManager.default.removeItem(at: sampleURL)
+    if legacySampleURL != sampleURL {
+      try? FileManager.default.removeItem(at: legacySampleURL)
+    }
+    NotificationCenter.default.post(name: Self.didUpdateNotification, object: self)
+  }
+
   private static func defaultURL() -> URL {
     let baseDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
       ?? FileManager.default.temporaryDirectory
     let directory = baseDirectory.appendingPathComponent("OpenVitals", isDirectory: true)
     try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     return directory
-      .appendingPathComponent("hrv-samples.json")
+      .appendingPathComponent("hrv-samples.jsonl")
+  }
+
+  private static func legacyURL(for url: URL) -> URL {
+    guard url.pathExtension == "jsonl" else {
+      return url
+    }
+    return url.deletingPathExtension().appendingPathExtension("json")
   }
 
   private static func loadSamples(from url: URL) -> [HRVSamplePoint] {
@@ -448,6 +604,19 @@ final class HRVSeriesStore {
     }
     let decoder = JSONDecoder()
     decoder.dateDecodingStrategy = .iso8601
+    if let text = String(data: data, encoding: .utf8), text.contains("\n") {
+      let samples = text
+        .split(whereSeparator: \.isNewline)
+        .compactMap { line -> HRVSamplePoint? in
+          guard let lineData = String(line).data(using: .utf8) else {
+            return nil
+          }
+          return try? decoder.decode(HRVSamplePoint.self, from: lineData)
+        }
+      if !samples.isEmpty {
+        return samples.sorted { $0.capturedAt < $1.capturedAt }
+      }
+    }
     if let file = try? decoder.decode(HRVSeriesFile.self, from: data) {
       return file.samples.sorted { $0.capturedAt < $1.capturedAt }
     }
@@ -475,8 +644,10 @@ final class HRVSeriesStore {
     )
   }
 
-  private func prune(relativeTo date: Date) {
+  @discardableResult
+  private func prune(relativeTo date: Date) -> Bool {
     let cutoff = date.addingTimeInterval(-Self.retention)
+    let beforeCount = samples.count
     if let firstKept = samples.firstIndex(where: { $0.capturedAt >= cutoff }), firstKept > 0 {
       samples.removeFirst(firstKept)
     } else if samples.allSatisfy({ $0.capturedAt < cutoff }) {
@@ -485,6 +656,7 @@ final class HRVSeriesStore {
     if samples.count > Self.maxSamples {
       samples.removeFirst(samples.count - Self.maxSamples)
     }
+    return samples.count != beforeCount
   }
 
   private func schedulePersist() {
@@ -499,25 +671,64 @@ final class HRVSeriesStore {
       self.stateLock.lock()
       self.pendingWrite = nil
       let url = self.url
-      let payload = HRVSeriesFile(version: 1, samples: self.samples)
+      let shouldCompact = self.needsCompaction
+      let samples = shouldCompact ? self.samples : self.pendingSamples
+      self.pendingSamples.removeAll(keepingCapacity: true)
+      if shouldCompact {
+        self.needsCompaction = false
+        self.appendedSinceCompaction = 0
+      }
       self.stateLock.unlock()
-      Self.persist(payload: payload, to: url)
+      if shouldCompact {
+        Self.rewrite(samples: samples, to: url)
+      } else {
+        Self.append(samples: samples, to: url)
+      }
     }
     pendingWrite = workItem
     writeQueue.asyncAfter(deadline: .now() + Self.persistDelay, execute: workItem)
   }
 
-  private static func persist(payload: HRVSeriesFile, to url: URL) {
+  private static func append(samples: [HRVSamplePoint], to url: URL) {
+    guard !samples.isEmpty else {
+      return
+    }
     do {
       let directory = url.deletingLastPathComponent()
       try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-      let encoder = JSONEncoder()
-      encoder.dateEncodingStrategy = .iso8601
-      let data = try encoder.encode(payload)
+      if !FileManager.default.fileExists(atPath: url.path) {
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+      }
+      let data = try jsonLinesData(samples)
+      let handle = try FileHandle(forWritingTo: url)
+      try handle.seekToEnd()
+      try handle.write(contentsOf: data)
+      try handle.close()
+    } catch {
+      NSLog("OpenVitals HRV sample append failed: \(String(describing: error))")
+    }
+  }
+
+  private static func rewrite(samples: [HRVSamplePoint], to url: URL) {
+    do {
+      let directory = url.deletingLastPathComponent()
+      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+      let data = try jsonLinesData(samples)
       try data.write(to: url, options: .atomic)
     } catch {
-      NSLog("OpenVitals HRV sample persist failed: \(String(describing: error))")
+      NSLog("OpenVitals HRV sample compact failed: \(String(describing: error))")
     }
+  }
+
+  private static func jsonLinesData(_ samples: [HRVSamplePoint]) throws -> Data {
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    var data = Data()
+    for sample in samples {
+      data.append(try encoder.encode(sample))
+      data.append(contentsOf: [0x0a])
+    }
+    return data
   }
 
   private func markUpdateNotificationIfNeeded() -> Bool {

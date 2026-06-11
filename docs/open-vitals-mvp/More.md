@@ -90,6 +90,8 @@ MVP rule: More owns operational surfaces: device, connection lab, capture/import
 - [ ] Add Export action.
 - [ ] Show bundle path, zip path, row counts, export status.
 - [ ] Show bundle validation, zip validation, privacy lint, and sanitized privacy statuses.
+- [x] Add a manual Supabase debug upload action that creates the local data bundle, uploads bundle/manifest objects, and records a queryable metadata row.
+- [x] Show Supabase debug upload states with explicit settings, object upload, manifest upload, metadata row, skipped, and failed labels instead of generic pending/ready badges.
 
 ## Algorithms
 
@@ -110,6 +112,9 @@ MVP rule: More owns operational surfaces: device, connection lab, capture/import
 - [ ] Show command evidence import/gate sweep/capture plan.
 - [ ] Show command shortcuts grouped by identity, battery, historical sync, haptics, sensors, config, firmware, reboot.
 - [ ] Keep destructive commands gated behind explicit confirmation.
+- [x] Make the primary Debug capture action aggregate movement, HR, physiological, pulse, temperature/history, and metadata evidence so normal capture mode collects the broadest useful packet set.
+- [x] Show command response names/result codes for physiology probes and include K16/K20/K17 beat-interval candidates in capture diagnostics.
+- [x] Add confirmed local app data wipe that clears app storage and cached scores while preserving the remembered BLE device and never sending a wearable erase command.
 
 ## Privacy And Support
 

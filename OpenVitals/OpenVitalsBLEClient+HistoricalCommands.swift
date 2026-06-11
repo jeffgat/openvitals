@@ -51,6 +51,7 @@ extension OpenVitalsBLEClient {
     historyEndReceived = false
     historyCompleteReceived = false
     historyStartReceived = false
+    resetCoalescedHistoricalDataPackets()
     historicalRangePendingResponses = 0
     historicalRangeRetryCount = 0
     historicalTransferRequestAttemptCount = 0

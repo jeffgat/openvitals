@@ -5,6 +5,7 @@ enum HealthPacketCaptureMode: String {
   case walk
   case temperature
   case physiology
+  case diagnostic
 
   var purpose: String {
     switch self {
@@ -14,6 +15,8 @@ enum HealthPacketCaptureMode: String {
       return "temperature_history_event_capture"
     case .physiology:
       return "full_physiology_signal_capture"
+    case .diagnostic:
+      return "aggregate_diagnostic_signal_capture"
     }
   }
 
@@ -40,11 +43,30 @@ enum HealthPacketCaptureMode: String {
         "raw_motion_k10",
         "raw_stream_k11",
         "embedded_heart_rate",
+        "raw_ecg_labrador_k16",
         "raw_or_research_k20",
         "r17_optical_or_labrador_filtered",
         "raw_motion_k21",
         "pulse_information_k25_k26",
         "temperature_candidates_if_present",
+      ]
+    case .diagnostic:
+      return [
+        "realtime_status_k2",
+        "raw_motion_k10",
+        "raw_stream_k11",
+        "embedded_heart_rate",
+        "passive_activity_candidate",
+        "gps_route_if_authorized",
+        "raw_ecg_labrador_k16",
+        "raw_or_research_k20",
+        "r17_optical_or_labrador_filtered",
+        "raw_motion_k21",
+        "pulse_information_k25_k26",
+        "temperature_event_17",
+        "normal_history_k18",
+        "normal_history_k24",
+        "history_metadata",
       ]
     }
   }
@@ -56,7 +78,9 @@ enum HealthPacketCaptureMode: String {
     case .temperature:
       return "frames 0 | K18 0 | K24 0 | event17 0 | temp 0 | unknown 0"
     case .physiology:
-      return "frames 0 | motion 0 | K11 0 | HR 0 | R21 0 | optical 0 | pulse 0 | temp 0 | unknown 0"
+      return "frames 0 | motion 0 | K11 0 | K16 0 | HR 0 | R21 0 | optical 0 | pulse 0 | temp 0 | unknown 0"
+    case .diagnostic:
+      return "frames 0 | motion 0 | K11 0 | K16 0 | K20 0 | K2 0 | HR 0 | R21 0 | optical 0 | pulse 0 | K47 0 | temp 0 | unknown 0"
     }
   }
 
@@ -68,6 +92,8 @@ enum HealthPacketCaptureMode: String {
       return "Capturing temperature history"
     case .physiology:
       return "Capturing physiology signals"
+    case .diagnostic:
+      return "Capturing diagnostic signals"
     }
   }
 }
@@ -84,6 +110,8 @@ struct ActiveHealthPacketCapture {
   let sessionID: String
   let startedAt: Date
   let mode: HealthPacketCaptureMode
+  let source: String
+  let requestedStreams: Bool
   var importedFrameCount: Int
 }
 

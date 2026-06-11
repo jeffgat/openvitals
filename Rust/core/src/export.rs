@@ -29,8 +29,8 @@ use crate::{
         ActivityIntervalRow, ActivityLabelRow, ActivityMetricRow, ActivitySessionRow,
         AlgorithmRunRecord, CalibrationLabelRow, CalibrationRunRecord, CommandValidationRecord,
         DailyActivityMetricRow, DailyRecoveryMetricRow, DebugCommandRow, DebugEventRow,
-        DebugSessionRow, DecodedFrameRow, OpenVitalsStore, HourlyActivityMetricRow, MetricProvenanceRow,
-        RawEvidenceRow,
+        DebugSessionRow, DecodedFrameRow, HourlyActivityMetricRow, MetricProvenanceRow,
+        OpenVitalsStore, RawEvidenceRow,
     },
     timeline::{PacketTimelineRow, packet_timeline_from_decoded_frames},
 };
@@ -1433,14 +1433,19 @@ pub fn export_raw_timeframe(
     }
 
     if raw_export_family_selected(&selected_data_families, RAW_EXPORT_SQLITE_FAMILY) {
-        let sqlite_source_path = options
-            .sqlite_source_path
-            .ok_or_else(|| OpenVitalsError::message("sqlite data family requires sqlite_source_path"))?;
+        let sqlite_source_path = options.sqlite_source_path.ok_or_else(|| {
+            OpenVitalsError::message("sqlite data family requires sqlite_source_path")
+        })?;
         let sqlite_target_path = options.output_dir.join("data/open_vitals.sqlite");
         snapshot_sqlite_database(sqlite_source_path, &sqlite_target_path)?;
         let bytes = fs::read(&sqlite_target_path)
             .map_err(|source| OpenVitalsError::io(&sqlite_target_path, source))?;
-        manifest_files.push(manifest_file("data/open_vitals.sqlite", &bytes, None, "sqlite"));
+        manifest_files.push(manifest_file(
+            "data/open_vitals.sqlite",
+            &bytes,
+            None,
+            "sqlite",
+        ));
     }
 
     let manifest = ExportManifest {
@@ -2104,8 +2109,9 @@ fn is_raw_byte_json_key(key: &str) -> bool {
 fn write_jsonl<T: Serialize>(path: &Path, rows: &[T]) -> OpenVitalsResult<Vec<u8>> {
     let mut bytes = Vec::new();
     for row in rows {
-        serde_json::to_writer(&mut bytes, row)
-            .map_err(|error| OpenVitalsError::message(format!("cannot serialize JSONL row: {error}")))?;
+        serde_json::to_writer(&mut bytes, row).map_err(|error| {
+            OpenVitalsError::message(format!("cannot serialize JSONL row: {error}"))
+        })?;
         bytes.push(b'\n');
     }
     fs::write(path, &bytes).map_err(|source| OpenVitalsError::io(path, source))?;
@@ -2221,7 +2227,10 @@ fn write_packet_timeline_csv(path: &Path, rows: &[PacketTimelineRow]) -> OpenVit
     Ok(bytes)
 }
 
-fn write_sensor_samples_csv(path: &Path, rows: &[ExportSensorSampleRow]) -> OpenVitalsResult<Vec<u8>> {
+fn write_sensor_samples_csv(
+    path: &Path,
+    rows: &[ExportSensorSampleRow],
+) -> OpenVitalsResult<Vec<u8>> {
     let mut bytes = Vec::new();
     writeln!(
         bytes,
@@ -2778,8 +2787,9 @@ fn push_metric_feature_report(
         .get("issues")
         .cloned()
         .unwrap_or_else(|| json!([]));
-    let issues_json = serde_json::to_string(&issues_json)
-        .map_err(|error| OpenVitalsError::message(format!("cannot serialize report issues: {error}")))?;
+    let issues_json = serde_json::to_string(&issues_json).map_err(|error| {
+        OpenVitalsError::message(format!("cannot serialize report issues: {error}"))
+    })?;
     rows.push(ExportMetricFeatureReportRow {
         report_kind: report_kind.to_string(),
         schema,
@@ -2961,7 +2971,10 @@ fn usize_field(value: &Value, field: &str) -> Option<usize> {
         .and_then(|count| usize::try_from(count).ok())
 }
 
-fn write_metric_values_csv(path: &Path, rows: &[ExportMetricValueRow]) -> OpenVitalsResult<Vec<u8>> {
+fn write_metric_values_csv(
+    path: &Path,
+    rows: &[ExportMetricValueRow],
+) -> OpenVitalsResult<Vec<u8>> {
     let mut bytes = Vec::new();
     writeln!(
         bytes,
@@ -3138,7 +3151,9 @@ fn export_metric_outputs(
     Ok((values, components))
 }
 
-fn parse_quality_flags_for_metric_output(run: &AlgorithmRunRecord) -> OpenVitalsResult<Vec<String>> {
+fn parse_quality_flags_for_metric_output(
+    run: &AlgorithmRunRecord,
+) -> OpenVitalsResult<Vec<String>> {
     let quality_flags: Vec<String> =
         serde_json::from_str(&run.quality_flags_json).map_err(|error| {
             OpenVitalsError::message(format!(
@@ -3465,7 +3480,10 @@ fn metric_provenance_rows_for_raw_byte_policy(
         .collect()
 }
 
-fn write_activity_sessions_csv(path: &Path, rows: &[ActivitySessionRow]) -> OpenVitalsResult<Vec<u8>> {
+fn write_activity_sessions_csv(
+    path: &Path,
+    rows: &[ActivitySessionRow],
+) -> OpenVitalsResult<Vec<u8>> {
     let mut bytes = Vec::new();
     writeln!(
         bytes,
@@ -3502,7 +3520,10 @@ fn write_activity_sessions_csv(path: &Path, rows: &[ActivitySessionRow]) -> Open
     Ok(bytes)
 }
 
-fn write_activity_metrics_csv(path: &Path, rows: &[ActivityMetricRow]) -> OpenVitalsResult<Vec<u8>> {
+fn write_activity_metrics_csv(
+    path: &Path,
+    rows: &[ActivityMetricRow],
+) -> OpenVitalsResult<Vec<u8>> {
     let mut bytes = Vec::new();
     writeln!(
         bytes,
@@ -3530,7 +3551,10 @@ fn write_activity_metrics_csv(path: &Path, rows: &[ActivityMetricRow]) -> OpenVi
     Ok(bytes)
 }
 
-fn write_activity_intervals_csv(path: &Path, rows: &[ActivityIntervalRow]) -> OpenVitalsResult<Vec<u8>> {
+fn write_activity_intervals_csv(
+    path: &Path,
+    rows: &[ActivityIntervalRow],
+) -> OpenVitalsResult<Vec<u8>> {
     let mut bytes = Vec::new();
     writeln!(
         bytes,
@@ -3715,7 +3739,10 @@ fn write_daily_recovery_metrics_csv(
     Ok(bytes)
 }
 
-fn write_metric_provenance_csv(path: &Path, rows: &[MetricProvenanceRow]) -> OpenVitalsResult<Vec<u8>> {
+fn write_metric_provenance_csv(
+    path: &Path,
+    rows: &[MetricProvenanceRow],
+) -> OpenVitalsResult<Vec<u8>> {
     let mut bytes = Vec::new();
     writeln!(
         bytes,
@@ -3744,7 +3771,10 @@ fn write_metric_provenance_csv(path: &Path, rows: &[MetricProvenanceRow]) -> Ope
     Ok(bytes)
 }
 
-fn write_calibration_runs_csv(path: &Path, rows: &[CalibrationRunRecord]) -> OpenVitalsResult<Vec<u8>> {
+fn write_calibration_runs_csv(
+    path: &Path,
+    rows: &[CalibrationRunRecord],
+) -> OpenVitalsResult<Vec<u8>> {
     let mut bytes = Vec::new();
     writeln!(
         bytes,
@@ -3771,7 +3801,10 @@ fn write_calibration_runs_csv(path: &Path, rows: &[CalibrationRunRecord]) -> Ope
     Ok(bytes)
 }
 
-fn write_debug_sessions_csv(path: &Path, rows: &[ExportDebugSessionRow]) -> OpenVitalsResult<Vec<u8>> {
+fn write_debug_sessions_csv(
+    path: &Path,
+    rows: &[ExportDebugSessionRow],
+) -> OpenVitalsResult<Vec<u8>> {
     let mut bytes = Vec::new();
     writeln!(
         bytes,
@@ -3797,7 +3830,10 @@ fn write_debug_sessions_csv(path: &Path, rows: &[ExportDebugSessionRow]) -> Open
     Ok(bytes)
 }
 
-fn write_debug_commands_csv(path: &Path, rows: &[ExportDebugCommandRow]) -> OpenVitalsResult<Vec<u8>> {
+fn write_debug_commands_csv(
+    path: &Path,
+    rows: &[ExportDebugCommandRow],
+) -> OpenVitalsResult<Vec<u8>> {
     let mut bytes = Vec::new();
     writeln!(
         bytes,
@@ -3914,8 +3950,9 @@ fn write_csv_row(output: &mut Vec<u8>, fields: &[&str]) -> OpenVitalsResult<()> 
         if index > 0 {
             output.push(b',');
         }
-        write!(output, "{}", csv_escape(field))
-            .map_err(|error| OpenVitalsError::message(format!("cannot write CSV field: {error}")))?;
+        write!(output, "{}", csv_escape(field)).map_err(|error| {
+            OpenVitalsError::message(format!("cannot write CSV field: {error}"))
+        })?;
     }
     output.push(b'\n');
     Ok(())
@@ -4264,8 +4301,8 @@ fn validate_zipped_export_bundle(path: &Path) -> OpenVitalsResult<ExportValidati
     let mut archive = ZipArchive::new(zip_file)
         .map_err(|error| OpenVitalsError::message(format!("cannot open zip bundle: {error}")))?;
     let manifest_raw = read_zip_entry_to_string(&mut archive, "manifest.json")?;
-    let manifest: ExportManifest =
-        serde_json::from_str(&manifest_raw).map_err(|source| OpenVitalsError::json(path, source))?;
+    let manifest: ExportManifest = serde_json::from_str(&manifest_raw)
+        .map_err(|source| OpenVitalsError::json(path, source))?;
 
     let mut manifest_issues = Vec::new();
     validate_manifest_shape(&manifest, &mut manifest_issues);
@@ -6348,7 +6385,11 @@ fn validate_metric_json_fields(
         &format!("{row_name} provenance_json"),
         issues,
     );
-    validate_no_platform_metric_source_json(inputs_json, &format!("{row_name} inputs_json"), issues);
+    validate_no_platform_metric_source_json(
+        inputs_json,
+        &format!("{row_name} inputs_json"),
+        issues,
+    );
     validate_no_platform_metric_source_json(
         quality_flags_json,
         &format!("{row_name} quality_flags_json"),
@@ -7790,8 +7831,8 @@ fn write_export_zip(
         }
     }
 
-    let zip_file =
-        File::create(zip_output_path).map_err(|source| OpenVitalsError::io(zip_output_path, source))?;
+    let zip_file = File::create(zip_output_path)
+        .map_err(|source| OpenVitalsError::io(zip_output_path, source))?;
     let mut writer = ZipWriter::new(zip_file);
     let options = FileOptions::default()
         .compression_method(CompressionMethod::Deflated)
@@ -7921,7 +7962,10 @@ fn validate_zip_manifest_file(
     }
 }
 
-fn read_zip_entry_to_string(archive: &mut ZipArchive<File>, path: &str) -> OpenVitalsResult<String> {
+fn read_zip_entry_to_string(
+    archive: &mut ZipArchive<File>,
+    path: &str,
+) -> OpenVitalsResult<String> {
     let bytes = read_zip_entry(archive, path)?;
     String::from_utf8(bytes)
         .map_err(|error| OpenVitalsError::message(format!("{path} is not valid UTF-8: {error}")))

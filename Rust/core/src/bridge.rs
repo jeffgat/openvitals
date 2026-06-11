@@ -18,8 +18,10 @@ use crate::{
         append_activity_session_correction_history,
     },
     algorithm_compare::{
-        compare_hrv_open_vitals_to_reference, compare_sleep_open_vitals_to_external_reference_report,
-        compare_sleep_open_vitals_to_reference, compare_sleep_v1_open_vitals_to_external_reference_report,
+        compare_hrv_open_vitals_to_reference,
+        compare_sleep_open_vitals_to_external_reference_report,
+        compare_sleep_open_vitals_to_reference,
+        compare_sleep_v1_open_vitals_to_external_reference_report,
         compare_sleep_v1_open_vitals_to_reference, compare_strain_open_vitals_to_reference,
         compare_stress_open_vitals_to_reference,
     },
@@ -69,14 +71,15 @@ use crate::{
         scaffold_local_health_validation_manifest,
     },
     metric_features::{
-        HeartRateFeatureOptions, HrvCaptureValidationOptions, HrvFeatureOptions,
-        MetricFeatureNextAction, MetricWindowFeatureOptions, MotionFeatureOptions,
-        OxygenSaturationCaptureValidationOptions, RecoveryFeatureScoreOptions,
-        RecoverySensorDiscoveryOptions, RecoverySensorDiscoveryReport,
-        RespiratoryRateCaptureValidationOptions, RestingHeartRateFeatureOptions,
-        SleepFeatureScoreOptions, SleepFeatureScoreReport, SleepStageKind,
-        StrainFeatureScoreOptions, StressFeatureScoreOptions, TemperatureCaptureValidationOptions,
-        VitalEventFeatureOptions, run_heart_rate_feature_report_for_store,
+        BeatIntervalCandidateScanOptions, HeartRateFeatureOptions, HrvCaptureValidationOptions,
+        HrvFeatureOptions, MetricFeatureNextAction, MetricWindowFeatureOptions,
+        MotionFeatureOptions, OxygenSaturationCaptureValidationOptions,
+        RecoveryFeatureScoreOptions, RecoveryProvidedVitalsFeature, RecoverySensorDiscoveryOptions,
+        RecoverySensorDiscoveryReport, RespiratoryRateCaptureValidationOptions,
+        RestingHeartRateFeatureOptions, SleepFeatureScoreOptions, SleepFeatureScoreReport,
+        SleepStageKind, StrainFeatureScoreOptions, StressFeatureScoreOptions,
+        TemperatureCaptureValidationOptions, VitalEventFeatureOptions,
+        run_beat_interval_candidate_scan_for_store, run_heart_rate_feature_report_for_store,
         run_hrv_capture_validation_for_store, run_hrv_feature_report_for_store,
         run_metric_window_feature_report_for_store, run_motion_feature_report_for_store,
         run_oxygen_saturation_capture_validation_for_store,
@@ -92,15 +95,16 @@ use crate::{
         run_metric_input_readiness,
     },
     metrics::{
-        AlgorithmRunResult, OPENVITALS_HRV_V0_ID, OPENVITALS_HRV_V0_VERSION, OPENVITALS_RECOVERY_V0_ID,
-        OPENVITALS_RECOVERY_V0_VERSION, OPENVITALS_SLEEP_V0_ID, OPENVITALS_SLEEP_V0_VERSION, OPENVITALS_SLEEP_V1_ID,
-        OPENVITALS_SLEEP_V1_VERSION, OPENVITALS_STRAIN_V0_ID, OPENVITALS_STRAIN_V0_VERSION, OPENVITALS_STRESS_V0_ID,
-        OPENVITALS_STRESS_V0_VERSION, HrvInput, RecoveryInput, SleepInput, SleepModelStatusInput,
+        AlgorithmRunResult, HrvInput, OPENVITALS_HRV_V0_ID, OPENVITALS_HRV_V0_VERSION,
+        OPENVITALS_RECOVERY_V0_ID, OPENVITALS_RECOVERY_V0_VERSION, OPENVITALS_SLEEP_V0_ID,
+        OPENVITALS_SLEEP_V0_VERSION, OPENVITALS_SLEEP_V1_ID, OPENVITALS_SLEEP_V1_VERSION,
+        OPENVITALS_STRAIN_V0_ID, OPENVITALS_STRAIN_V0_VERSION, OPENVITALS_STRESS_V0_ID,
+        OPENVITALS_STRESS_V0_VERSION, RecoveryInput, SleepInput, SleepModelStatusInput,
         SleepNightHistoryInput, SleepStageSegment, SleepV1Input, StrainInput, StressInput,
         algorithm_run_record, built_in_algorithm_definitions,
         built_in_default_algorithm_preferences, default_algorithm_preferences_for_scope,
-        open_vitals_hrv_v0, open_vitals_recovery_v0, open_vitals_sleep_v0, open_vitals_sleep_v1, open_vitals_strain_v0,
-        open_vitals_stress_v0, sleep_history_night_is_usable,
+        open_vitals_hrv_v0, open_vitals_recovery_v0, open_vitals_sleep_v0, open_vitals_sleep_v1,
+        open_vitals_strain_v0, open_vitals_stress_v0, sleep_history_night_is_usable,
     },
     openwhoop_reference::{
         OPENWHOOP_REFERENCE_ATTRIBUTION, OPENWHOOP_REFERENCE_COMMIT,
@@ -222,6 +226,17 @@ struct StorageCheckArgs {
     database_path: String,
     #[serde(default)]
     self_test: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PersistedScoreReportsArgs {
+    database_path: String,
+    #[serde(default = "default_correlation_start")]
+    start: String,
+    #[serde(default = "default_correlation_end")]
+    end: String,
+    #[serde(default)]
+    families: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -574,6 +589,61 @@ struct DailyRecoveryMetricListArgs {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct PacketInputSummaryArgs {
+    database_path: String,
+    #[serde(default = "default_correlation_start")]
+    start: String,
+    #[serde(default = "default_correlation_end")]
+    end: String,
+    #[serde(default)]
+    min_owned_captures: Option<usize>,
+    #[serde(default)]
+    require_trusted_evidence: bool,
+    #[serde(default)]
+    require_owned_captures: bool,
+    #[serde(default)]
+    require_scores_ready: bool,
+    #[serde(default)]
+    max_step_candidate_fields: Option<usize>,
+    #[serde(default)]
+    max_step_ingest_candidate_fields: Option<usize>,
+    #[serde(default)]
+    hrv_min_rr_intervals_to_compute: Option<usize>,
+    #[serde(default)]
+    hrv_baseline_min_days: Option<usize>,
+    #[serde(default)]
+    hrv_require_baseline: bool,
+    #[serde(default)]
+    resting_hr_baseline_min_days: Option<usize>,
+    #[serde(default)]
+    resting_hr_require_baseline: bool,
+    #[serde(default)]
+    resting_hr_daily_rollup: Option<RestingHeartRateDailyRollupArgs>,
+    #[serde(default)]
+    step_counter_daily_rollup: Option<StepCounterDailyRollupArgs>,
+    #[serde(default)]
+    step_counter_hourly_rollup: Option<StepCounterHourlyRollupArgs>,
+    #[serde(default)]
+    activity_unavailable_daily_status: Option<ActivityUnavailableDailyStatusArgs>,
+    #[serde(default)]
+    energy_daily_rollup: Option<EnergyDailyRollupArgs>,
+    #[serde(default)]
+    energy_hourly_rollup: Option<EnergyHourlyRollupArgs>,
+    #[serde(default)]
+    energy_unavailable_daily_status: Option<EnergyDailyRollupArgs>,
+    #[serde(default)]
+    recovery_sensor_daily_rollup: Option<RecoverySensorDailyRollupArgs>,
+    #[serde(default)]
+    recovery_unavailable_daily_status: Option<RecoveryUnavailableDailyStatusArgs>,
+    #[serde(default)]
+    daily_activity_metrics: Option<DailyActivityMetricListArgs>,
+    #[serde(default)]
+    hourly_activity_metrics: Option<HourlyActivityMetricListArgs>,
+    #[serde(default)]
+    daily_recovery_metrics: Option<DailyRecoveryMetricListArgs>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct EnergyDailyRollupArgs {
     database_path: String,
     date_key: String,
@@ -809,6 +879,23 @@ struct HrvFeaturesArgs {
     algorithm_id: Option<String>,
     #[serde(default)]
     algorithm_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BeatIntervalCandidateScanArgs {
+    database_path: String,
+    #[serde(default = "default_correlation_start")]
+    start: String,
+    #[serde(default = "default_correlation_end")]
+    end: String,
+    #[serde(default)]
+    sample_rate_hz: Option<f64>,
+    #[serde(default)]
+    peak_threshold_i16: Option<f64>,
+    #[serde(default)]
+    min_peak_spacing_samples: Option<usize>,
+    #[serde(default)]
+    max_frame_summaries: Option<usize>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1092,6 +1179,8 @@ struct RecoveryFeatureScoreArgs {
     provided_vitals_source: Option<String>,
     #[serde(default)]
     provided_vitals_provenance_json: Option<String>,
+    #[serde(default)]
+    history_import_in_progress: bool,
     #[serde(default)]
     persist_algorithm_run: bool,
     #[serde(default)]
@@ -2000,6 +2089,10 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
             .and_then(metric_input_readiness_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "metrics.packet_input_summary" => request_args::<PacketInputSummaryArgs>(&request)
+            .and_then(packet_input_summary_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "metrics.motion_features" => request_args::<MotionFeaturesArgs>(&request)
             .and_then(motion_features_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
@@ -2080,6 +2173,12 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
             .and_then(hrv_features_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "metrics.beat_interval_candidate_scan" => {
+            request_args::<BeatIntervalCandidateScanArgs>(&request)
+                .and_then(beat_interval_candidate_scan_bridge)
+                .map(|value| bridge_ok(&request.request_id, value))
+                .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error))
+        }
         "metrics.hrv_capture_validation" => request_args::<HrvCaptureValidationArgs>(&request)
             .and_then(hrv_capture_validation_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
@@ -2140,6 +2239,10 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
                 .map(|value| bridge_ok(&request.request_id, value))
                 .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error))
         }
+        "metrics.persisted_score_reports" => request_args::<PersistedScoreReportsArgs>(&request)
+            .and_then(persisted_score_reports_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "metrics.sleep_score_from_features" => request_args::<SleepFeatureScoreArgs>(&request)
             .and_then(sleep_feature_score_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
@@ -2502,7 +2605,9 @@ pub extern "C" fn open_vitals_core_version_json() -> *mut c_char {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn open_vitals_bridge_handle_json(request_json: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn open_vitals_bridge_handle_json(
+    request_json: *const c_char,
+) -> *mut c_char {
     if request_json.is_null() {
         return response_to_c_string(&bridge_error(
             "unknown",
@@ -2537,8 +2642,9 @@ pub unsafe extern "C" fn open_vitals_bridge_free_string(value: *mut c_char) {
 fn parse_frame_hex_bridge(args: ParseFrameArgs) -> OpenVitalsResult<serde_json::Value> {
     let device_type = parse_device_type(&args.device_type)?;
     let parsed = parse_frame_hex(device_type, &args.frame_hex)?;
-    serde_json::to_value(parsed)
-        .map_err(|error| OpenVitalsError::message(format!("cannot serialize parsed frame: {error}")))
+    serde_json::to_value(parsed).map_err(|error| {
+        OpenVitalsError::message(format!("cannot serialize parsed frame: {error}"))
+    })
 }
 
 fn parse_frame_hex_batch_bridge(args: ParseFrameBatchArgs) -> OpenVitalsResult<serde_json::Value> {
@@ -2750,8 +2856,9 @@ fn axis_range_and_abs(axis: &I16SeriesSummary) -> Option<(f64, f64)> {
 
 fn timeline_from_decoded_frames_bridge(args: TimelineArgs) -> OpenVitalsResult<serde_json::Value> {
     let rows = packet_timeline_from_decoded_frames(&args.decoded_frames)?;
-    serde_json::to_value(rows)
-        .map_err(|error| OpenVitalsError::message(format!("cannot serialize timeline rows: {error}")))
+    serde_json::to_value(rows).map_err(|error| {
+        OpenVitalsError::message(format!("cannot serialize timeline rows: {error}"))
+    })
 }
 
 fn storage_check_bridge(args: StorageCheckArgs) -> OpenVitalsResult<serde_json::Value> {
@@ -2762,8 +2869,9 @@ fn storage_check_bridge(args: StorageCheckArgs) -> OpenVitalsResult<serde_json::
         database_path: Path::new(&args.database_path),
         run_self_test: args.self_test,
     })?;
-    serde_json::to_value(report)
-        .map_err(|error| OpenVitalsError::message(format!("cannot serialize storage report: {error}")))
+    serde_json::to_value(report).map_err(|error| {
+        OpenVitalsError::message(format!("cannot serialize storage report: {error}"))
+    })
 }
 
 fn apply_default_preferences_bridge(
@@ -2802,7 +2910,9 @@ fn get_algorithm_preference_bridge(args: GetPreferenceArgs) -> OpenVitalsResult<
         .map_err(|error| OpenVitalsError::message(format!("cannot serialize preference: {error}")))
 }
 
-fn list_algorithm_preferences_bridge(args: ListPreferencesArgs) -> OpenVitalsResult<serde_json::Value> {
+fn list_algorithm_preferences_bridge(
+    args: ListPreferencesArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let preferences = store.algorithm_preferences(args.scope.as_deref())?;
     serde_json::to_value(preferences)
@@ -3007,8 +3117,9 @@ fn maybe_persist_calibration_report(
             "calibration report did not pass; refusing to persist",
         ));
     }
-    let database_path = database_path
-        .ok_or_else(|| OpenVitalsError::message("database_path is required when persist is true"))?;
+    let database_path = database_path.ok_or_else(|| {
+        OpenVitalsError::message("database_path is required when persist is true")
+    })?;
     let calibration_run_id = calibration_run_id
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| {
@@ -3214,11 +3325,14 @@ fn raw_export_bridge(args: RawExportArgs) -> OpenVitalsResult<serde_json::Value>
             zip_output_path: args.zip_output_path.as_deref().map(Path::new),
         },
     )?;
-    serde_json::to_value(report)
-        .map_err(|error| OpenVitalsError::message(format!("cannot serialize export report: {error}")))
+    serde_json::to_value(report).map_err(|error| {
+        OpenVitalsError::message(format!("cannot serialize export report: {error}"))
+    })
 }
 
-fn export_validate_bundle_bridge(args: ExportValidateBundleArgs) -> OpenVitalsResult<serde_json::Value> {
+fn export_validate_bundle_bridge(
+    args: ExportValidateBundleArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     if args.path.trim().is_empty() {
         return Err(OpenVitalsError::message("path is required"));
     }
@@ -3379,10 +3493,10 @@ fn ui_coverage_audit_bridge(args: UiCoverageAuditArgs) -> OpenVitalsResult<serde
         .filter(|path| !path.trim().is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(default_ui_coverage_map_path);
-    let input_raw =
-        fs::read_to_string(&input_path).map_err(|source| OpenVitalsError::io(&input_path, source))?;
-    let input: UiCoverageAuditInput =
-        serde_json::from_str(&input_raw).map_err(|source| OpenVitalsError::json(&input_path, source))?;
+    let input_raw = fs::read_to_string(&input_path)
+        .map_err(|source| OpenVitalsError::io(&input_path, source))?;
+    let input: UiCoverageAuditInput = serde_json::from_str(&input_raw)
+        .map_err(|source| OpenVitalsError::json(&input_path, source))?;
     let base_dir = input_path.parent().unwrap_or_else(|| Path::new("."));
     let report = run_ui_coverage_audit(&input, base_dir)?;
     serde_json::to_value(report).map_err(|error| {
@@ -3432,9 +3546,14 @@ fn reference_compare_bridge(args: ReferenceCompareArgs) -> OpenVitalsResult<serd
                 let input: SleepV1Input = serde_json::from_value(normalize_sleep_v1_input_value(
                     args.input,
                 ))
-                .map_err(|error| OpenVitalsError::message(format!("invalid sleep v1 input: {error}")))?;
+                .map_err(|error| {
+                    OpenVitalsError::message(format!("invalid sleep v1 input: {error}"))
+                })?;
                 if let Some(reference_report) = args.reference_report {
-                    compare_sleep_v1_open_vitals_to_external_reference_report(&input, &reference_report)?
+                    compare_sleep_v1_open_vitals_to_external_reference_report(
+                        &input,
+                        &reference_report,
+                    )?
                 } else {
                     compare_sleep_v1_open_vitals_to_reference(&input)?
                 }
@@ -3443,20 +3562,25 @@ fn reference_compare_bridge(args: ReferenceCompareArgs) -> OpenVitalsResult<serd
                     OpenVitalsError::message(format!("invalid sleep input: {error}"))
                 })?;
                 if let Some(reference_report) = args.reference_report {
-                    compare_sleep_open_vitals_to_external_reference_report(&input, &reference_report)?
+                    compare_sleep_open_vitals_to_external_reference_report(
+                        &input,
+                        &reference_report,
+                    )?
                 } else {
                     compare_sleep_open_vitals_to_reference(&input)?
                 }
             }
         }
         "strain" => {
-            let input: StrainInput = serde_json::from_value(args.input)
-                .map_err(|error| OpenVitalsError::message(format!("invalid strain input: {error}")))?;
+            let input: StrainInput = serde_json::from_value(args.input).map_err(|error| {
+                OpenVitalsError::message(format!("invalid strain input: {error}"))
+            })?;
             compare_strain_open_vitals_to_reference(&input)?
         }
         "stress" => {
-            let input: StressInput = serde_json::from_value(args.input)
-                .map_err(|error| OpenVitalsError::message(format!("invalid stress input: {error}")))?;
+            let input: StressInput = serde_json::from_value(args.input).map_err(|error| {
+                OpenVitalsError::message(format!("invalid stress input: {error}"))
+            })?;
             compare_stress_open_vitals_to_reference(&input)?
         }
         other => {
@@ -3486,7 +3610,9 @@ fn normalize_sleep_v1_input_value(input: serde_json::Value) -> serde_json::Value
     serde_json::Value::Object(merged)
 }
 
-fn metric_input_readiness_bridge(args: MetricInputReadinessArgs) -> OpenVitalsResult<serde_json::Value> {
+fn metric_input_readiness_bridge(
+    args: MetricInputReadinessArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let correlation = run_capture_correlation_for_store(
         &store,
@@ -3511,6 +3637,439 @@ fn metric_input_readiness_bridge(args: MetricInputReadinessArgs) -> OpenVitalsRe
             "cannot serialize metric input readiness report: {error}"
         ))
     })
+}
+
+fn packet_input_summary_bridge(
+    args: PacketInputSummaryArgs,
+) -> OpenVitalsResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let mut reports = serde_json::Map::new();
+    let min_owned_captures = args
+        .min_owned_captures
+        .unwrap_or(DEFAULT_MIN_OWNED_CAPTURES_PER_SUMMARY);
+
+    let correlation = run_capture_correlation_for_store(
+        &store,
+        &args.database_path,
+        &args.start,
+        &args.end,
+        CaptureCorrelationOptions {
+            min_owned_captures_per_summary: min_owned_captures,
+            require_owned_captures: args.require_owned_captures,
+        },
+    )?;
+    packet_input_summary_insert(
+        &mut reports,
+        "readiness",
+        run_metric_input_readiness(
+            &correlation,
+            MetricInputReadinessOptions {
+                require_scores_ready: args.require_scores_ready,
+            },
+        ),
+    )?;
+
+    let feature_options = MotionFeatureOptions {
+        min_owned_captures_per_summary: min_owned_captures,
+        require_trusted_evidence: args.require_trusted_evidence,
+    };
+    packet_input_summary_insert(
+        &mut reports,
+        "motion",
+        run_motion_feature_report_for_store(
+            &store,
+            &args.database_path,
+            &args.start,
+            &args.end,
+            feature_options,
+        )?,
+    )?;
+    packet_input_summary_insert(
+        &mut reports,
+        "heart_rate",
+        run_heart_rate_feature_report_for_store(
+            &store,
+            &args.database_path,
+            &args.start,
+            &args.end,
+            HeartRateFeatureOptions {
+                min_owned_captures_per_summary: min_owned_captures,
+                require_trusted_evidence: args.require_trusted_evidence,
+            },
+        )?,
+    )?;
+    packet_input_summary_insert(
+        &mut reports,
+        "vital_event",
+        run_vital_event_feature_report_for_store(
+            &store,
+            &args.database_path,
+            &args.start,
+            &args.end,
+            VitalEventFeatureOptions {
+                min_owned_captures_per_summary: min_owned_captures,
+                require_trusted_evidence: args.require_trusted_evidence,
+            },
+        )?,
+    )?;
+    packet_input_summary_insert(
+        &mut reports,
+        "step_discovery",
+        run_step_packet_discovery_for_store(
+            &store,
+            &args.database_path,
+            &args.start,
+            &args.end,
+            StepPacketDiscoveryOptions {
+                max_candidate_fields: args.max_step_candidate_fields.unwrap_or(100),
+            },
+        )?,
+    )?;
+    packet_input_summary_insert(
+        &mut reports,
+        "step_counter_ingest",
+        run_step_counter_ingest_for_store(
+            &store,
+            &args.database_path,
+            &args.start,
+            &args.end,
+            StepCounterIngestOptions {
+                max_candidate_fields: args.max_step_ingest_candidate_fields.unwrap_or(1_000),
+            },
+        )?,
+    )?;
+    packet_input_summary_insert(
+        &mut reports,
+        "hrv",
+        run_hrv_feature_report_for_store(
+            &store,
+            &args.database_path,
+            &args.start,
+            &args.end,
+            HrvFeatureOptions {
+                min_owned_captures_per_summary: min_owned_captures,
+                require_trusted_evidence: args.require_trusted_evidence,
+                min_rr_intervals_to_compute: args.hrv_min_rr_intervals_to_compute.unwrap_or(2),
+                baseline_min_days: args.hrv_baseline_min_days.unwrap_or(3),
+                require_baseline: args.hrv_require_baseline,
+            },
+        )?,
+    )?;
+    packet_input_summary_insert(
+        &mut reports,
+        "window",
+        run_metric_window_feature_report_for_store(
+            &store,
+            &args.database_path,
+            &args.start,
+            &args.end,
+            MetricWindowFeatureOptions {
+                min_owned_captures_per_summary: min_owned_captures,
+                require_trusted_evidence: args.require_trusted_evidence,
+                resting_hr_bpm: None,
+                max_hr_bpm: None,
+            },
+        )?,
+    )?;
+    packet_input_summary_insert(
+        &mut reports,
+        "resting_hr",
+        run_resting_heart_rate_feature_report_for_store(
+            &store,
+            &args.database_path,
+            &args.start,
+            &args.end,
+            RestingHeartRateFeatureOptions {
+                min_owned_captures_per_summary: min_owned_captures,
+                require_trusted_evidence: args.require_trusted_evidence,
+                baseline_min_days: args.resting_hr_baseline_min_days.unwrap_or(3),
+                require_baseline: args.resting_hr_require_baseline,
+            },
+        )?,
+    )?;
+
+    let mut resting_hr_bpm = None;
+    if let Some(rollup_args) = args.resting_hr_daily_rollup.as_ref() {
+        let report = rollup_resting_heart_rate_day_for_store(
+            &store,
+            &rollup_args.database_path,
+            RestingHeartRateDailyRollupOptions {
+                date_key: &rollup_args.date_key,
+                timezone: &rollup_args.timezone,
+                start: &rollup_args.start,
+                end: &rollup_args.end,
+                min_owned_captures_per_summary: rollup_args
+                    .min_owned_captures
+                    .unwrap_or(DEFAULT_MIN_OWNED_CAPTURES_PER_SUMMARY),
+                require_trusted_evidence: rollup_args.require_trusted_evidence,
+                baseline_min_days: rollup_args.baseline_min_days.unwrap_or(3),
+                require_baseline: rollup_args.require_baseline,
+                min_sample_count: rollup_args.min_sample_count.unwrap_or(2),
+                write_metric: rollup_args.write_metric,
+            },
+        )?;
+        let value = metric_result_to_value(report)?;
+        resting_hr_bpm = value.get("resting_hr_bpm").and_then(Value::as_f64);
+        reports.insert("resting_hr_rollup".to_string(), value);
+    }
+    if let Some(rollup_args) = args.step_counter_daily_rollup.as_ref() {
+        packet_input_summary_insert(
+            &mut reports,
+            "step_counter_rollup",
+            rollup_device_step_counter_day(
+                &store,
+                StepCounterDailyRollupOptions {
+                    date_key: &rollup_args.date_key,
+                    timezone: &rollup_args.timezone,
+                    start_time_unix_ms: rollup_args.start_time_unix_ms,
+                    end_time_unix_ms: rollup_args.end_time_unix_ms,
+                    min_sample_count: rollup_args.min_sample_count.unwrap_or(2),
+                    write_metric: rollup_args.write_metric,
+                },
+            )?,
+        )?;
+    }
+    if let Some(rollup_args) = args.step_counter_hourly_rollup.as_ref() {
+        packet_input_summary_insert(
+            &mut reports,
+            "step_counter_hourly_rollup",
+            rollup_device_step_counter_hour(
+                &store,
+                StepCounterHourlyRollupOptions {
+                    date_key: &rollup_args.date_key,
+                    timezone: &rollup_args.timezone,
+                    start_time_unix_ms: rollup_args.start_time_unix_ms,
+                    end_time_unix_ms: rollup_args.end_time_unix_ms,
+                    min_sample_count: rollup_args.min_sample_count.unwrap_or(2),
+                    write_metric: rollup_args.write_metric,
+                },
+            )?,
+        )?;
+    }
+    if let Some(status_args) = args.activity_unavailable_daily_status.as_ref() {
+        packet_input_summary_insert(
+            &mut reports,
+            "activity_unavailable_status",
+            rollup_activity_unavailable_daily_status_for_store(
+                &store,
+                ActivityUnavailableDailyStatusOptions {
+                    date_key: &status_args.date_key,
+                    timezone: &status_args.timezone,
+                    start_time_unix_ms: status_args.start_time_unix_ms,
+                    end_time_unix_ms: status_args.end_time_unix_ms,
+                    min_sample_count: status_args.min_sample_count.unwrap_or(2),
+                    write_metric: status_args.write_metric,
+                },
+            )?,
+        )?;
+    }
+    if let Some(mut rollup_args) = args.energy_daily_rollup.clone() {
+        if rollup_args.resting_hr_bpm.is_none() {
+            rollup_args.resting_hr_bpm = resting_hr_bpm;
+        }
+        packet_input_summary_insert(
+            &mut reports,
+            "energy_rollup",
+            rollup_energy_day_for_store(
+                &store,
+                &rollup_args.database_path,
+                energy_daily_rollup_options(&rollup_args),
+            )?,
+        )?;
+    }
+    if let Some(mut rollup_args) = args.energy_hourly_rollup.clone() {
+        if rollup_args.resting_hr_bpm.is_none() {
+            rollup_args.resting_hr_bpm = resting_hr_bpm;
+        }
+        packet_input_summary_insert(
+            &mut reports,
+            "energy_hourly_rollup",
+            rollup_energy_hour_for_store(
+                &store,
+                &rollup_args.database_path,
+                energy_hourly_rollup_options(&rollup_args),
+            )?,
+        )?;
+    }
+    if let Some(mut status_args) = args.energy_unavailable_daily_status.clone() {
+        if status_args.resting_hr_bpm.is_none() {
+            status_args.resting_hr_bpm = resting_hr_bpm;
+        }
+        packet_input_summary_insert(
+            &mut reports,
+            "energy_unavailable_status",
+            rollup_energy_unavailable_daily_status_for_store(
+                &store,
+                &status_args.database_path,
+                energy_daily_rollup_options(&status_args),
+            )?,
+        )?;
+    }
+    if let Some(rollup_args) = args.recovery_sensor_daily_rollup.as_ref() {
+        packet_input_summary_insert(
+            &mut reports,
+            "recovery_sensor_rollup",
+            rollup_recovery_sensor_daily_for_store(
+                &store,
+                &rollup_args.database_path,
+                recovery_sensor_daily_rollup_options(rollup_args),
+            )?,
+        )?;
+    }
+    if let Some(status_args) = args.recovery_unavailable_daily_status.as_ref() {
+        packet_input_summary_insert(
+            &mut reports,
+            "recovery_unavailable_status",
+            rollup_recovery_unavailable_daily_status_for_store(
+                &store,
+                &status_args.database_path,
+                recovery_unavailable_daily_status_options(status_args),
+            )?,
+        )?;
+    }
+    if let Some(list_args) = args.daily_activity_metrics.as_ref() {
+        let metrics = store.daily_activity_metrics_between(
+            list_args.start_time_unix_ms,
+            list_args.end_time_unix_ms,
+        )?;
+        reports.insert(
+            "daily_activity".to_string(),
+            json!({
+                "schema": "open_vitals.daily-activity-metric-list.v1",
+                "generated_by": "open-vitals-bridge",
+                "start_time_unix_ms": list_args.start_time_unix_ms,
+                "end_time_unix_ms": list_args.end_time_unix_ms,
+                "metric_count": metrics.len(),
+                "metrics": metrics,
+            }),
+        );
+    }
+    if let Some(list_args) = args.hourly_activity_metrics.as_ref() {
+        let metrics = store.hourly_activity_metrics_between(
+            list_args.start_time_unix_ms,
+            list_args.end_time_unix_ms,
+        )?;
+        reports.insert(
+            "hourly_activity".to_string(),
+            json!({
+                "schema": "open_vitals.hourly-activity-metric-list.v1",
+                "generated_by": "open-vitals-bridge",
+                "start_time_unix_ms": list_args.start_time_unix_ms,
+                "end_time_unix_ms": list_args.end_time_unix_ms,
+                "metric_count": metrics.len(),
+                "metrics": metrics,
+            }),
+        );
+    }
+    if let Some(list_args) = args.daily_recovery_metrics.as_ref() {
+        let metrics = store.daily_recovery_metrics_between(
+            list_args.start_time_unix_ms,
+            list_args.end_time_unix_ms,
+        )?;
+        reports.insert(
+            "daily_recovery".to_string(),
+            json!({
+                "schema": "open_vitals.daily-recovery-metric-list.v1",
+                "generated_by": "open-vitals-bridge",
+                "start_time_unix_ms": list_args.start_time_unix_ms,
+                "end_time_unix_ms": list_args.end_time_unix_ms,
+                "metric_count": metrics.len(),
+                "metrics": metrics,
+            }),
+        );
+    }
+
+    Ok(json!({
+        "schema": "open_vitals.packet-input-summary.v1",
+        "generated_by": "open-vitals-bridge",
+        "start": args.start,
+        "end": args.end,
+        "report_count": reports.len(),
+        "reports": reports,
+    }))
+}
+
+fn packet_input_summary_insert<T: Serialize>(
+    reports: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    report: T,
+) -> OpenVitalsResult<()> {
+    reports.insert(key.to_string(), metric_result_to_value(report)?);
+    Ok(())
+}
+
+fn energy_daily_rollup_options(args: &EnergyDailyRollupArgs) -> EnergyDailyRollupOptions<'_> {
+    EnergyDailyRollupOptions {
+        date_key: &args.date_key,
+        timezone: &args.timezone,
+        start: &args.start,
+        end: &args.end,
+        min_owned_captures_per_summary: args
+            .min_owned_captures
+            .unwrap_or(DEFAULT_MIN_OWNED_CAPTURES_PER_SUMMARY),
+        require_trusted_evidence: args.require_trusted_evidence,
+        profile_weight_kg: args.profile_weight_kg,
+        profile_age_years: args.profile_age_years,
+        profile_sex: args.profile_sex.as_deref(),
+        resting_hr_bpm: args.resting_hr_bpm,
+        max_hr_bpm: args.max_hr_bpm,
+        min_heart_rate_samples: args.min_heart_rate_samples.unwrap_or(2),
+        write_metric: args.write_metric,
+    }
+}
+
+fn energy_hourly_rollup_options(args: &EnergyHourlyRollupArgs) -> EnergyHourlyRollupOptions<'_> {
+    EnergyHourlyRollupOptions {
+        date_key: &args.date_key,
+        timezone: &args.timezone,
+        start: &args.start,
+        end: &args.end,
+        min_owned_captures_per_summary: args
+            .min_owned_captures
+            .unwrap_or(DEFAULT_MIN_OWNED_CAPTURES_PER_SUMMARY),
+        require_trusted_evidence: args.require_trusted_evidence,
+        profile_weight_kg: args.profile_weight_kg,
+        profile_age_years: args.profile_age_years,
+        profile_sex: args.profile_sex.as_deref(),
+        resting_hr_bpm: args.resting_hr_bpm,
+        max_hr_bpm: args.max_hr_bpm,
+        min_heart_rate_samples: args.min_heart_rate_samples.unwrap_or(2),
+        write_metric: args.write_metric,
+    }
+}
+
+fn recovery_unavailable_daily_status_options(
+    args: &RecoveryUnavailableDailyStatusArgs,
+) -> RecoveryUnavailableDailyStatusOptions<'_> {
+    RecoveryUnavailableDailyStatusOptions {
+        date_key: &args.date_key,
+        timezone: &args.timezone,
+        start: &args.start,
+        end: &args.end,
+        min_owned_captures_per_summary: args
+            .min_owned_captures
+            .unwrap_or(DEFAULT_MIN_OWNED_CAPTURES_PER_SUMMARY),
+        require_trusted_evidence: args.require_trusted_evidence,
+        min_rr_intervals_to_compute: args.min_rr_intervals_to_compute.unwrap_or(2),
+        write_metric: args.write_metric,
+    }
+}
+
+fn recovery_sensor_daily_rollup_options(
+    args: &RecoverySensorDailyRollupArgs,
+) -> RecoverySensorDailyRollupOptions<'_> {
+    RecoverySensorDailyRollupOptions {
+        date_key: &args.date_key,
+        timezone: &args.timezone,
+        start: &args.start,
+        end: &args.end,
+        min_owned_captures_per_summary: args
+            .min_owned_captures
+            .unwrap_or(DEFAULT_MIN_OWNED_CAPTURES_PER_SUMMARY),
+        require_trusted_evidence: args.require_trusted_evidence,
+        min_rr_intervals_to_compute: args.min_rr_intervals_to_compute.unwrap_or(2),
+        write_metric: args.write_metric,
+    }
 }
 
 fn motion_features_bridge(args: MotionFeaturesArgs) -> OpenVitalsResult<serde_json::Value> {
@@ -3553,7 +4112,9 @@ fn heart_rate_features_bridge(args: HeartRateFeaturesArgs) -> OpenVitalsResult<s
     })
 }
 
-fn vital_event_features_bridge(args: VitalEventFeaturesArgs) -> OpenVitalsResult<serde_json::Value> {
+fn vital_event_features_bridge(
+    args: VitalEventFeaturesArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let report = run_vital_event_feature_report_for_store(
         &store,
@@ -3574,7 +4135,9 @@ fn vital_event_features_bridge(args: VitalEventFeaturesArgs) -> OpenVitalsResult
     })
 }
 
-fn step_packet_discovery_bridge(args: StepPacketDiscoveryArgs) -> OpenVitalsResult<serde_json::Value> {
+fn step_packet_discovery_bridge(
+    args: StepPacketDiscoveryArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let report = run_step_packet_discovery_for_store(
         &store,
@@ -3844,7 +4407,9 @@ fn energy_unavailable_daily_status_bridge(
     })
 }
 
-fn energy_hourly_rollup_bridge(args: EnergyHourlyRollupArgs) -> OpenVitalsResult<serde_json::Value> {
+fn energy_hourly_rollup_bridge(
+    args: EnergyHourlyRollupArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let report = rollup_energy_hour_for_store(
         &store,
@@ -3947,6 +4512,163 @@ fn validate_requested_primary_algorithm(
     Ok(())
 }
 
+fn persisted_score_reports_bridge(
+    args: PersistedScoreReportsArgs,
+) -> OpenVitalsResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let requested_families: BTreeSet<String> = if args.families.is_empty() {
+        ["sleep", "recovery", "strain"]
+            .into_iter()
+            .map(str::to_string)
+            .collect()
+    } else {
+        args.families
+            .iter()
+            .map(|family| family.trim().to_lowercase())
+            .filter(|family| !family.is_empty())
+            .collect()
+    };
+
+    let runs = store.algorithm_runs_overlapping(&args.start, &args.end)?;
+    let mut latest_runs: BTreeMap<&'static str, &AlgorithmRunRecord> = BTreeMap::new();
+    for run in &runs {
+        let Some(family) = persisted_score_family_for_algorithm(&run.algorithm_id, &run.version)
+        else {
+            continue;
+        };
+        if !requested_families.contains(family) {
+            continue;
+        }
+        let should_replace = latest_runs
+            .get(family)
+            .map(|existing| persisted_score_run_is_newer(run, existing))
+            .unwrap_or(true);
+        if should_replace {
+            latest_runs.insert(family, run);
+        }
+    }
+
+    let mut reports = BTreeMap::new();
+    for (family, run) in latest_runs {
+        reports.insert(family, persisted_score_report_for_run(family, run)?);
+    }
+
+    Ok(json!({
+        "schema": "open_vitals.persisted-score-reports.v1",
+        "generated_by": "open-vitals-persisted-score-loader",
+        "start_time": args.start,
+        "end_time": args.end,
+        "report_count": reports.len(),
+        "reports": reports,
+    }))
+}
+
+fn persisted_score_family_for_algorithm(algorithm_id: &str, version: &str) -> Option<&'static str> {
+    match (algorithm_id, version) {
+        (OPENVITALS_SLEEP_V1_ID, OPENVITALS_SLEEP_V1_VERSION)
+        | (OPENVITALS_SLEEP_V0_ID, OPENVITALS_SLEEP_V0_VERSION) => Some("sleep"),
+        (OPENVITALS_RECOVERY_V0_ID, OPENVITALS_RECOVERY_V0_VERSION) => Some("recovery"),
+        (OPENVITALS_STRAIN_V0_ID, OPENVITALS_STRAIN_V0_VERSION) => Some("strain"),
+        _ => None,
+    }
+}
+
+fn persisted_score_run_is_newer(
+    candidate: &AlgorithmRunRecord,
+    existing: &AlgorithmRunRecord,
+) -> bool {
+    if candidate.end_time != existing.end_time {
+        return candidate.end_time > existing.end_time;
+    }
+    if candidate.start_time != existing.start_time {
+        return candidate.start_time > existing.start_time;
+    }
+    let candidate_rank =
+        persisted_score_algorithm_rank(&candidate.algorithm_id, &candidate.version);
+    let existing_rank = persisted_score_algorithm_rank(&existing.algorithm_id, &existing.version);
+    if candidate_rank != existing_rank {
+        return candidate_rank > existing_rank;
+    }
+    candidate.run_id > existing.run_id
+}
+
+fn persisted_score_algorithm_rank(algorithm_id: &str, version: &str) -> u8 {
+    match (algorithm_id, version) {
+        (OPENVITALS_SLEEP_V1_ID, OPENVITALS_SLEEP_V1_VERSION) => 20,
+        (OPENVITALS_SLEEP_V0_ID, OPENVITALS_SLEEP_V0_VERSION) => 10,
+        (OPENVITALS_RECOVERY_V0_ID, OPENVITALS_RECOVERY_V0_VERSION)
+        | (OPENVITALS_STRAIN_V0_ID, OPENVITALS_STRAIN_V0_VERSION) => 10,
+        _ => 0,
+    }
+}
+
+fn persisted_score_report_for_run(
+    family: &str,
+    run: &AlgorithmRunRecord,
+) -> OpenVitalsResult<serde_json::Value> {
+    let output = parse_algorithm_run_json("output_json", &run.output_json)?;
+    let quality_flags = parse_algorithm_run_json("quality_flags_json", &run.quality_flags_json)?;
+    let provenance_json = parse_algorithm_run_json("provenance_json", &run.provenance_json)?;
+    let errors = provenance_json
+        .get("errors")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    let provenance = provenance_json
+        .get("provenance")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let pass = !output.is_null();
+    let issues = if pass {
+        json!([])
+    } else {
+        json!(["persisted_score_output_missing"])
+    };
+    let next_actions = if pass {
+        json!([])
+    } else {
+        json!(["Recompute packet-derived scores after fresh local packet capture."])
+    };
+
+    Ok(json!({
+        "schema": "open_vitals.persisted-score-report.v1",
+        "generated_by": "open-vitals-persisted-score-loader",
+        "source": "algorithm_runs",
+        "persisted": true,
+        "run_id": run.run_id,
+        "family": family,
+        "pass": pass,
+        "start_time": run.start_time,
+        "end_time": run.end_time,
+        "issues": issues,
+        "next_actions": next_actions,
+        "score_result": {
+            "algorithm_id": run.algorithm_id,
+            "algorithm_version": run.version,
+            "family": family,
+            "start_time": run.start_time,
+            "end_time": run.end_time,
+            "output": output,
+            "quality_flags": quality_flags,
+            "errors": errors,
+            "provenance": provenance,
+        },
+        "persisted_algorithm_run": {
+            "persist_requested": true,
+            "inserted": false,
+            "run_id": run.run_id,
+            "algorithm_id": run.algorithm_id,
+            "algorithm_version": run.version,
+            "start_time": run.start_time,
+            "end_time": run.end_time,
+        },
+    }))
+}
+
+fn parse_algorithm_run_json(field: &str, value: &str) -> OpenVitalsResult<Value> {
+    serde_json::from_str(value)
+        .map_err(|error| OpenVitalsError::message(format!("{field} is not valid JSON: {error}")))
+}
+
 fn hrv_features_bridge(args: HrvFeaturesArgs) -> OpenVitalsResult<serde_json::Value> {
     validate_requested_primary_algorithm(
         "hrv",
@@ -3985,7 +4707,31 @@ fn hrv_features_bridge(args: HrvFeaturesArgs) -> OpenVitalsResult<serde_json::Va
     Ok(value)
 }
 
-fn hrv_capture_validation_bridge(args: HrvCaptureValidationArgs) -> OpenVitalsResult<serde_json::Value> {
+fn beat_interval_candidate_scan_bridge(
+    args: BeatIntervalCandidateScanArgs,
+) -> OpenVitalsResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let report = run_beat_interval_candidate_scan_for_store(
+        &store,
+        &args.start,
+        &args.end,
+        BeatIntervalCandidateScanOptions {
+            sample_rate_hz: args.sample_rate_hz.unwrap_or(25.0),
+            peak_threshold_i16: args.peak_threshold_i16.unwrap_or(800.0),
+            min_peak_spacing_samples: args.min_peak_spacing_samples.unwrap_or(8),
+            max_frame_summaries: args.max_frame_summaries.unwrap_or(24),
+        },
+    )?;
+    serde_json::to_value(report).map_err(|error| {
+        OpenVitalsError::message(format!(
+            "cannot serialize beat-interval candidate scan report: {error}"
+        ))
+    })
+}
+
+fn hrv_capture_validation_bridge(
+    args: HrvCaptureValidationArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let report = run_hrv_capture_validation_for_store(
         &store,
@@ -4180,7 +4926,9 @@ fn recovery_sensor_daily_rollup_bridge(
     })
 }
 
-fn metric_window_features_bridge(args: MetricWindowFeaturesArgs) -> OpenVitalsResult<serde_json::Value> {
+fn metric_window_features_bridge(
+    args: MetricWindowFeaturesArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let report = run_metric_window_feature_report_for_store(
         &store,
@@ -5106,7 +5854,36 @@ fn sleep_feature_score_bridge(args: SleepFeatureScoreArgs) -> OpenVitalsResult<s
     Ok(value)
 }
 
-fn recovery_feature_score_bridge(args: RecoveryFeatureScoreArgs) -> OpenVitalsResult<serde_json::Value> {
+fn sleep_v1_result_ready_for_recovery(
+    result: &AlgorithmRunResult<crate::metrics::SleepV1Output>,
+) -> bool {
+    result.errors.is_empty()
+        && result.output.as_ref().is_some_and(|output| {
+            output.status_report.can_show_final_score || output.status_report.can_show_trained_score
+        })
+}
+
+fn attach_bridge_recovery_provided_vitals_provenance<T>(
+    result: &mut AlgorithmRunResult<T>,
+    vitals: &RecoveryProvidedVitalsFeature,
+) {
+    if let Some(object) = result.provenance.as_object_mut() {
+        object.insert(
+            "provided_vitals".to_string(),
+            json!({
+                "metric_input_id": vitals.metric_input_id,
+                "source": vitals.source,
+                "trusted_metric_input": vitals.trusted_metric_input,
+                "quality_flags": vitals.quality_flags,
+                "provenance": vitals.provenance,
+            }),
+        );
+    }
+}
+
+fn recovery_feature_score_bridge(
+    args: RecoveryFeatureScoreArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     validate_requested_primary_algorithm(
         "recovery",
         args.algorithm_id.as_deref(),
@@ -5168,6 +5945,70 @@ fn recovery_feature_score_bridge(args: RecoveryFeatureScoreArgs) -> OpenVitalsRe
             "cannot serialize recovery feature score report: {error}"
         ))
     })?;
+    let mut score_result_for_persist = report.score_result.clone();
+    value["recovery_sleep_score_source"] = json!({
+        "selected": "sleep_v0_feature_score",
+        "reason": "sleep_v1_final_score_unavailable"
+    });
+    if let (Some(sleep_input), Some(mut recovery_input)) = (
+        report.sleep_report.sleep_input.as_ref(),
+        report.recovery_input.clone(),
+    ) {
+        let sleep_v1_input = sleep_v1_input_from_feature_score(
+            &store,
+            sleep_input,
+            &report.sleep_report,
+            args.history_import_in_progress,
+        )?;
+        let sleep_v1_result = open_vitals_sleep_v1(&sleep_v1_input);
+        value["sleep_v1_input"] = serde_json::to_value(&sleep_v1_input).map_err(|error| {
+            OpenVitalsError::message(format!("cannot serialize recovery sleep v1 input: {error}"))
+        })?;
+        value["sleep_v1_score_result"] = metric_result_to_value(&sleep_v1_result)?;
+        if sleep_v1_result_ready_for_recovery(&sleep_v1_result) {
+            let sleep_v1_score = sleep_v1_result
+                .output
+                .as_ref()
+                .map(|output| output.score_0_to_100)
+                .unwrap_or(recovery_input.sleep_score_0_to_100);
+            recovery_input.sleep_score_0_to_100 = sleep_v1_score;
+            let mut recovery_result = open_vitals_recovery_v0(&recovery_input);
+            if let Some(vitals) = report.provided_vitals.as_ref() {
+                recovery_result
+                    .quality_flags
+                    .extend(vitals.quality_flags.iter().cloned());
+                recovery_result.quality_flags.sort();
+                recovery_result.quality_flags.dedup();
+                attach_bridge_recovery_provided_vitals_provenance(&mut recovery_result, vitals);
+            }
+            if let Some(object) = recovery_result.provenance.as_object_mut() {
+                object.insert(
+                    "sleep_score_source".to_string(),
+                    json!({
+                        "algorithm_id": sleep_v1_result.algorithm_id,
+                        "algorithm_version": sleep_v1_result.algorithm_version,
+                        "status_report_state": sleep_v1_result
+                            .output
+                            .as_ref()
+                            .map(|output| output.status_report.report_state.as_str()),
+                        "score_0_to_100": sleep_v1_score,
+                    }),
+                );
+            }
+            value["recovery_input"] = serde_json::to_value(&recovery_input).map_err(|error| {
+                OpenVitalsError::message(format!(
+                    "cannot serialize recovery v1 sleep input: {error}"
+                ))
+            })?;
+            value["score_result"] = metric_result_to_value(&recovery_result)?;
+            value["recovery_sleep_score_source"] = json!({
+                "selected": "sleep_v1_final_score",
+                "reason": "sleep_v1_status_ready_for_recovery",
+                "score_0_to_100": sleep_v1_score
+            });
+            score_result_for_persist = Some(recovery_result);
+        }
+    }
     if args.persist_algorithm_run && !report.pass {
         value["persisted_algorithm_run"] = json!({
             "persist_requested": true,
@@ -5182,13 +6023,15 @@ fn recovery_feature_score_bridge(args: RecoveryFeatureScoreArgs) -> OpenVitalsRe
             args.persist_algorithm_run,
             args.algorithm_run_id.as_deref(),
             "packet-derived-recovery",
-            report.score_result.as_ref(),
+            score_result_for_persist.as_ref(),
         )?;
     }
     Ok(value)
 }
 
-fn strain_feature_score_bridge(args: StrainFeatureScoreArgs) -> OpenVitalsResult<serde_json::Value> {
+fn strain_feature_score_bridge(
+    args: StrainFeatureScoreArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     validate_requested_primary_algorithm(
         "strain",
         args.algorithm_id.as_deref(),
@@ -5231,7 +6074,9 @@ fn strain_feature_score_bridge(args: StrainFeatureScoreArgs) -> OpenVitalsResult
     Ok(value)
 }
 
-fn stress_feature_score_bridge(args: StressFeatureScoreArgs) -> OpenVitalsResult<serde_json::Value> {
+fn stress_feature_score_bridge(
+    args: StressFeatureScoreArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     validate_requested_primary_algorithm(
         "stress",
         args.algorithm_id.as_deref(),
@@ -5309,7 +6154,9 @@ fn capture_import_frame_batch_bridge(
     })
 }
 
-fn overnight_mirror_batch_bridge(args: OvernightMirrorBatchArgs) -> OpenVitalsResult<serde_json::Value> {
+fn overnight_mirror_batch_bridge(
+    args: OvernightMirrorBatchArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let sessions: Vec<OvernightSyncSessionInput<'_>> = args
         .sessions
@@ -5389,8 +6236,9 @@ fn overnight_mirror_batch_bridge(args: OvernightMirrorBatchArgs) -> OpenVitalsRe
         .collect();
     let report =
         store.mirror_overnight_batch(&sessions, &raw_notifications, &historical_range_polls)?;
-    serde_json::to_value(report)
-        .map_err(|error| OpenVitalsError::message(format!("cannot serialize overnight mirror: {error}")))
+    serde_json::to_value(report).map_err(|error| {
+        OpenVitalsError::message(format!("cannot serialize overnight mirror: {error}"))
+    })
 }
 
 fn overnight_mirror_counts_bridge(
@@ -5415,8 +6263,9 @@ fn capture_timeline_bridge(args: CaptureTimelineArgs) -> OpenVitalsResult<serde_
     }
     let store = open_bridge_store(&args.database_path)?;
     let rows = packet_timeline_between(&store, &args.start, &args.end)?;
-    serde_json::to_value(rows)
-        .map_err(|error| OpenVitalsError::message(format!("cannot serialize capture timeline: {error}")))
+    serde_json::to_value(rows).map_err(|error| {
+        OpenVitalsError::message(format!("cannot serialize capture timeline: {error}"))
+    })
 }
 
 fn capture_observability_timeline_bridge(
@@ -5432,7 +6281,9 @@ fn capture_observability_timeline_bridge(
         return Err(OpenVitalsError::message("start must be earlier than end"));
     }
     if args.start_unix_ms < 0 {
-        return Err(OpenVitalsError::message("start_unix_ms must be non-negative"));
+        return Err(OpenVitalsError::message(
+            "start_unix_ms must be non-negative",
+        ));
     }
     if args.end_unix_ms <= 0 {
         return Err(OpenVitalsError::message("end_unix_ms must be positive"));
@@ -5453,7 +6304,9 @@ fn capture_observability_timeline_bridge(
     })
 }
 
-fn capture_start_session_bridge(args: CaptureStartSessionArgs) -> OpenVitalsResult<serde_json::Value> {
+fn capture_start_session_bridge(
+    args: CaptureStartSessionArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let provenance_json = if args.provenance.is_null() {
         "{}".to_string()
@@ -5461,8 +6314,9 @@ fn capture_start_session_bridge(args: CaptureStartSessionArgs) -> OpenVitalsResu
         if !args.provenance.is_object() {
             return Err(OpenVitalsError::message("provenance must be a JSON object"));
         }
-        serde_json::to_string(&args.provenance)
-            .map_err(|error| OpenVitalsError::message(format!("cannot serialize provenance: {error}")))?
+        serde_json::to_string(&args.provenance).map_err(|error| {
+            OpenVitalsError::message(format!("cannot serialize provenance: {error}"))
+        })?
     };
     let inserted = store.start_capture_session(CaptureSessionInput {
         session_id: &args.session_id,
@@ -5483,7 +6337,9 @@ fn capture_start_session_bridge(args: CaptureStartSessionArgs) -> OpenVitalsResu
     .map_err(|error| OpenVitalsError::message(format!("cannot serialize capture session: {error}")))
 }
 
-fn capture_finish_session_bridge(args: CaptureFinishSessionArgs) -> OpenVitalsResult<serde_json::Value> {
+fn capture_finish_session_bridge(
+    args: CaptureFinishSessionArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let session =
         store.finish_capture_session(&args.session_id, args.ended_at_unix_ms, args.frame_count)?;
@@ -5495,7 +6351,9 @@ fn capture_finish_session_bridge(args: CaptureFinishSessionArgs) -> OpenVitalsRe
     .map_err(|error| OpenVitalsError::message(format!("cannot serialize capture session: {error}")))
 }
 
-fn capture_list_sessions_bridge(args: CaptureListSessionsArgs) -> OpenVitalsResult<serde_json::Value> {
+fn capture_list_sessions_bridge(
+    args: CaptureListSessionsArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let sessions = store.capture_sessions_between(args.start_unix_ms, args.end_unix_ms)?;
     serde_json::to_value(json!({
@@ -5503,7 +6361,9 @@ fn capture_list_sessions_bridge(args: CaptureListSessionsArgs) -> OpenVitalsResu
         "session_count": sessions.len(),
         "sessions": sessions,
     }))
-    .map_err(|error| OpenVitalsError::message(format!("cannot serialize capture session list: {error}")))
+    .map_err(|error| {
+        OpenVitalsError::message(format!("cannot serialize capture session list: {error}"))
+    })
 }
 
 fn activity_create_session_bridge(
@@ -5536,7 +6396,9 @@ fn activity_create_session_bridge(
     }))
 }
 
-fn activity_get_session_bridge(args: ActivitySessionLookupArgs) -> OpenVitalsResult<serde_json::Value> {
+fn activity_get_session_bridge(
+    args: ActivitySessionLookupArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let session = store.activity_session(&args.session_id)?.ok_or_else(|| {
         OpenVitalsError::message(format!("activity session {} not found", args.session_id))
@@ -5548,7 +6410,9 @@ fn activity_get_session_bridge(args: ActivitySessionLookupArgs) -> OpenVitalsRes
     }))
 }
 
-fn activity_list_sessions_bridge(args: ActivitySessionListArgs) -> OpenVitalsResult<serde_json::Value> {
+fn activity_list_sessions_bridge(
+    args: ActivitySessionListArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let sessions =
         store.activity_sessions_between(args.start_time_unix_ms, args.end_time_unix_ms)?;
@@ -5681,7 +6545,9 @@ fn activity_apply_correction_bridge(
         }
         ActivitySessionCorrectionKind::TrimStart => {
             start_time_unix_ms = args.start_time_unix_ms.ok_or_else(|| {
-                OpenVitalsError::message("start_time_unix_ms is required for trim_start corrections")
+                OpenVitalsError::message(
+                    "start_time_unix_ms is required for trim_start corrections",
+                )
             })?;
         }
         ActivitySessionCorrectionKind::TrimEnd => {
@@ -5768,11 +6634,14 @@ fn activity_delete_session_bridge(
     }))
 }
 
-fn activity_attach_metric_bridge(args: ActivityMetricAttachArgs) -> OpenVitalsResult<serde_json::Value> {
+fn activity_attach_metric_bridge(
+    args: ActivityMetricAttachArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let provenance_json = json_object_string("provenance", &args.provenance)?;
-    let quality_flags_json = serde_json::to_string(&args.quality_flags)
-        .map_err(|error| OpenVitalsError::message(format!("cannot serialize quality_flags: {error}")))?;
+    let quality_flags_json = serde_json::to_string(&args.quality_flags).map_err(|error| {
+        OpenVitalsError::message(format!("cannot serialize quality_flags: {error}"))
+    })?;
     let inserted = store.insert_activity_metric(ActivityMetricInput {
         metric_id: &args.metric_id,
         activity_session_id: &args.activity_session_id,
@@ -5806,7 +6675,9 @@ fn activity_attach_metrics_bridge(
             Ok(SerializedActivityMetricAttachArg {
                 metric,
                 quality_flags_json: serde_json::to_string(&metric.quality_flags).map_err(
-                    |error| OpenVitalsError::message(format!("cannot serialize quality_flags: {error}")),
+                    |error| {
+                        OpenVitalsError::message(format!("cannot serialize quality_flags: {error}"))
+                    },
                 )?,
                 provenance_json: json_object_string("provenance", &metric.provenance)?,
             })
@@ -5833,7 +6704,10 @@ fn activity_attach_metrics_bridge(
             .iter()
             .map(|metric| {
                 store.activity_metric(&metric.metric_id)?.ok_or_else(|| {
-                    OpenVitalsError::message(format!("activity metric {} not found", metric.metric_id))
+                    OpenVitalsError::message(format!(
+                        "activity metric {} not found",
+                        metric.metric_id
+                    ))
                 })
             })
             .collect::<OpenVitalsResult<Vec<_>>>()?
@@ -5851,7 +6725,9 @@ fn activity_attach_metrics_bridge(
     }))
 }
 
-fn activity_list_metrics_bridge(args: ActivityMetricListArgs) -> OpenVitalsResult<serde_json::Value> {
+fn activity_list_metrics_bridge(
+    args: ActivityMetricListArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let metrics = store.activity_metrics_for_session(&args.activity_session_id)?;
     Ok(json!({
@@ -6000,7 +6876,9 @@ fn external_sleep_history_import_bridge(
     }))
 }
 
-fn sleep_correction_label_bridge(args: SleepCorrectionLabelArgs) -> OpenVitalsResult<serde_json::Value> {
+fn sleep_correction_label_bridge(
+    args: SleepCorrectionLabelArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let value_json = json_object_string("value", &args.value)?;
     let provenance_json = json_object_string("provenance", &args.provenance)?;
@@ -6168,7 +7046,9 @@ fn sleep_v1_explanation_stability_bridge(
     })
 }
 
-fn sleep_v1_release_gate_bridge(args: SleepV1ReleaseGateArgs) -> OpenVitalsResult<serde_json::Value> {
+fn sleep_v1_release_gate_bridge(
+    args: SleepV1ReleaseGateArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     let report = validate_sleep_v1_release_gates(&args.input);
     serde_json::to_value(report).map_err(|error| {
         OpenVitalsError::message(format!(
@@ -6214,7 +7094,9 @@ fn capture_correlation_bridge(args: CaptureCorrelationArgs) -> OpenVitalsResult<
     })
 }
 
-fn capture_arrival_plan_bridge(args: CaptureArrivalPlanArgs) -> OpenVitalsResult<serde_json::Value> {
+fn capture_arrival_plan_bridge(
+    args: CaptureArrivalPlanArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let min_owned_captures = args
         .min_owned_captures
@@ -6953,10 +7835,9 @@ fn command_validate_evidence_bridge(
 ) -> OpenVitalsResult<serde_json::Value> {
     let report = validate_commands(&args.evidence);
     if args.persist {
-        let database_path = args
-            .database_path
-            .as_deref()
-            .ok_or_else(|| OpenVitalsError::message("database_path is required when persist is true"))?;
+        let database_path = args.database_path.as_deref().ok_or_else(|| {
+            OpenVitalsError::message("database_path is required when persist is true")
+        })?;
         let store = open_bridge_store(database_path)?;
         persist_command_validation_results(&store, &report.commands)?;
     }
@@ -7019,8 +7900,9 @@ fn command_direct_send_gate_bridge(
         None => None,
     };
     let gate = direct_send_gate_from_result(&args.command, result.as_ref());
-    serde_json::to_value(gate)
-        .map_err(|error| OpenVitalsError::message(format!("cannot serialize command gate: {error}")))
+    serde_json::to_value(gate).map_err(|error| {
+        OpenVitalsError::message(format!("cannot serialize command gate: {error}"))
+    })
 }
 
 fn command_direct_send_preflight_bridge(
@@ -7057,7 +7939,9 @@ fn command_direct_send_preflight_bridge(
     })
 }
 
-fn command_capture_plan_bridge(args: CommandCapturePlanArgs) -> OpenVitalsResult<serde_json::Value> {
+fn command_capture_plan_bridge(
+    args: CommandCapturePlanArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let records = store.command_validation_records()?;
     let mut results = Vec::new();
@@ -7383,7 +8267,9 @@ fn debug_start_command_bridge(args: DebugStartCommandArgs) -> OpenVitalsResult<s
     })
 }
 
-fn debug_finish_command_bridge(args: DebugFinishCommandArgs) -> OpenVitalsResult<serde_json::Value> {
+fn debug_finish_command_bridge(
+    args: DebugFinishCommandArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let snapshot = finish_debug_command(
         &store,
@@ -7420,7 +8306,9 @@ fn debug_record_event_bridge(args: DebugRecordEventArgs) -> OpenVitalsResult<ser
         .map_err(|error| OpenVitalsError::message(format!("cannot serialize debug event: {error}")))
 }
 
-fn debug_session_snapshot_bridge(args: DebugSessionSnapshotArgs) -> OpenVitalsResult<serde_json::Value> {
+fn debug_session_snapshot_bridge(
+    args: DebugSessionSnapshotArgs,
+) -> OpenVitalsResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let snapshot = debug_session_snapshot(&store, &args.session_id)?;
     serde_json::to_value(snapshot).map_err(|error| {
@@ -7429,8 +8317,9 @@ fn debug_session_snapshot_bridge(args: DebugSessionSnapshotArgs) -> OpenVitalsRe
 }
 
 fn metric_result_to_value<T: Serialize>(result: T) -> OpenVitalsResult<serde_json::Value> {
-    serde_json::to_value(result)
-        .map_err(|error| OpenVitalsError::message(format!("cannot serialize metric result: {error}")))
+    serde_json::to_value(result).map_err(|error| {
+        OpenVitalsError::message(format!("cannot serialize metric result: {error}"))
+    })
 }
 
 fn maybe_persist_algorithm_run<T: Serialize>(
@@ -7535,8 +8424,9 @@ fn json_object_string(field_name: &str, value: &serde_json::Value) -> OpenVitals
             "{field_name} must be a JSON object"
         )));
     }
-    serde_json::to_string(value)
-        .map_err(|error| OpenVitalsError::message(format!("cannot serialize {field_name}: {error}")))
+    serde_json::to_string(value).map_err(|error| {
+        OpenVitalsError::message(format!("cannot serialize {field_name}: {error}"))
+    })
 }
 
 fn register_built_in_definitions(store: &OpenVitalsStore) -> OpenVitalsResult<()> {

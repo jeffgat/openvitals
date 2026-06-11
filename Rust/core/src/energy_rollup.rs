@@ -11,8 +11,8 @@ use crate::{
         run_metric_window_feature_report_for_store,
     },
     store::{
-        DailyActivityMetricInput, DailyActivityMetricRow, OpenVitalsStore, HourlyActivityMetricInput,
-        HourlyActivityMetricRow, MetricProvenanceInput,
+        DailyActivityMetricInput, DailyActivityMetricRow, HourlyActivityMetricInput,
+        HourlyActivityMetricRow, MetricProvenanceInput, OpenVitalsStore,
     },
     validation_labels::{
         OFFICIAL_WHOOP_LABEL_POLICY, official_label_policy_issue_action,
@@ -28,7 +28,8 @@ pub const ENERGY_UNAVAILABLE_DAILY_STATUS_REPORT_SCHEMA: &str =
     "open_vitals.energy-unavailable-daily-status-report.v1";
 pub const OPENVITALS_ENERGY_LOCAL_ESTIMATE_V0_ID: &str = "open_vitals.energy.local_estimate.v0";
 pub const OPENVITALS_ENERGY_LOCAL_ESTIMATE_V0_VERSION: &str = "0.1.0";
-pub const OPENVITALS_ENERGY_UNAVAILABLE_STATUS_V0_ID: &str = "open_vitals.energy.unavailable_status.v0";
+pub const OPENVITALS_ENERGY_UNAVAILABLE_STATUS_V0_ID: &str =
+    "open_vitals.energy.unavailable_status.v0";
 pub const OPENVITALS_ENERGY_UNAVAILABLE_STATUS_V0_VERSION: &str = "0.1.0";
 const STEP_CADENCE_SUPPORT_SOURCE_KIND: &str = "device_counter";
 
@@ -1520,7 +1521,9 @@ fn validate_energy_validation_options(
     options: &EnergyCaptureValidationOptions<'_>,
 ) -> OpenVitalsResult<()> {
     if !options.tolerance_kcal.is_finite() || options.tolerance_kcal < 0.0 {
-        return Err(OpenVitalsError::message("tolerance_kcal must be nonnegative"));
+        return Err(OpenVitalsError::message(
+            "tolerance_kcal must be nonnegative",
+        ));
     }
     if !options.relative_tolerance_fraction.is_finite()
         || !(0.0..=1.0).contains(&options.relative_tolerance_fraction)
@@ -1545,7 +1548,9 @@ fn validate_energy_validation_options(
     ] {
         if let Some(value) = value {
             if !value.is_finite() || value < 0.0 {
-                return Err(OpenVitalsError::message(format!("{name} must be nonnegative")));
+                return Err(OpenVitalsError::message(format!(
+                    "{name} must be nonnegative"
+                )));
             }
         }
     }

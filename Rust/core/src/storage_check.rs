@@ -86,7 +86,9 @@ pub struct StorageCheckNextAction {
     pub action: String,
 }
 
-pub fn check_storage_database(options: StorageCheckOptions<'_>) -> OpenVitalsResult<StorageCheckReport> {
+pub fn check_storage_database(
+    options: StorageCheckOptions<'_>,
+) -> OpenVitalsResult<StorageCheckReport> {
     let store = OpenVitalsStore::open(options.database_path)?;
     let actual_schema_version = store.schema_version()?;
     let foreign_keys_enabled = store.foreign_keys_enabled()?;
@@ -488,7 +490,10 @@ fn dedupe_storage_next_actions(
 
 fn required_columns() -> BTreeMap<&'static str, Vec<&'static str>> {
     let mut columns = BTreeMap::new();
-    columns.insert("open_vitals_schema_migrations", vec!["version", "applied_at"]);
+    columns.insert(
+        "open_vitals_schema_migrations",
+        vec!["version", "applied_at"],
+    );
     columns.insert(
         "raw_evidence",
         vec![

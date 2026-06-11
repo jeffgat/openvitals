@@ -10,8 +10,8 @@ use crate::{
         run_step_packet_discovery_for_store,
     },
     store::{
-        DailyActivityMetricInput, OpenVitalsStore, HourlyActivityMetricInput, MetricProvenanceInput,
-        StepCounterSampleInput, StepCounterSampleRow,
+        DailyActivityMetricInput, HourlyActivityMetricInput, MetricProvenanceInput,
+        OpenVitalsStore, StepCounterSampleInput, StepCounterSampleRow,
     },
 };
 
@@ -24,7 +24,8 @@ pub const ACTIVITY_UNAVAILABLE_DAILY_STATUS_REPORT_SCHEMA: &str =
     "open_vitals.activity-unavailable-daily-status-report.v1";
 pub const OPENVITALS_STEPS_DEVICE_COUNTER_V0_ID: &str = "open_vitals.steps.device_counter.v0";
 pub const OPENVITALS_STEPS_DEVICE_COUNTER_V0_VERSION: &str = "0.1.0";
-pub const OPENVITALS_ACTIVITY_UNAVAILABLE_STATUS_V0_ID: &str = "open_vitals.activity.unavailable_status.v0";
+pub const OPENVITALS_ACTIVITY_UNAVAILABLE_STATUS_V0_ID: &str =
+    "open_vitals.activity.unavailable_status.v0";
 pub const OPENVITALS_ACTIVITY_UNAVAILABLE_STATUS_V0_VERSION: &str = "0.1.0";
 
 #[derive(Debug, Clone, Copy)]
@@ -1107,12 +1108,16 @@ fn validate_rollup_options(options: &StepCounterDailyRollupOptions<'_>) -> OpenV
         ));
     }
     if options.min_sample_count < 2 {
-        return Err(OpenVitalsError::message("min_sample_count must be at least 2"));
+        return Err(OpenVitalsError::message(
+            "min_sample_count must be at least 2",
+        ));
     }
     Ok(())
 }
 
-fn validate_hourly_rollup_options(options: &StepCounterHourlyRollupOptions<'_>) -> OpenVitalsResult<()> {
+fn validate_hourly_rollup_options(
+    options: &StepCounterHourlyRollupOptions<'_>,
+) -> OpenVitalsResult<()> {
     if options.date_key.trim().is_empty() {
         return Err(OpenVitalsError::message("date_key is required"));
     }
@@ -1130,7 +1135,9 @@ fn validate_hourly_rollup_options(options: &StepCounterHourlyRollupOptions<'_>) 
         ));
     }
     if options.min_sample_count < 2 {
-        return Err(OpenVitalsError::message("min_sample_count must be at least 2"));
+        return Err(OpenVitalsError::message(
+            "min_sample_count must be at least 2",
+        ));
     }
     Ok(())
 }

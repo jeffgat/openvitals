@@ -45,6 +45,44 @@ extension OpenVitalsAppModel {
     ble.record(source: "ui", title: title, body: detail)
   }
 
+  func markLocalAppDataWiped() {
+    onboardingComplete = false
+    packetImportRevision += 1
+    packetImportStatus = "Local app data wiped"
+    activityPersistenceStatus = "No activity stored"
+    homeActivityTimelineItems = []
+    homeActivityTimelineStatus = "Local app data wiped"
+    heartRateHourlyRanges = []
+    heartRateStorageStatus = "No HR samples stored"
+    activityDetectionStatus = "Watching for movement packets"
+    movementPacketValidationTimeoutWorkItem?.cancel()
+    movementPacketValidationTimeoutWorkItem = nil
+    movementPacketValidationStatus = "Not run"
+    movementPacketValidationIsRunning = false
+    healthPacketCaptureTimeoutWorkItem?.cancel()
+    healthPacketCaptureTimeoutWorkItem = nil
+    healthPacketCaptureStreamRetryWorkItem?.cancel()
+    healthPacketCaptureStreamRetryWorkItem = nil
+    healthPacketCaptureUIUpdateWorkItem?.cancel()
+    healthPacketCaptureUIUpdateWorkItem = nil
+    respiratoryPacketWatchTimeoutWorkItem?.cancel()
+    respiratoryPacketWatchTimeoutWorkItem = nil
+    healthPacketCaptureSessionID = nil
+    healthPacketCaptureStatus = "No health packet capture"
+    healthPacketCaptureStartedAt = nil
+    healthPacketCaptureFrameCount = 0
+    healthPacketCaptureTargetSummary = "No health packet capture"
+    healthPacketCaptureLastPacketSummary = "No packets captured"
+    healthPacketCaptureFamilyRows = []
+    healthPacketCaptureFamilyRowsByID = [:]
+    respiratoryPacketWatchActive = false
+    respiratoryPacketWatchStatus = "Not watching K18 respiratory history"
+    overnightGuardExportURL = nil
+    overnightGuardExportManifestURL = nil
+    overnightGuardCanExportLastSession = false
+    ble.record(source: "ui.debug", title: "local_app_data.wiped", body: "remembered_ble_device_kept")
+  }
+
   @discardableResult
   func handleDebugCommandDeepLink(_ url: URL) -> Bool {
     guard url.scheme?.lowercased() == "openvitals",

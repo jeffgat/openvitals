@@ -133,15 +133,15 @@ struct HomeTimelineSection: View {
   private func tint(for activityType: String) -> Color {
     switch activityType {
     case "walking", "hiking":
-      return .green
+      return OpenVitalsTheme.champagne
     case "running":
-      return .orange
+      return OpenVitalsTheme.gold
     case "cycling", "spinning":
-      return .blue
+      return OpenVitalsTheme.bronze
     case "strength":
-      return .red
+      return OpenVitalsTheme.accentMuted
     default:
-      return activity.tint
+      return OpenVitalsTheme.accent
     }
   }
 
@@ -261,14 +261,16 @@ struct HomeSectionHeader: View {
 
   var body: some View {
     Text(title)
-      .font(.title3.bold())
+      .font(.subheadline.weight(.bold))
+      .foregroundStyle(OpenVitalsTheme.textSecondary)
+      .textCase(.uppercase)
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(.top, 4)
   }
 }
 
 extension View {
-  func cardSurface(tint: Color = .green, prominent: Bool = false) -> some View {
+  func cardSurface(tint: Color = OpenVitalsTheme.accent, prominent: Bool = false) -> some View {
     modifier(HomeCardSurfaceModifier(tint: tint, prominent: prominent))
   }
 }
@@ -281,14 +283,14 @@ struct HomeCardSurfaceModifier: ViewModifier {
   func body(content: Content) -> some View {
     content
       .background {
-        RoundedRectangle(cornerRadius: 16, style: .continuous)
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
           .fill(baseFill)
           .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
               .fill(
                 LinearGradient(
                   colors: [
-                    tint.opacity(tintOpacity),
+                    OpenVitalsTheme.accent.opacity(tintOpacity),
                     tint.opacity(tintOpacity * 0.36),
                     .clear,
                   ],
@@ -299,16 +301,14 @@ struct HomeCardSurfaceModifier: ViewModifier {
           }
       }
       .overlay {
-        RoundedRectangle(cornerRadius: 16, style: .continuous)
-          .strokeBorder(tint.opacity(borderOpacity), lineWidth: 1)
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+          .strokeBorder(OpenVitalsTheme.border.opacity(borderOpacity), lineWidth: 1)
       }
       .shadow(color: shadowColor, radius: prominent ? 5 : 2, x: 0, y: prominent ? 3 : 1)
   }
 
   private var baseFill: Color {
-    colorScheme == .dark
-      ? Color.white.opacity(prominent ? 0.070 : 0.055)
-      : Color(UIColor.secondarySystemGroupedBackground)
+    prominent ? OpenVitalsTheme.elevatedSurface : OpenVitalsTheme.surface
   }
 
   private var tintOpacity: Double {
@@ -320,11 +320,10 @@ struct HomeCardSurfaceModifier: ViewModifier {
   }
 
   private var borderOpacity: Double {
-    colorScheme == .dark ? 0.14 : 0.075
+    colorScheme == .dark ? 1.0 : 0.72
   }
 
   private var shadowColor: Color {
-    colorScheme == .dark ? .black.opacity(0.10) : .black.opacity(prominent ? 0.026 : 0.014)
+    colorScheme == .dark ? .black.opacity(0.10) : OpenVitalsTheme.graphite.opacity(prominent ? 0.026 : 0.014)
   }
 }
-

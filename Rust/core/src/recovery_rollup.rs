@@ -11,7 +11,7 @@ use crate::{
         RestingHeartRateFeatureReport, run_recovery_sensor_discovery_report_for_store,
         run_resting_heart_rate_feature_report_for_store,
     },
-    store::{DailyRecoveryMetricInput, OpenVitalsStore, MetricProvenanceInput},
+    store::{DailyRecoveryMetricInput, MetricProvenanceInput, OpenVitalsStore},
     validation_labels::{
         OFFICIAL_WHOOP_LABEL_POLICY, official_label_policy_issue_action,
         official_label_policy_issues,
@@ -29,7 +29,8 @@ pub const RECOVERY_SENSOR_DAILY_ROLLUP_REPORT_SCHEMA: &str =
 pub const OPENVITALS_RESTING_HEART_RATE_DEVICE_SENSOR_V0_ID: &str =
     "open_vitals.resting_heart_rate.device_sensor.v0";
 pub const OPENVITALS_RESTING_HEART_RATE_DEVICE_SENSOR_V0_VERSION: &str = "0.1.0";
-pub const OPENVITALS_RECOVERY_UNAVAILABLE_STATUS_V0_ID: &str = "open_vitals.recovery.unavailable_status.v0";
+pub const OPENVITALS_RECOVERY_UNAVAILABLE_STATUS_V0_ID: &str =
+    "open_vitals.recovery.unavailable_status.v0";
 pub const OPENVITALS_RECOVERY_UNAVAILABLE_STATUS_V0_VERSION: &str = "0.1.0";
 pub const OPENVITALS_RECOVERY_SENSOR_DEVICE_SENSOR_V0_ID: &str =
     "open_vitals.recovery_sensor.device_sensor.v0";
@@ -1305,7 +1306,9 @@ fn validate_options(options: &RestingHeartRateDailyRollupOptions<'_>) -> OpenVit
         return Err(OpenVitalsError::message("end is required"));
     }
     if options.min_sample_count == 0 {
-        return Err(OpenVitalsError::message("min_sample_count must be at least 1"));
+        return Err(OpenVitalsError::message(
+            "min_sample_count must be at least 1",
+        ));
     }
     Ok(())
 }
@@ -1360,7 +1363,9 @@ fn validate_rhr_validation_options(
     options: &RestingHeartRateCaptureValidationOptions<'_>,
 ) -> OpenVitalsResult<()> {
     if !options.tolerance_bpm.is_finite() || options.tolerance_bpm < 0.0 {
-        return Err(OpenVitalsError::message("tolerance_bpm must be nonnegative"));
+        return Err(OpenVitalsError::message(
+            "tolerance_bpm must be nonnegative",
+        ));
     }
     if let Some(value) = options.official_whoop_resting_hr_bpm {
         if !value.is_finite() || value <= 0.0 {

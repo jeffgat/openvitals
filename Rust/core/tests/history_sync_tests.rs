@@ -922,11 +922,9 @@ fn stale_preflight_rejects_unsupported_schema_before_any_commands() {
         report.next_actions[0].reason,
         "unsupported schema open_vitals.historical-sync-dry-run.v0"
     );
-    assert!(
-        report.next_actions[0].action.contains(
-            "Use open_vitals.historical-sync-dry-run.v1 input before planning historical sync."
-        )
-    );
+    assert!(report.next_actions[0].action.contains(
+        "Use open_vitals.historical-sync-dry-run.v1 input before planning historical sync."
+    ));
 }
 
 #[test]

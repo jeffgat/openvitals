@@ -146,6 +146,7 @@
 		D10000000000000000000051 /* BLEUIStateAggregator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000051 /* BLEUIStateAggregator.swift */; };
 		D10000000000000000000052 /* PacketMonitorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000052 /* PacketMonitorModel.swift */; };
 		D10000000000000000000053 /* OpenVitalsMessageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000053 /* OpenVitalsMessageStore.swift */; };
+		D10000000000000000000054 /* MoreDataStore+SupabaseDebugUpload.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000054 /* MoreDataStore+SupabaseDebugUpload.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -317,6 +318,7 @@
 		D20000000000000000000051 /* BLEUIStateAggregator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BLEUIStateAggregator.swift; sourceTree = "<group>"; };
 		D20000000000000000000052 /* PacketMonitorModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketMonitorModel.swift; sourceTree = "<group>"; };
 		D20000000000000000000053 /* OpenVitalsMessageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenVitalsMessageStore.swift; sourceTree = "<group>"; };
+		D20000000000000000000054 /* MoreDataStore+SupabaseDebugUpload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MoreDataStore+SupabaseDebugUpload.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -403,6 +405,7 @@
 				D20000000000000000000002 /* MoreProfileViews.swift */,
 				D20000000000000000000003 /* MoreDataStore.swift */,
 				D20000000000000000000049 /* MoreDataStore+Validation.swift */,
+				D20000000000000000000054 /* MoreDataStore+SupabaseDebugUpload.swift */,
 				D2000000000000000000004A /* HealthDataStore+ActivitySnapshots.swift */,
 				D20000000000000000000004 /* OpenVitalsLocalDataExporter.swift */,
 				D20000000000000000000044 /* OpenVitalsLocalDataExporter+Validation.swift */,
@@ -759,6 +762,7 @@
 				D10000000000000000000002 /* MoreProfileViews.swift in Sources */,
 				D10000000000000000000003 /* MoreDataStore.swift in Sources */,
 				D10000000000000000000049 /* MoreDataStore+Validation.swift in Sources */,
+				D10000000000000000000054 /* MoreDataStore+SupabaseDebugUpload.swift in Sources */,
 				D1000000000000000000004A /* HealthDataStore+ActivitySnapshots.swift in Sources */,
 				D10000000000000000000004 /* OpenVitalsLocalDataExporter.swift in Sources */,
 				D10000000000000000000044 /* OpenVitalsLocalDataExporter+Validation.swift in Sources */,

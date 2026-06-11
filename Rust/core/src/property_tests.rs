@@ -10,8 +10,8 @@ use crate::{
     OpenVitalsError, OpenVitalsResult,
     metrics::{
         HrvInput, RecoveryInput, SleepInput, SleepModelStatusInput, SleepV1Input, StrainInput,
-        StressInput, open_vitals_hrv_v0, open_vitals_recovery_v0, open_vitals_sleep_v0, open_vitals_sleep_v1,
-        open_vitals_strain_v0, open_vitals_stress_v0,
+        StressInput, open_vitals_hrv_v0, open_vitals_recovery_v0, open_vitals_sleep_v0,
+        open_vitals_sleep_v1, open_vitals_strain_v0, open_vitals_stress_v0,
     },
     protocol::{DeviceType, FrameAccumulator, build_v5_payload_frame, parse_frame},
 };
@@ -267,8 +267,9 @@ fn parser_frame_properties(rng: &mut DeterministicRng, cases: usize) -> Property
     for case_index in 0..cases {
         let payload = random_payload(rng);
         let frame = build_v5_payload_frame(&payload);
-        let parsed_result =
-            catch_unwind(AssertUnwindSafe(|| parse_frame(DeviceType::OpenVitals, &frame)));
+        let parsed_result = catch_unwind(AssertUnwindSafe(|| {
+            parse_frame(DeviceType::OpenVitals, &frame)
+        }));
         match parsed_result {
             Ok(Ok(parsed)) => {
                 let padded_payload = &frame[8..frame.len() - 4];
@@ -367,7 +368,11 @@ fn parser_frame_properties(rng: &mut DeterministicRng, cases: usize) -> Property
 
         let noise_len = rng.usize(160);
         let noise = rng.bytes(noise_len);
-        if catch_unwind(AssertUnwindSafe(|| parse_frame(DeviceType::OpenVitals, &noise))).is_err() {
+        if catch_unwind(AssertUnwindSafe(|| {
+            parse_frame(DeviceType::OpenVitals, &noise)
+        }))
+        .is_err()
+        {
             group.fail(
                 case_index,
                 "arbitrary_bytes_no_panic",

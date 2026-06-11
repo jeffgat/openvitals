@@ -4,24 +4,140 @@ import SwiftUI
 import UIKit
 
 extension HealthDataStore {
-  func runPacketScores() {
-    let baseArgs = bridgeBaseArgs(requireTrustedEvidence: false)
+  func runPacketScores(completion: (() -> Void)? = nil) {
+    guard !packetScoreIsRunning else {
+      packetScoreStatus = "Bridge score run already running..."
+      completion?()
+      return
+    }
+
+    let runID = UUID()
+    packetScoreRunID = runID
+    packetScoreIsRunning = true
+    packetScoreStatus = "Recomputing packet-derived scores..."
+    let databasePath = databasePath
+
+    packetScoreQueue.async {
+      let result = Self.packetScoreBridgeReports(databasePath: databasePath)
+      DispatchQueue.main.async { [weak self] in
+        guard let self, self.packetScoreRunID == runID else {
+          return
+        }
+        self.packetScoreIsRunning = false
+        switch result {
+        case .success(let reports):
+          self.packetScoreReports = reports
+          self.refreshPrimarySleepFromScoreReport()
+          self.packetScoreStatus = "Bridge packet-derived scores recomputed"
+        case .failure(let error):
+          self.packetScoreStatus = "Bridge score run blocked: \(Self.shortError(error))"
+        }
+        self.refreshHealthDashboardSnapshots()
+        completion?()
+      }
+    }
+  }
+
+  func loadPersistedPacketScoresIfNeeded() {
+    guard packetScoreReports.isEmpty, packetScoreStatus == "No run" else {
+      return
+    }
+    guard FileManager.default.fileExists(atPath: databasePath) else {
+      packetScoreStatus = "No persisted packet-derived scores"
+      return
+    }
+
+    let runID = UUID()
+    packetScoreRunID = runID
+    packetScoreIsRunning = true
+    packetScoreStatus = "Loading persisted packet-derived scores..."
+    let databasePath = databasePath
+
+    packetScoreQueue.async {
+      let result = Self.persistedPacketScoreBridgeReports(databasePath: databasePath)
+      DispatchQueue.main.async { [weak self] in
+        guard let self, self.packetScoreRunID == runID else {
+          return
+        }
+        self.packetScoreIsRunning = false
+        switch result {
+        case .success(let reports):
+          if reports.isEmpty {
+            self.packetScoreStatus = "No persisted packet-derived scores"
+          } else {
+            self.packetScoreReports = reports
+            self.refreshPrimarySleepFromScoreReport()
+            self.packetScoreStatus = "Loaded persisted packet-derived scores"
+          }
+        case .failure(let error):
+          self.packetScoreStatus = "Persisted score load blocked: \(Self.shortError(error))"
+        }
+        self.refreshHealthDashboardSnapshots()
+      }
+    }
+  }
+
+  func runSleepScore(completion: (() -> Void)? = nil) {
+    guard !packetScoreIsRunning else {
+      packetScoreStatus = "Bridge sleep score already running..."
+      completion?()
+      return
+    }
+
+    let runID = UUID()
+    packetScoreRunID = runID
+    packetScoreIsRunning = true
+    packetScoreStatus = "Recomputing sleep score..."
+    let databasePath = databasePath
+
+    packetScoreQueue.async {
+      let result = Self.sleepScoreBridgeReport(databasePath: databasePath)
+      DispatchQueue.main.async { [weak self] in
+        guard let self, self.packetScoreRunID == runID else {
+          return
+        }
+        self.packetScoreIsRunning = false
+        switch result {
+        case .success(let report):
+          self.packetScoreReports["sleep"] = report
+          self.refreshPrimarySleepFromScoreReport()
+          self.packetScoreStatus = "Bridge sleep score recomputed"
+        case .failure(let error):
+          self.packetScoreStatus = "Bridge sleep score blocked: \(Self.shortError(error))"
+        }
+        self.refreshHealthDashboardSnapshots()
+        completion?()
+      }
+    }
+  }
+
+  func runReferenceComparisons() {
+    referenceComparisonReports = [:]
+    for family in ["hrv", "sleep", "strain", "stress"] {
+      referenceRunStatusByFamily[family] = "blocked | real comparison inputs not wired"
+    }
+  }
+
+  nonisolated static func packetScoreBridgeReports(databasePath: String) -> Result<[String: [String: Any]], Error> {
+    let bridge = OpenVitalsRustBridge()
+    let baseArgs = packetScoreBaseArgs(databasePath: databasePath, requireTrustedEvidence: false)
     do {
-      packetScoreReports["sleep"] = try sleepScoreReport(baseArgs: baseArgs)
-      refreshPrimarySleepFromScoreReport()
-      packetScoreReports["strain"] = try bridge.request(
+      var reports: [String: [String: Any]] = [:]
+      reports["sleep"] = try sleepScoreBridgeReport(bridge: bridge, baseArgs: baseArgs)
+      reports["strain"] = try bridge.request(
         method: "metrics.strain_score_from_features",
         args: baseArgs.merging([
           "resting_start": "0000",
           "resting_end": "9999",
           "resting_baseline_min_days": 3,
+          "persist_algorithm_run": true,
         ]) { _, new in new }
       )
-      packetScoreReports["recovery"] = try bridge.request(
+      reports["recovery"] = try bridge.request(
         method: "metrics.recovery_score_from_features",
-        args: baseArgs.merging(recoveryScoreBridgeArgs()) { _, new in new }
+        args: baseArgs.merging(packetScoreRecoveryArgs()) { _, new in new }
       )
-      packetScoreReports["stress"] = try bridge.request(
+      reports["stress"] = try bridge.request(
         method: "metrics.stress_score_from_features",
         args: baseArgs.merging([
           "resting_start": "0000",
@@ -35,27 +151,99 @@ extension HealthDataStore {
           "hrv_baseline_min_days": 3,
         ]) { _, new in new }
       )
-      packetScoreStatus = "Bridge packet-derived scores recomputed"
+      return .success(reports)
     } catch {
-      packetScoreStatus = "Bridge score run blocked: \(Self.shortError(error))"
+      return .failure(error)
     }
   }
 
-  func runSleepScore() {
+  nonisolated static func persistedPacketScoreBridgeReports(databasePath: String) -> Result<[String: [String: Any]], Error> {
+    let bridge = OpenVitalsRustBridge()
     do {
-      packetScoreReports["sleep"] = try sleepScoreReport(baseArgs: bridgeBaseArgs(requireTrustedEvidence: false))
-      refreshPrimarySleepFromScoreReport()
-      packetScoreStatus = "Bridge sleep score recomputed"
+      let value = try bridge.request(
+        method: "metrics.persisted_score_reports",
+        args: [
+          "database_path": databasePath,
+          "start": "0000",
+          "end": "9999",
+          "families": ["sleep", "recovery", "strain"],
+        ]
+      )
+      let rawReports = value["reports"] as? [String: Any] ?? [:]
+      let reports = rawReports.reduce(into: [String: [String: Any]]()) { output, element in
+        if let report = element.value as? [String: Any] {
+          output[element.key] = report
+        }
+      }
+      return .success(reports)
     } catch {
-      packetScoreStatus = "Bridge sleep score blocked: \(Self.shortError(error))"
+      return .failure(error)
     }
   }
 
-  func runReferenceComparisons() {
-    referenceComparisonReports = [:]
-    for family in ["hrv", "sleep", "strain", "stress"] {
-      referenceRunStatusByFamily[family] = "blocked | real comparison inputs not wired"
+  nonisolated static func sleepScoreBridgeReport(databasePath: String) -> Result<[String: Any], Error> {
+    let bridge = OpenVitalsRustBridge()
+    let baseArgs = packetScoreBaseArgs(databasePath: databasePath, requireTrustedEvidence: false)
+    do {
+      return .success(try sleepScoreBridgeReport(bridge: bridge, baseArgs: baseArgs))
+    } catch {
+      return .failure(error)
     }
+  }
+
+  nonisolated static func sleepScoreBridgeReport(
+    bridge: OpenVitalsRustBridge,
+    baseArgs: [String: Any]
+  ) throws -> [String: Any] {
+    try bridge.request(
+      method: "metrics.sleep_score_from_features",
+      args: baseArgs.merging([
+        "sleep_need_minutes": 480.0,
+        "low_motion_threshold_0_to_1": 0.05,
+        "disturbance_motion_threshold_0_to_1": 0.20,
+        "target_midpoint_minutes_since_midnight": 180.0,
+        "history_import_in_progress": false,
+        "algorithm_id": OpenVitalsPacketScoreAlgorithmID.sleep,
+        "persist_algorithm_run": true,
+      ]) { _, new in new }
+    )
+  }
+
+  nonisolated static func packetScoreBaseArgs(
+    databasePath: String,
+    requireTrustedEvidence: Bool
+  ) -> [String: Any] {
+    [
+      "database_path": databasePath,
+      "start": "0000",
+      "end": "9999",
+      "min_owned_captures": 2,
+      "require_trusted_evidence": requireTrustedEvidence,
+    ]
+  }
+
+  nonisolated static func packetScoreRecoveryArgs() -> [String: Any] {
+    [
+      "hrv_start": "0000",
+      "hrv_end": "9999",
+      "hrv_baseline_start": "0000",
+      "hrv_baseline_end": "9999",
+      "resting_start": "0000",
+      "resting_end": "9999",
+      "sleep_start": "0000",
+      "sleep_end": "9999",
+      "prior_strain_start": "0000",
+      "prior_strain_end": "9999",
+      "resting_baseline_min_days": 3,
+      "hrv_min_rr_intervals_to_compute": 2,
+      "hrv_baseline_min_days": 3,
+      "sleep_need_minutes": 480.0,
+      "low_motion_threshold_0_to_1": 0.05,
+      "disturbance_motion_threshold_0_to_1": 0.20,
+      "target_midpoint_minutes_since_midnight": 180.0,
+      "prior_strain_resting_baseline_min_days": 3,
+      "persist_algorithm_run": true,
+    ]
   }
 
   func importCalibrationLabels() {
@@ -92,14 +280,24 @@ extension HealthDataStore {
     if let index = snapshots.firstIndex(where: { $0.route == .strain }) {
       snapshots[index] = strainSnapshot(base: snapshots[index])
     }
+    let stressSummary = stressAlgorithmSummary(allowLiveFallbacks: !stableDailyMetrics)
     if let index = snapshots.firstIndex(where: { $0.route == .stress }) {
-      snapshots[index] = stressSnapshot(base: snapshots[index], allowLiveFallbacks: !stableDailyMetrics)
+      snapshots[index] = stressSnapshot(base: snapshots[index], summary: stressSummary)
     }
     if let index = snapshots.firstIndex(where: { $0.route == .cardioLoad }) {
       snapshots[index] = cardioLoadSnapshot(base: snapshots[index])
     }
     if let index = snapshots.firstIndex(where: { $0.route == .energyBank }) {
-      snapshots[index] = energyBankSnapshot(base: snapshots[index], allowLiveFallbacks: !stableDailyMetrics)
+      snapshots[index] = energyBankSnapshot(base: snapshots[index], summary: energyBankAlgorithmSummary(from: stressSummary))
+    }
+    if let index = snapshots.firstIndex(where: { $0.route == .packetInputs }) {
+      snapshots[index] = packetInputsSnapshot(base: snapshots[index])
+    }
+    if let index = snapshots.firstIndex(where: { $0.route == .algorithms }) {
+      snapshots[index] = algorithmsSnapshot(base: snapshots[index])
+    }
+    if let index = snapshots.firstIndex(where: { $0.route == .calibration }) {
+      snapshots[index] = calibrationSnapshot(base: snapshots[index])
     }
     if let liveHeartRateBPM,
        let index = snapshots.firstIndex(where: { $0.id == "health-monitor" }) {
@@ -120,6 +318,47 @@ extension HealthDataStore {
       )
     }
     return snapshots
+  }
+
+  func refreshHealthDashboardSnapshots() {
+    let landing = landingSnapshots(
+      liveHeartRateBPM: nil,
+      liveHeartRateSource: "",
+      liveHeartRateUpdatedAt: nil,
+      stableDailyMetrics: true
+    )
+    healthDashboardVitalSnapshots = trimmedHealthMonitorSnapshots(allowLiveFallbacks: false)
+    healthDashboardExploreSnapshots = healthDashboardSnapshots(
+      for: [.sleep, .recovery, .strain, .stress, .cardioLoad, .energyBank],
+      in: landing
+    )
+    healthDashboardAlgorithmSnapshots = healthDashboardSnapshots(
+      for: [.packetInputs, .algorithms, .calibration],
+      in: landing
+    )
+    healthDashboardStepsText = whoopStepsDisplayText()
+    healthDashboardStepsStatus = whoopStepsStatusText()
+    healthDashboardStepsSource = whoopStepsSource()
+    healthDashboardActiveEnergyText = whoopActiveCaloriesDisplayText()
+    healthDashboardActiveEnergyStatus = whoopActiveCaloriesStatusText()
+    healthDashboardActiveEnergySource = whoopActiveCaloriesSource()
+    healthDashboardCardioLoadDays = cardioLoadWeeklyPoints()
+  }
+
+  func healthDashboardSnapshots(
+    for routes: [HealthRoute],
+    in landingSnapshots: [HealthMetricSnapshot]
+  ) -> [HealthMetricSnapshot] {
+    routes.compactMap { route in
+      landingSnapshots.first { $0.route == route } ?? snapshot(for: route)
+    }
+  }
+
+  func trimmedHealthMonitorSnapshots(allowLiveFallbacks: Bool = true) -> [HealthMetricSnapshot] {
+    let visibleIDs = ["respiratory-rate", "resting-hr", "resting-hrv"]
+    return healthMonitorSnapshots(allowLiveFallbacks: allowLiveFallbacks).filter { snapshot in
+      visibleIDs.contains(snapshot.id)
+    }
   }
 
   func healthMonitorSnapshots(
@@ -192,6 +431,15 @@ extension HealthDataStore {
     if route == .energyBank && !previewMissingData {
       return energyBankSnapshot(base: snapshot)
     }
+    if route == .packetInputs && !previewMissingData {
+      return packetInputsSnapshot(base: snapshot)
+    }
+    if route == .algorithms && !previewMissingData {
+      return algorithmsSnapshot(base: snapshot)
+    }
+    if route == .calibration && !previewMissingData {
+      return calibrationSnapshot(base: snapshot)
+    }
     guard previewMissingData else {
       return snapshot
     }
@@ -229,6 +477,8 @@ extension HealthDataStore {
   func sleepSnapshot(base snapshot: HealthMetricSnapshot) -> HealthMetricSnapshot {
     if let output = Self.map(packetScoreReports["sleep"], "score_result", "output") {
       let scoreText = Self.numberText(output["score_0_to_100"], fractionDigits: 0) ?? snapshot.value
+      let algorithmID = Self.map(packetScoreReports["sleep"], "score_result")?["algorithm_id"] as? String
+        ?? OpenVitalsPacketScoreAlgorithmID.sleep
       return HealthMetricSnapshot(
         id: snapshot.id,
         route: snapshot.route,
@@ -239,7 +489,7 @@ extension HealthDataStore {
         status: Self.sleepQualityLabel(score: Self.doubleValue(output["score_0_to_100"])),
         freshness: "Latest",
         provenance: "metrics.sleep_score_from_features",
-        source: .bridge("open_vitals.sleep.v1"),
+        source: .bridge(algorithmID),
         systemImage: snapshot.systemImage,
         tint: snapshot.tint,
         trend: snapshot.trend
@@ -285,6 +535,8 @@ extension HealthDataStore {
     }
     if let output = Self.map(packetScoreReports["sleep"], "score_result", "output"),
        let duration = Self.doubleValue(output["sleep_duration_minutes"]) {
+      let algorithmID = Self.map(packetScoreReports["sleep"], "score_result")?["algorithm_id"] as? String
+        ?? OpenVitalsPacketScoreAlgorithmID.sleep
       return HealthMetricSnapshot(
         id: snapshot.id,
         route: snapshot.route,
@@ -295,7 +547,7 @@ extension HealthDataStore {
         status: Self.sleepQualityLabel(score: Self.doubleValue(output["score_0_to_100"])),
         freshness: "Latest",
         provenance: "metrics.sleep_score_from_features",
-        source: .bridge("open_vitals.sleep.v1"),
+        source: .bridge(algorithmID),
         systemImage: snapshot.systemImage,
         tint: snapshot.tint,
         trend: snapshot.trend
@@ -339,6 +591,142 @@ extension HealthDataStore {
       systemImage: snapshot.systemImage,
       tint: snapshot.tint,
       trend: recoveryScoreTrend(base: snapshot.trend, currentScore: score)
+    )
+  }
+
+  func packetInputsSnapshot(base snapshot: HealthMetricSnapshot) -> HealthMetricSnapshot {
+    guard !packetInputReports.isEmpty else {
+      if packetInputIsRunning {
+        return replacingHealthMonitorSnapshot(
+          snapshot,
+          value: "--",
+          unit: "",
+          status: "Extracting",
+          freshness: "Running",
+          provenance: "metrics.packet_input_summary",
+          source: .bridge("packet input extraction running"),
+          trend: snapshot.trend
+        )
+      }
+      if packetInputStatus != "No run" {
+        return replacingHealthMonitorSnapshot(
+          snapshot,
+          value: "--",
+          unit: "",
+          status: "Blocked",
+          freshness: packetInputStatus,
+          provenance: "metrics.packet_input_summary",
+          source: .unavailable(packetInputStatus),
+          trend: snapshot.trend
+        )
+      }
+      return snapshot
+    }
+
+    let ready = Self.intValue(packetInputReports["readiness"]?["ready_family_count"])
+    let total = Self.intValue(packetInputReports["readiness"]?["family_count"])
+      ?? Self.array(packetInputReports["readiness"]?["families"]).count
+    let readyText = ready.map { readyValue in
+      total > 0 ? "\(readyValue)/\(total) ready" : "\(readyValue) ready"
+    } ?? "\(packetInputReports.count) reports"
+
+    return replacingHealthMonitorSnapshot(
+      snapshot,
+      value: "\(packetInputReports.count)",
+      unit: "reports",
+      status: readyText,
+      freshness: "Latest",
+      provenance: metricInputReadinessSummary(),
+      source: .bridge("metrics.packet_input_summary"),
+      trend: Self.emptyTrend(from: snapshot.trend, packetCount: packetEvidenceFrameCount())
+    )
+  }
+
+  func algorithmsSnapshot(base snapshot: HealthMetricSnapshot) -> HealthMetricSnapshot {
+    let familyCount = algorithmFamilies.count
+    guard !algorithmDefinitions.isEmpty else {
+      if catalogStatus.hasPrefix("Loading") {
+        return replacingHealthMonitorSnapshot(
+          snapshot,
+          value: "--",
+          unit: "families",
+          status: "Loading",
+          freshness: "Bridge catalog",
+          provenance: "metrics.built_in_definitions",
+          source: .bridge("metric registry loading"),
+          trend: snapshot.trend
+        )
+      }
+      if catalogStatus != "Metric catalog not loaded" {
+        return replacingHealthMonitorSnapshot(
+          snapshot,
+          value: "--",
+          unit: "families",
+          status: "Unavailable",
+          freshness: catalogStatus,
+          provenance: "metrics.built_in_definitions",
+          source: catalogSource,
+          trend: snapshot.trend
+        )
+      }
+      return snapshot
+    }
+
+    return replacingHealthMonitorSnapshot(
+      snapshot,
+      value: "\(familyCount)",
+      unit: "families",
+      status: "Loaded",
+      freshness: "\(algorithmDefinitions.count) algorithms",
+      provenance: "metrics.built_in_definitions",
+      source: catalogSource,
+      trend: HealthTrendModel(
+        id: snapshot.trend.id,
+        title: snapshot.trend.title,
+        rangeLabel: "\(familyCount) families",
+        summary: "\(algorithmDefinitions.count) local algorithm definitions loaded from the bridge catalog.",
+        analysis: "Algorithms are available for local score and metric surfaces.",
+        resources: snapshot.trend.resources,
+        points: []
+      )
+    )
+  }
+
+  func calibrationSnapshot(base snapshot: HealthMetricSnapshot) -> HealthMetricSnapshot {
+    let issues = calibrationIssues()
+    if calibrationRunComplete {
+      return replacingHealthMonitorSnapshot(
+        snapshot,
+        value: "Ready",
+        unit: "",
+        status: calibrationTargetFamily.capitalized,
+        freshness: calibrationSummary(),
+        provenance: calibratedScoreSummary(),
+        source: .local("local calibration run"),
+        trend: snapshot.trend
+      )
+    }
+    if calibrationLabelsImported {
+      return replacingHealthMonitorSnapshot(
+        snapshot,
+        value: "1",
+        unit: "label",
+        status: "Needs run",
+        freshness: calibrationNextActionSummary(),
+        provenance: calibrationLabelSummary(),
+        source: .local("stored calibration labels"),
+        trend: snapshot.trend
+      )
+    }
+    return replacingHealthMonitorSnapshot(
+      snapshot,
+      value: "--",
+      unit: "",
+      status: issues.first ?? "No labels",
+      freshness: calibrationNextActionSummary(),
+      provenance: calibrationSummary(),
+      source: .unavailable("calibration requires stored labels and a local run"),
+      trend: snapshot.trend
     )
   }
 

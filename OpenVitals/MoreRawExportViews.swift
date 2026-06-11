@@ -131,6 +131,85 @@ struct MoreRawExportView: View {
         MoreInfoRow(title: "Privacy Lint", value: store.privacyLintStatus, systemImage: "hand.raised", status: store.validationStatusKind(store.privacyLintStatus))
         MoreInfoRow(title: "Sanitized Privacy", value: store.sanitizedPrivacyStatus, systemImage: "sparkles.rectangle.stack", status: .pending)
       }
+
+      Section("Supabase Debug Upload") {
+        TextField("Project URL", text: $store.supabaseProjectURL)
+          .textInputAutocapitalization(.never)
+          .keyboardType(.URL)
+          .autocorrectionDisabled()
+        SecureField("Publishable key", text: $store.supabaseAnonKey)
+          .textInputAutocapitalization(.never)
+          .autocorrectionDisabled()
+          .privacySensitive()
+        TextField("Bucket", text: $store.supabaseBucket)
+          .textInputAutocapitalization(.never)
+          .autocorrectionDisabled()
+        TextField("Device alias", text: $store.supabaseDeviceAlias)
+          .textInputAutocapitalization(.never)
+          .autocorrectionDisabled()
+
+        Button {
+          store.saveSupabaseDebugUploadSettings()
+        } label: {
+          Label("Save Settings", systemImage: "checkmark.circle")
+        }
+        .disabled(store.supabaseUploadInProgress)
+
+        MoreInfoRow(
+          title: "Upload Status",
+          value: store.supabaseUploadStatus,
+          systemImage: "icloud.and.arrow.up",
+          status: store.supabaseUploadStatusKind,
+          statusTitle: store.supabaseUploadStatusBadgeTitle
+        )
+        MoreInfoRow(
+          title: "Settings Check",
+          value: store.supabaseUploadReadinessSummary,
+          systemImage: "checkmark.seal",
+          status: store.supabaseUploadReadinessStatus,
+          statusTitle: store.supabaseUploadReadinessBadgeTitle
+        )
+
+        Button {
+          store.uploadSupabaseDebugBundle()
+        } label: {
+          Label(store.supabaseUploadActionTitle, systemImage: store.supabaseUploadInProgress ? "arrow.clockwise.icloud" : "icloud.and.arrow.up")
+        }
+        .disabled(store.supabaseUploadInProgress)
+
+        if store.supabaseUploadInProgress {
+          ProgressView(store.supabaseUploadStatus)
+        }
+
+        MoreInfoRow(
+          title: "Storage Bucket",
+          value: store.supabaseBucket,
+          systemImage: "shippingbox",
+          status: store.supabaseBucketStatus,
+          statusTitle: store.supabaseBucketStatusTitle
+        )
+        MoreInfoRow(
+          title: "Bundle Object",
+          value: store.supabaseLastBundlePath,
+          systemImage: "doc",
+          status: store.supabaseBundleObjectStatus,
+          statusTitle: store.supabaseBundleObjectStatusTitle
+        )
+        MoreInfoRow(
+          title: "Manifest Object",
+          value: store.supabaseLastManifestPath,
+          systemImage: "list.bullet.rectangle",
+          status: store.supabaseManifestObjectStatus,
+          statusTitle: store.supabaseManifestObjectStatusTitle
+        )
+        MoreInfoRow(
+          title: "Database Row",
+          value: store.supabaseLastDatabaseRow,
+          systemImage: "tablecells",
+          status: store.supabaseDatabaseRowStatus,
+          statusTitle: store.supabaseDatabaseRowStatusTitle
+        )
+      }
     }
     .openVitalsListBackground()
     .navigationTitle("Raw Export")
@@ -200,4 +279,3 @@ struct MoreAlgorithmsView: View {
     }
   }
 }
-

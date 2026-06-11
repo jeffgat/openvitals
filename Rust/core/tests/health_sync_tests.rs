@@ -1095,7 +1095,9 @@ fn delete_planning_blocks_non_open_vitals_external_or_unsupported_records() {
     assert!(!report.cleanup_scope_ready);
     assert!(report.blocked_deletes.iter().any(|record| {
         record.platform_record_id == "external-platform-record"
-            && record.reasons.contains(&"not_open_vitals_owned".to_string())
+            && record
+                .reasons
+                .contains(&"not_open_vitals_owned".to_string())
     }));
     assert!(report.blocked_deletes.iter().any(|record| {
         record.platform_record_id == "unsupported-platform-record"

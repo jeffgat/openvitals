@@ -481,7 +481,8 @@ fn debug_session_store_records_structured_activity_export_and_health_sync_events
     .unwrap();
 
     let snapshot =
-        open_vitals_core::debug_ws::debug_session_snapshot(&store, "debug-session-structured").unwrap();
+        open_vitals_core::debug_ws::debug_session_snapshot(&store, "debug-session-structured")
+            .unwrap();
 
     assert!(
         snapshot.contract_report.pass,

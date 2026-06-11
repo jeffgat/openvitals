@@ -211,8 +211,9 @@ fn lint_file_path(
 ) -> OpenVitalsResult<()> {
     if is_zip_path(path) {
         let file = File::open(path).map_err(|source| OpenVitalsError::io(path, source))?;
-        let mut archive = ZipArchive::new(file)
-            .map_err(|source| OpenVitalsError::message(format!("cannot open zip archive: {source}")))?;
+        let mut archive = ZipArchive::new(file).map_err(|source| {
+            OpenVitalsError::message(format!("cannot open zip archive: {source}"))
+        })?;
         for index in 0..archive.len() {
             let mut entry = archive.by_index(index).map_err(|source| {
                 OpenVitalsError::message(format!("cannot read zip entry {index}: {source}"))

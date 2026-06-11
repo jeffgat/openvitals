@@ -77,30 +77,38 @@ extension OpenVitalsAppModel {
     activityPersistenceStatus = syncStatus == "candidate" ? "Candidate \(activity.title)" : "Recording \(activity.title)"
 
     if ownsCaptureSession {
-      do {
-        _ = try rust.request(
+      let startArgs: [String: Any] = [
+        "database_path": HealthDataStore.defaultDatabasePath(),
+        "session_id": captureSessionID,
+        "source": source,
+        "started_at_unix_ms": unixMilliseconds(startedAt),
+        "device_model": ble.activeDeviceName,
+        "active_device_id": ble.activeDeviceIdentifier?.uuidString ?? NSNull(),
+        "provenance": [
+          "activity_session_id": activitySessionID,
+          "activity_type": rustActivityType(for: activity),
+          "activity_title": activity.title,
+          "started_by": source,
+          "detection_method": detectionMethod,
+          "sync_status": syncStatus,
+          "capture_mode": "activity",
+        ],
+      ]
+      OpenVitalsRustBridge.performInBackground(qos: .utility, {
+        try OpenVitalsRustBridge().request(
           method: "capture.start_session",
-          args: [
-            "database_path": HealthDataStore.defaultDatabasePath(),
-            "session_id": captureSessionID,
-            "source": source,
-            "started_at_unix_ms": unixMilliseconds(startedAt),
-            "device_model": ble.activeDeviceName,
-            "active_device_id": ble.activeDeviceIdentifier?.uuidString ?? NSNull(),
-            "provenance": [
-              "activity_session_id": activitySessionID,
-              "activity_type": rustActivityType(for: activity),
-              "activity_title": activity.title,
-              "started_by": source,
-              "detection_method": detectionMethod,
-              "sync_status": syncStatus,
-              "capture_mode": "activity",
-            ],
-          ]
+          args: startArgs
         )
-        ble.record(source: "rust", title: "activity.capture.start.ok", body: captureSessionID)
-      } catch {
-        ble.record(level: .error, source: "rust", title: "activity.capture.start.failed", body: String(describing: error))
+      }) { [weak self] result in
+        guard let self else {
+          return
+        }
+        switch result {
+        case .success:
+          self.ble.record(source: "rust", title: "activity.capture.start.ok", body: captureSessionID)
+        case .failure(let error):
+          self.ble.record(level: .error, source: "rust", title: "activity.capture.start.failed", body: String(describing: error))
+        }
       }
     } else {
       ble.record(source: "rust", title: "activity.capture.attach_existing", body: captureSessionID)
@@ -220,19 +228,27 @@ extension OpenVitalsAppModel {
     }
 
     if let captureSessionID, ownsCaptureSession {
-      do {
-        _ = try rust.request(
+      let finishArgs: [String: Any] = [
+        "database_path": HealthDataStore.defaultDatabasePath(),
+        "session_id": captureSessionID,
+        "ended_at_unix_ms": endMs,
+        "frame_count": persistence?.importedFrameCount ?? 0,
+      ]
+      OpenVitalsRustBridge.performInBackground(qos: .utility, {
+        try OpenVitalsRustBridge().request(
           method: "capture.finish_session",
-          args: [
-            "database_path": HealthDataStore.defaultDatabasePath(),
-            "session_id": captureSessionID,
-            "ended_at_unix_ms": endMs,
-            "frame_count": persistence?.importedFrameCount ?? 0,
-          ]
+          args: finishArgs
         )
-        ble.record(source: "rust", title: "activity.capture.finish.ok", body: "\(captureSessionID) frames=\(persistence?.importedFrameCount ?? 0)")
-      } catch {
-        ble.record(level: .error, source: "rust", title: "activity.capture.finish.failed", body: String(describing: error))
+      }) { [weak self] result in
+        guard let self else {
+          return
+        }
+        switch result {
+        case .success:
+          self.ble.record(source: "rust", title: "activity.capture.finish.ok", body: "\(captureSessionID) frames=\(persistence?.importedFrameCount ?? 0)")
+        case .failure(let error):
+          self.ble.record(level: .error, source: "rust", title: "activity.capture.finish.failed", body: String(describing: error))
+        }
       }
     }
 
@@ -265,65 +281,71 @@ extension OpenVitalsAppModel {
       provenance[key] = value
     }
 
-    do {
-      _ = try rust.request(
-        method: "activity.create_session",
-        args: [
-          "database_path": HealthDataStore.defaultDatabasePath(),
-          "session_id": sessionID,
-          "source": sessionSource,
-          "start_time_unix_ms": startMs,
-          "end_time_unix_ms": endMs,
-          "activity_type": activityType,
-          "external_activity_type_name": activityExternalName(for: activity),
-          "custom_label": activity.title,
-          "confidence": boundedConfidence,
-          "detection_method": sessionDetectionMethod,
-          "sync_status": sessionSyncStatus,
-          "provenance": provenance,
-        ]
-      )
+    let sessionArgs: [String: Any] = [
+      "database_path": HealthDataStore.defaultDatabasePath(),
+      "session_id": sessionID,
+      "source": sessionSource,
+      "start_time_unix_ms": startMs,
+      "end_time_unix_ms": endMs,
+      "activity_type": activityType,
+      "external_activity_type_name": activityExternalName(for: activity),
+      "custom_label": activity.title,
+      "confidence": boundedConfidence,
+      "detection_method": sessionDetectionMethod,
+      "sync_status": sessionSyncStatus,
+      "provenance": provenance,
+    ]
 
-      var activityMetrics: [[String: Any]] = []
-      appendActivityMetric(&activityMetrics, sessionID: sessionID, name: "duration", value: persistedElapsed, unit: "s", startMs: startMs, endMs: endMs, source: sessionSource)
-      if abs(activeTimerElapsed - persistedElapsed) > 1 {
-        appendActivityMetric(&activityMetrics, sessionID: sessionID, name: "active_duration", value: activeTimerElapsed, unit: "s", startMs: startMs, endMs: endMs, source: sessionSource)
+    var activityMetrics: [[String: Any]] = []
+    appendActivityMetric(&activityMetrics, sessionID: sessionID, name: "duration", value: persistedElapsed, unit: "s", startMs: startMs, endMs: endMs, source: sessionSource)
+    if abs(activeTimerElapsed - persistedElapsed) > 1 {
+      appendActivityMetric(&activityMetrics, sessionID: sessionID, name: "active_duration", value: activeTimerElapsed, unit: "s", startMs: startMs, endMs: endMs, source: sessionSource)
+    }
+    if storesLocationMetrics {
+      appendActivityMetric(&activityMetrics, sessionID: sessionID, name: "distance", value: max(distanceMeters, 0), unit: "m", startMs: startMs, endMs: endMs, source: sessionSource)
+      appendActivityMetric(&activityMetrics, sessionID: sessionID, name: "route_points", value: Double(routePointCount), unit: "count", startMs: startMs, endMs: endMs, source: sessionSource)
+      appendActivityMetric(&activityMetrics, sessionID: sessionID, name: "elevation_gain", value: max(elevationGainMeters, 0), unit: "m", startMs: startMs, endMs: endMs, source: sessionSource)
+    }
+    if let metricAverageHeartRate {
+      appendActivityMetric(&activityMetrics, sessionID: sessionID, name: "average_hr", value: Double(metricAverageHeartRate), unit: "bpm", startMs: startMs, endMs: endMs, source: sessionSource)
+    }
+    if let metricMaxHeartRate {
+      appendActivityMetric(&activityMetrics, sessionID: sessionID, name: "max_hr", value: Double(metricMaxHeartRate), unit: "bpm", startMs: startMs, endMs: endMs, source: sessionSource)
+    }
+    for zoneID in 1...5 {
+      let seconds = metricZoneDurations[zoneID, default: 0]
+      appendActivityMetric(&activityMetrics, sessionID: sessionID, name: "hr_zone_\(zoneID)_duration", value: seconds, unit: "s", startMs: startMs, endMs: endMs, source: sessionSource)
+    }
+    activityPersistenceStatus = "Storing \(activity.title)..."
+    OpenVitalsRustBridge.performInBackground(qos: .utility, {
+      try OpenVitalsRustBridge().request(method: "activity.create_session", args: sessionArgs)
+    }) { [weak self] result in
+      guard let self else {
+        return
       }
-      if storesLocationMetrics {
-        appendActivityMetric(&activityMetrics, sessionID: sessionID, name: "distance", value: max(distanceMeters, 0), unit: "m", startMs: startMs, endMs: endMs, source: sessionSource)
-        appendActivityMetric(&activityMetrics, sessionID: sessionID, name: "route_points", value: Double(routePointCount), unit: "count", startMs: startMs, endMs: endMs, source: sessionSource)
-        appendActivityMetric(&activityMetrics, sessionID: sessionID, name: "elevation_gain", value: max(elevationGainMeters, 0), unit: "m", startMs: startMs, endMs: endMs, source: sessionSource)
-      }
-      if let metricAverageHeartRate {
-        appendActivityMetric(&activityMetrics, sessionID: sessionID, name: "average_hr", value: Double(metricAverageHeartRate), unit: "bpm", startMs: startMs, endMs: endMs, source: sessionSource)
-      }
-      if let metricMaxHeartRate {
-        appendActivityMetric(&activityMetrics, sessionID: sessionID, name: "max_hr", value: Double(metricMaxHeartRate), unit: "bpm", startMs: startMs, endMs: endMs, source: sessionSource)
-      }
-      for zoneID in 1...5 {
-        let seconds = metricZoneDurations[zoneID, default: 0]
-        appendActivityMetric(&activityMetrics, sessionID: sessionID, name: "hr_zone_\(zoneID)_duration", value: seconds, unit: "s", startMs: startMs, endMs: endMs, source: sessionSource)
-      }
-      attachActivityMetrics(activityMetrics)
+      switch result {
+      case .success:
+        self.attachActivityMetrics(activityMetrics)
 
-      let storedPrefix = sessionSyncStatus == "candidate" ? "Stored candidate" : "Stored"
-      let storedDistance = storesLocationMetrics ? " \(formatPersistedDistance(distanceMeters))" : ""
-      let logDistance = storesLocationMetrics ? "\(Int(distanceMeters.rounded()))m" : "no distance"
-      activityPersistenceStatus = "\(storedPrefix) \(activity.title)\(storedDistance)"
-      ble.record(source: "rust", title: "activity.session.store.ok", body: "\(sessionID) \(activityType) \(logDistance)")
-      refreshActivityTimeline(for: end)
-      if shouldFinishSharedHealthCapture {
-        stopHealthPacketCapture(reason: "activity_finished")
-      } else if sessionDetectionMethod == "user_assigned", activeHealthPacketCapture == nil {
-        ble.stopMovementHeartRateCapture()
-      }
-    } catch {
-      activityPersistenceStatus = "Activity store failed"
-      ble.record(level: .error, source: "rust", title: "activity.session.store.failed", body: String(describing: error))
-      if shouldFinishSharedHealthCapture {
-        stopHealthPacketCapture(reason: "activity_store_failed")
-      } else if sessionDetectionMethod == "user_assigned", activeHealthPacketCapture == nil {
-        ble.stopMovementHeartRateCapture()
+        let storedPrefix = sessionSyncStatus == "candidate" ? "Stored candidate" : "Stored"
+        let storedDistance = storesLocationMetrics ? " \(self.formatPersistedDistance(distanceMeters))" : ""
+        let logDistance = storesLocationMetrics ? "\(Int(distanceMeters.rounded()))m" : "no distance"
+        self.activityPersistenceStatus = "\(storedPrefix) \(activity.title)\(storedDistance)"
+        self.ble.record(source: "rust", title: "activity.session.store.ok", body: "\(sessionID) \(activityType) \(logDistance)")
+        self.refreshActivityTimeline(for: end)
+        if shouldFinishSharedHealthCapture {
+          self.stopHealthPacketCapture(reason: "activity_finished")
+        } else if sessionDetectionMethod == "user_assigned", self.activeHealthPacketCapture == nil {
+          self.ble.stopMovementHeartRateCapture()
+        }
+      case .failure(let error):
+        self.activityPersistenceStatus = "Activity store failed"
+        self.ble.record(level: .error, source: "rust", title: "activity.session.store.failed", body: String(describing: error))
+        if shouldFinishSharedHealthCapture {
+          self.stopHealthPacketCapture(reason: "activity_store_failed")
+        } else if sessionDetectionMethod == "user_assigned", self.activeHealthPacketCapture == nil {
+          self.ble.stopMovementHeartRateCapture()
+        }
       }
     }
   }

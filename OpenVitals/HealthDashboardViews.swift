@@ -5,6 +5,10 @@ import UIKit
 
 struct HealthDashboardStatusHeader: View {
   let catalogStatus: String
+  let packetInputStatus: String
+  let packetScoreStatus: String
+  let refreshStatus: String
+  let isRefreshing: Bool
   let usesSampleData: Bool
 
   var body: some View {
@@ -12,30 +16,37 @@ struct HealthDashboardStatusHeader: View {
       HStack(spacing: 10) {
         Image(systemName: usesSampleData ? "testtube.2" : "checkmark.seal")
           .font(.system(size: 16, weight: .semibold))
-          .foregroundStyle(usesSampleData ? .orange : .green)
+          .foregroundStyle(usesSampleData ? OpenVitalsTheme.bronze : OpenVitalsTheme.gold)
           .frame(width: 30, height: 30)
-          .background((usesSampleData ? Color.orange : Color.green).opacity(0.14), in: Circle())
+          .background((usesSampleData ? OpenVitalsTheme.bronze : OpenVitalsTheme.gold).opacity(0.14), in: Circle())
         VStack(alignment: .leading, spacing: 2) {
           Text("Health Sources")
             .font(.headline.weight(.semibold))
-          Text(catalogStatus)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.74)
+          VStack(alignment: .leading, spacing: 2) {
+            Text(catalogStatus)
+            Text("Inputs: \(packetInputStatus)")
+            Text("Scores: \(packetScoreStatus)")
+            if isRefreshing || refreshStatus != "No refresh" {
+              Text(refreshStatus)
+            }
+          }
+          .font(.caption)
+          .foregroundStyle(OpenVitalsTheme.textSecondary)
+          .lineLimit(1)
+          .minimumScaleFactor(0.74)
         }
         Spacer()
         Text(usesSampleData ? "Preview" : "Live")
           .font(.caption.weight(.bold))
-          .foregroundStyle(usesSampleData ? .orange : .green)
+          .foregroundStyle(usesSampleData ? OpenVitalsTheme.bronze : OpenVitalsTheme.gold)
           .padding(.horizontal, 9)
           .padding(.vertical, 5)
-          .background((usesSampleData ? Color.orange : Color.green).opacity(0.12), in: Capsule())
+          .background((usesSampleData ? OpenVitalsTheme.bronze : OpenVitalsTheme.gold).opacity(0.12), in: Capsule())
       }
 
     }
     .padding(16)
-    .healthDashboardSurface(tint: usesSampleData ? .orange : .green, tintOpacity: 0.05)
+    .healthDashboardSurface(tint: usesSampleData ? OpenVitalsTheme.bronze : OpenVitalsTheme.gold, tintOpacity: 0.05)
   }
 }
 
@@ -69,9 +80,9 @@ struct HealthTodayFocusCard: View {
       HStack {
         Image(systemName: snapshot.systemImage)
           .font(.system(size: 16, weight: .semibold))
-          .foregroundStyle(snapshot.tint)
+          .foregroundStyle(tint)
           .frame(width: 30, height: 30)
-          .background(snapshot.tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+          .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         Spacer()
         HealthSourceBadge(source: snapshot.source)
       }
@@ -79,23 +90,27 @@ struct HealthTodayFocusCard: View {
       VStack(alignment: .leading, spacing: 4) {
         Text(snapshot.title)
           .font(.subheadline.weight(.semibold))
-          .foregroundStyle(.secondary)
+          .foregroundStyle(OpenVitalsTheme.textSecondary)
           .lineLimit(1)
         Text(snapshot.displayValue)
           .font(.system(size: 30, weight: .bold, design: .rounded))
-          .foregroundStyle(.primary)
+          .foregroundStyle(OpenVitalsTheme.textPrimary)
           .lineLimit(1)
           .minimumScaleFactor(0.62)
         Text(snapshot.status)
           .font(.caption.weight(.semibold))
-          .foregroundStyle(snapshot.tint)
+          .foregroundStyle(tint)
           .lineLimit(1)
       }
       Spacer(minLength: 0)
     }
     .frame(maxWidth: .infinity, minHeight: 154, alignment: .topLeading)
     .padding(16)
-    .healthDashboardSurface(tint: snapshot.tint, tintOpacity: 0.08)
+    .healthDashboardSurface(tint: tint, tintOpacity: 0.08)
+  }
+
+  private var tint: Color {
+    OpenVitalsTheme.routeTint(snapshot.route)
   }
 }
 
@@ -124,7 +139,7 @@ struct HealthActivityOverviewSection: View {
             value: steps,
             subtitle: stepsFreshness,
             systemImage: "shoeprints.fill",
-            tint: .green,
+            tint: OpenVitalsTheme.champagne,
             source: stepsSource
           )
         }
@@ -136,7 +151,7 @@ struct HealthActivityOverviewSection: View {
             value: activeEnergy,
             subtitle: activeEnergyFreshness,
             systemImage: "flame.fill",
-            tint: .orange,
+            tint: OpenVitalsTheme.gold,
             source: activeEnergySource
           )
         }
@@ -148,7 +163,7 @@ struct HealthActivityOverviewSection: View {
             value: heartRateValue,
             subtitle: heartRateStatus,
             systemImage: "heart.fill",
-            tint: .red,
+            tint: OpenVitalsTheme.bronze,
             source: heartRateSource
           )
         }
@@ -171,9 +186,9 @@ struct HealthDashboardMetricCard: View {
       HStack {
         Image(systemName: systemImage)
           .font(.system(size: 16, weight: .semibold))
-          .foregroundStyle(tint)
+          .foregroundStyle(cardTint)
           .frame(width: 30, height: 30)
-          .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+          .background(cardTint.opacity(0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         Spacer()
         HealthSourceBadge(source: source)
       }
@@ -181,16 +196,16 @@ struct HealthDashboardMetricCard: View {
       VStack(alignment: .leading, spacing: 4) {
         Text(value)
           .font(.system(size: 28, weight: .bold, design: .rounded))
-          .foregroundStyle(.primary)
+          .foregroundStyle(OpenVitalsTheme.textPrimary)
           .lineLimit(1)
           .minimumScaleFactor(0.62)
         Text(title)
           .font(.subheadline.weight(.semibold))
-          .foregroundStyle(.primary)
+          .foregroundStyle(OpenVitalsTheme.textPrimary)
           .lineLimit(1)
         Text(subtitle)
           .font(.caption)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(OpenVitalsTheme.textSecondary)
           .lineLimit(2)
           .fixedSize(horizontal: false, vertical: true)
       }
@@ -198,7 +213,11 @@ struct HealthDashboardMetricCard: View {
     }
     .frame(maxWidth: .infinity, minHeight: 148, alignment: .topLeading)
     .padding(16)
-    .healthDashboardSurface(tint: tint, tintOpacity: 0.08)
+    .healthDashboardSurface(tint: cardTint, tintOpacity: 0.08)
+  }
+
+  private var cardTint: Color {
+    OpenVitalsTheme.accent
   }
 }
 
@@ -216,9 +235,9 @@ struct HealthVitalsPreviewSection: View {
         NavigationLink(value: HealthRoute.healthMonitor) {
           Image(systemName: "chevron.right")
             .font(.caption.weight(.bold))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(OpenVitalsTheme.textSecondary)
             .frame(width: 30, height: 30)
-            .background(Color(.tertiarySystemGroupedBackground), in: Circle())
+            .background(OpenVitalsTheme.elevatedSurface, in: Circle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Open Health Monitor")
@@ -243,29 +262,33 @@ struct HealthVitalsPreviewCard: View {
     HStack(alignment: .top, spacing: 10) {
       Image(systemName: snapshot.systemImage)
         .font(.system(size: 15, weight: .semibold))
-        .foregroundStyle(snapshot.tint)
+        .foregroundStyle(tint)
         .frame(width: 28, height: 28)
-        .background(snapshot.tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .background(tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
       VStack(alignment: .leading, spacing: 4) {
         Text(snapshot.title)
           .font(.caption.weight(.semibold))
-          .foregroundStyle(.secondary)
+          .foregroundStyle(OpenVitalsTheme.textSecondary)
           .lineLimit(1)
         Text(snapshot.displayValue)
           .font(.headline.weight(.bold))
-          .foregroundStyle(.primary)
+          .foregroundStyle(OpenVitalsTheme.textPrimary)
           .lineLimit(1)
           .minimumScaleFactor(0.7)
         Text(snapshot.status)
           .font(.caption2)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(OpenVitalsTheme.textSecondary)
           .lineLimit(1)
       }
       Spacer(minLength: 0)
     }
     .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
     .padding(14)
-    .healthDashboardSurface(tint: snapshot.tint, tintOpacity: 0.05)
+    .healthDashboardSurface(tint: tint, tintOpacity: 0.05)
+  }
+
+  private var tint: Color {
+    OpenVitalsTheme.routeTint(snapshot.route)
   }
 }
 
@@ -295,16 +318,16 @@ struct HealthRouteShortcutCard: View {
     HStack(spacing: 12) {
       Image(systemName: snapshot.systemImage)
         .font(.system(size: 17, weight: .semibold))
-        .foregroundStyle(snapshot.tint)
+        .foregroundStyle(tint)
         .frame(width: 34, height: 34)
-        .background(snapshot.tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
       VStack(alignment: .leading, spacing: 3) {
         Text(snapshot.title)
           .font(.subheadline.weight(.semibold))
-          .foregroundStyle(.primary)
+          .foregroundStyle(OpenVitalsTheme.textPrimary)
         Text("\(snapshot.displayValue) | \(snapshot.status)")
           .font(.caption)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(OpenVitalsTheme.textSecondary)
           .lineLimit(1)
           .minimumScaleFactor(0.78)
       }
@@ -312,10 +335,14 @@ struct HealthRouteShortcutCard: View {
       HealthSourceBadge(source: snapshot.source)
       Image(systemName: "chevron.right")
         .font(.caption.weight(.bold))
-        .foregroundStyle(.tertiary)
+        .foregroundStyle(OpenVitalsTheme.textTertiary)
     }
     .padding(14)
-    .healthDashboardSurface(tint: snapshot.tint, tintOpacity: 0.04)
+    .healthDashboardSurface(tint: tint, tintOpacity: 0.04)
+  }
+
+  private var tint: Color {
+    OpenVitalsTheme.routeTint(snapshot.route)
   }
 }
 
@@ -390,15 +417,15 @@ struct HealthStatusBanner: View {
     VStack(alignment: .leading, spacing: 10) {
       HStack(spacing: 10) {
         Image(systemName: store.usesSampleData ? "testtube.2" : "checkmark.seal")
-          .foregroundStyle(store.usesSampleData ? .orange : .green)
+          .foregroundStyle(store.usesSampleData ? OpenVitalsTheme.bronze : OpenVitalsTheme.gold)
         Text(store.catalogStatus)
           .font(.subheadline.weight(.semibold))
-          .foregroundStyle(.primary)
+          .foregroundStyle(OpenVitalsTheme.textPrimary)
         Spacer()
       }
       Text("Every row below declares bridge, live, local, or unavailable provenance.")
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(OpenVitalsTheme.textSecondary)
     }
     .padding(14)
     .healthCardSurface()
@@ -437,29 +464,29 @@ struct HealthMetricCard: View {
       HStack {
         Image(systemName: snapshot.systemImage)
           .font(.system(size: 16, weight: .semibold))
-          .foregroundStyle(snapshot.tint)
+          .foregroundStyle(OpenVitalsTheme.routeTint(snapshot.route))
         Spacer()
         HealthSourceBadge(source: snapshot.source)
       }
 
       Text(snapshot.displayValue)
         .font(.title2.bold())
-        .foregroundStyle(.primary)
+        .foregroundStyle(OpenVitalsTheme.textPrimary)
         .lineLimit(1)
         .minimumScaleFactor(0.7)
 
       VStack(alignment: .leading, spacing: 3) {
         Text(snapshot.title)
           .font(.subheadline.weight(.semibold))
-          .foregroundStyle(.primary)
+          .foregroundStyle(OpenVitalsTheme.textPrimary)
           .lineLimit(1)
         Text("\(snapshot.status) | \(snapshot.freshness)")
           .font(.caption)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(OpenVitalsTheme.textSecondary)
           .lineLimit(2)
         Text(snapshot.provenance)
           .font(.caption2)
-          .foregroundStyle(.tertiary)
+          .foregroundStyle(OpenVitalsTheme.textTertiary)
           .lineLimit(1)
       }
     }
@@ -481,10 +508,10 @@ struct HealthMonitorView: View {
   var body: some View {
     ScrollView {
       LazyVStack(alignment: .leading, spacing: 18) {
-        HealthHero(snapshot: store.snapshot(for: .healthMonitor), subtitle: "Vitals, timeline, and primary sleep inputs")
+        HealthHero(snapshot: store.snapshot(for: .healthMonitor), subtitle: "Respiratory rate, resting HR, and resting HRV")
 
         LazyVGrid(columns: columns, spacing: 10) {
-          ForEach(store.healthMonitorSnapshots()) { snapshot in
+          ForEach(store.trimmedHealthMonitorSnapshots()) { snapshot in
             Button {
               selectedTrend = snapshot
             } label: {

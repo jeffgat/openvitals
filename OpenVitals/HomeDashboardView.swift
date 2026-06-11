@@ -6,44 +6,41 @@ struct HomeDashboardView: View {
   @Binding var selectedDate: Date
   let openHealthRoute: (HealthRoute) -> Void
   @State private var showingScoreDatePicker = false
-  @State private var showingCardioLoadSheet = false
   @State private var selectedHealthMonitorTrend: HealthMetricSnapshot?
+  @State private var scoreSyncIsPreparing = false
+  @State private var scoreSyncWaitingForBand = false
 
   var body: some View {
+    let dashboard = dashboardMetrics
     ScrollView {
       LazyVStack(alignment: .leading, spacing: 18) {
         HomeDailyScoreCard(
-          scores: scoreSnapshots,
+          scores: dashboard.scoreSnapshots,
+          syncDetail: homeScoreSyncDetail,
+          syncButtonTitle: homeScoreSyncButtonTitle,
+          syncIsRunning: homeScoreSyncIsRunning,
+          syncCanRun: homeScoreSyncCanRun,
+          syncAction: startHomeScoreSync,
           openScore: openHealth
         )
 
-        HomeStressEnergySection(
-          stress: landingSnapshot(for: .stress),
-          energy: landingSnapshot(for: .energyBank),
-          openStress: { openHealth(.stress) }
-        )
-
-        HomeCardioLoadWidget(
-          snapshot: landingSnapshot(for: .cardioLoad),
-          days: healthStore.cardioLoadWeeklyPoints()
-        ) {
-          showingCardioLoadSheet = true
-          model.recordUIAction("health.sheet.opened", detail: "Cardio Load home widget")
+        if !dashboard.missingDataItems.isEmpty {
+          HomeMissingDataSection(
+            items: dashboard.missingDataItems,
+            openItem: { openHealth($0.route) }
+          )
         }
 
         HomeHealthMonitorSection(
-          snapshots: healthStore.healthMonitorSnapshots(allowLiveFallbacks: false),
+          snapshots: dashboard.healthMonitorSnapshots,
           openSnapshot: openHealthMonitorSnapshot
         )
 
-        HomeTimelineSection(
-          sleep: homeSnapshot(for: .sleep),
-          activity: homeSnapshot(for: .strain),
-          recovery: homeSnapshot(for: .recovery),
-          activities: model.homeActivityTimelineItems,
-          openSleep: { openHealth(.sleep) },
-          openActivity: { openHealth(.strain) },
-          openRecovery: { openHealth(.recovery) }
+        HomeAlarmSection(ble: model.ble)
+
+        HomeDataAlgorithmsSection(
+          snapshots: dashboard.dataAlgorithmSnapshots,
+          openSnapshot: { openHealth($0.route) }
         )
 
       }
@@ -90,10 +87,10 @@ struct HomeDashboardView: View {
     }
     .task {
       healthStore.loadBridgeCatalogsIfNeeded()
-      model.refreshActivityTimeline(for: selectedDate)
+      healthStore.loadPersistedPacketScoresIfNeeded()
     }
-    .onChange(of: selectedDate) { _, newValue in
-      model.refreshActivityTimeline(for: newValue)
+    .onChange(of: model.ble.historicalSyncStatus) { _, newValue in
+      handleHomeScoreSyncStatusChange(newValue)
     }
     .sheet(isPresented: $showingScoreDatePicker) {
       ScoreDatePickerSheet(
@@ -103,27 +100,17 @@ struct HomeDashboardView: View {
         selectedDate: $selectedDate
       )
     }
-    .sheet(isPresented: $showingCardioLoadSheet) {
-      CardioLoadSheet(store: healthStore)
-    }
     .sheet(item: $selectedHealthMonitorTrend) { snapshot in
       SleepV2BevelTrendSheet(snapshot: snapshot)
     }
   }
 
-  private var scoreSnapshots: [HealthMetricSnapshot] {
-    [
-      datedHomeSnapshot(for: .sleep),
-      datedHomeSnapshot(for: .recovery),
-      datedHomeSnapshot(for: .strain),
-    ]
-  }
-
   private var scorePickerSnapshots: [HealthMetricSnapshot] {
-    [
-      homeSnapshot(for: .sleep),
-      homeSnapshot(for: .recovery),
-      homeSnapshot(for: .strain),
+    let snapshots = healthStore.healthDashboardExploreSnapshots
+    return [
+      homeSnapshot(for: .sleep, in: snapshots),
+      homeSnapshot(for: .recovery, in: snapshots),
+      homeSnapshot(for: .strain, in: snapshots),
     ]
   }
 
@@ -132,7 +119,7 @@ struct HomeDashboardView: View {
   }
 
   private var deviceToolbarTint: Color {
-    deviceToolbarConnected ? .green : .red
+    deviceToolbarConnected ? OpenVitalsTheme.accent : OpenVitalsTheme.textTertiary
   }
 
   private var deviceToolbarAccessibilityValue: String {
@@ -144,21 +131,61 @@ struct HomeDashboardView: View {
     return state == "ready" || state == "connected"
   }
 
-  private var landingSnapshots: [HealthMetricSnapshot] {
-    healthStore.landingSnapshots(
-      liveHeartRateBPM: model.ble.liveHeartRateBPM,
-      liveHeartRateSource: model.ble.liveHeartRateSource,
-      liveHeartRateUpdatedAt: model.ble.liveHeartRateUpdatedAt,
-      stableDailyMetrics: true
-    )
+  private var homeScoreSyncIsRunning: Bool {
+    scoreSyncIsPreparing || model.ble.isHistoricalSyncing || healthStore.healthMetricWorkIsRunning
   }
 
-  private func landingSnapshot(for route: HealthRoute) -> HealthMetricSnapshot {
-    landingSnapshots.first { $0.route == route } ?? healthStore.snapshot(for: route)
+  private var homeScoreSyncCanRun: Bool {
+    model.ble.canSyncHistorical && !homeScoreSyncIsRunning
   }
 
-  private func homeSnapshot(for route: HealthRoute) -> HealthMetricSnapshot {
-    let snapshot = landingSnapshot(for: route)
+  private var homeScoreSyncButtonTitle: String {
+    if scoreSyncIsPreparing {
+      return "Preparing"
+    }
+    if model.ble.isHistoricalSyncing {
+      return "Syncing"
+    }
+    if healthStore.healthMetricWorkIsRunning {
+      return "Updating"
+    }
+    return "Sync"
+  }
+
+  private var homeScoreSyncDetail: String {
+    if scoreSyncIsPreparing {
+      return model.dailyMetricSyncStatus
+    }
+    if model.ble.isHistoricalSyncing {
+      return "\(homeHistoricalPacketText) | \(model.ble.historicalSyncStatus)"
+    }
+    if healthStore.healthMetricWorkIsRunning {
+      return healthStore.healthMetricRefreshStatus
+    }
+    if model.ble.historicalSyncStatus == "failed" {
+      return model.ble.lastSyncFailure?.message ?? "Band sync failed"
+    }
+    if let completedAt = model.ble.lastHistoricalSyncCompletedAt {
+      let relative = HealthDataStore.relativeText(for: completedAt) ?? completedAt.formatted(date: .omitted, time: .shortened)
+      return "Last band sync \(relative) | \(healthStore.packetScoreStatus)"
+    }
+    if model.ble.canSyncHistorical {
+      return "Ready for Sleep, Recovery, and Strain"
+    }
+    return "Connect device to sync daily scores"
+  }
+
+  private var homeHistoricalPacketText: String {
+    let packetCount = model.ble.historicalPacketCount
+    return packetCount == 1 ? "1 packet" : "\(packetCount) packets"
+  }
+
+  private func landingSnapshot(for route: HealthRoute, in snapshots: [HealthMetricSnapshot]) -> HealthMetricSnapshot {
+    snapshots.first { $0.route == route } ?? healthStore.snapshot(for: route)
+  }
+
+  private func homeSnapshot(for route: HealthRoute, in snapshots: [HealthMetricSnapshot]) -> HealthMetricSnapshot {
+    let snapshot = landingSnapshot(for: route, in: snapshots)
     guard route == .strain, snapshot.unit != "%" else {
       return snapshot
     }
@@ -181,20 +208,82 @@ struct HomeDashboardView: View {
     )
   }
 
-  private func datedHomeSnapshot(for route: HealthRoute) -> HealthMetricSnapshot {
-    ScoreDateTimeline.datedSnapshot(from: homeSnapshot(for: route), date: selectedDate)
-  }
-
   private func openHealth(_ route: HealthRoute) {
     openHealthRoute(route)
     model.recordUIAction("health.deep_link.opened", detail: route.title)
   }
 
   private func openHealthMonitorSnapshot(_ snapshot: HealthMetricSnapshot) {
-    if snapshot.id == "resting-hr" {
+    if snapshot.id == "resting-hr" || snapshot.id == "resting-hrv" {
       selectedHealthMonitorTrend = snapshot
     } else {
       openHealth(.healthMonitor)
     }
+  }
+
+  private func startHomeScoreSync() {
+    guard !homeScoreSyncIsRunning else {
+      return
+    }
+    healthStore.loadBridgeCatalogsIfNeeded()
+    scoreSyncIsPreparing = true
+    scoreSyncWaitingForBand = false
+    model.recordUIAction("home.daily_scores.sync.requested", detail: model.ble.historicalSyncStatus)
+
+    guard model.ble.canSyncHistorical else {
+      scoreSyncIsPreparing = false
+      return
+    }
+
+    model.startDailyMetricSyncCaptureAndHistoricalSync { started in
+      scoreSyncIsPreparing = false
+      scoreSyncWaitingForBand = started
+    }
+  }
+
+  private func handleHomeScoreSyncStatusChange(_ status: String) {
+    guard scoreSyncWaitingForBand else {
+      return
+    }
+    if status == "synced" {
+      scoreSyncWaitingForBand = false
+      scoreSyncIsPreparing = true
+      model.finishDailyMetricSyncCaptureIfNeeded {
+        scoreSyncIsPreparing = false
+        healthStore.refreshHealthMetrics()
+      }
+    } else if status == "failed" {
+      scoreSyncWaitingForBand = false
+      scoreSyncIsPreparing = true
+      model.finishDailyMetricSyncCaptureIfNeeded {
+        scoreSyncIsPreparing = false
+      }
+    }
+  }
+
+  private var dashboardMetrics: HomeDashboardMetrics {
+    let snapshots = healthStore.healthDashboardExploreSnapshots
+    let sleep = homeSnapshot(for: .sleep, in: snapshots)
+    let recovery = homeSnapshot(for: .recovery, in: snapshots)
+    let strain = homeSnapshot(for: .strain, in: snapshots)
+    return HomeDashboardMetrics(
+      scoreSnapshots: [
+        ScoreDateTimeline.datedSnapshot(from: sleep, date: selectedDate),
+        ScoreDateTimeline.datedSnapshot(from: recovery, date: selectedDate),
+        ScoreDateTimeline.datedSnapshot(from: strain, date: selectedDate),
+      ],
+      healthMonitorSnapshots: healthStore.healthDashboardVitalSnapshots,
+      dataAlgorithmSnapshots: healthStore.healthDashboardAlgorithmSnapshots.filter {
+        [.packetInputs, .algorithms].contains($0.route)
+      },
+      missingDataItems: healthStore.homeMissingDataItems()
+    )
+  }
+
+  private struct HomeDashboardMetrics {
+    let scoreSnapshots: [HealthMetricSnapshot]
+    let healthMonitorSnapshots: [HealthMetricSnapshot]
+    let dataAlgorithmSnapshots: [HealthMetricSnapshot]
+    let missingDataItems: [HomeMissingDataItem]
   }
 }

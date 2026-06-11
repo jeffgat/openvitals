@@ -266,6 +266,10 @@ struct WhoopDataSignalSample {
     packetK == 20
   }
 
+  var isRawEcgPacket: Bool {
+    packetK == 16
+  }
+
   var isRawStreamCountedPacket: Bool {
     packetK == 11
   }
@@ -338,7 +342,7 @@ struct WhoopDataSignalSample {
       let payload = parsed["parsed_payload"] as? [String: Any],
       payload["kind"] as? String == "data_packet",
       let packetK = intValue(payload["packet_k"]),
-      [2, 9, 10, 11, 12, 17, 18, 20, 21, 24, 25, 26, 47].contains(packetK)
+      [2, 9, 10, 11, 12, 16, 17, 18, 20, 21, 24, 25, 26, 47].contains(packetK)
     else {
       return nil
     }
@@ -378,7 +382,7 @@ struct WhoopDataSignalSample {
     guard
       compact.payloadKind == "data_packet",
       let packetK = compact.packetK,
-      [2, 9, 10, 11, 12, 17, 18, 20, 21, 24, 25, 26, 47].contains(packetK)
+      [2, 9, 10, 11, 12, 16, 17, 18, 20, 21, 24, 25, 26, 47].contains(packetK)
     else {
       return nil
     }

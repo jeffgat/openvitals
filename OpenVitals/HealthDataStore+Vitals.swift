@@ -336,6 +336,20 @@ extension HealthDataStore {
     ) {
       return stored
     }
+    if let sample = Self.storedHRVDerivedHRVSample() {
+      return rrDerivedHRVHealthMonitorSnapshot(
+        base: snapshot,
+        sample: sample,
+        source: .local("HRV sample store")
+      )
+    }
+    if let sample = Self.liveRRDerivedHRVSample() {
+      return rrDerivedHRVHealthMonitorSnapshot(
+        base: snapshot,
+        sample: sample,
+        source: .live("BLE RR interval estimate")
+      )
+    }
     guard let report = packetInputReports["hrv"] else {
       if let unavailable = preferredDailyRecoveryUnavailableMetric(metricID: "hrv_rmssd_ms") {
         return unavailablePacketSnapshot(
@@ -418,6 +432,33 @@ extension HealthDataStore {
       provenance: "metrics.hrv_features | \(hrvFeatureProvenanceSummary())",
       source: .bridgeDeviceSensor("metrics.hrv_features"),
       trend: trend
+    )
+  }
+
+  func rrDerivedHRVHealthMonitorSnapshot(
+    base snapshot: HealthMetricSnapshot,
+    sample: LiveRRDerivedHRVSample,
+    source: HealthDataSource
+  ) -> HealthMetricSnapshot {
+    let valueText = Self.numberText(sample.rmssdMS, fractionDigits: 0)
+      ?? "\(Int(sample.rmssdMS.rounded()))"
+    return replacingHealthMonitorSnapshot(
+      snapshot,
+      value: valueText,
+      unit: "ms",
+      status: "RR-derived estimate",
+      freshness: Self.relativeText(for: sample.updatedAt).map { "Updated \($0)" } ?? "Latest",
+      provenance: "rmssd=\(Self.numberText(sample.rmssdMS, fractionDigits: 1) ?? valueText) ms | rr=\(sample.rrIntervalCount) | chunks=\(sample.sampleCount) | \(sample.source)",
+      source: source,
+      trend: HealthTrendModel(
+        id: snapshot.trend.id,
+        title: snapshot.trend.title,
+        rangeLabel: "\(valueText) ms RMSSD",
+        summary: "RR-derived HRV estimate from local BLE interval samples.",
+        analysis: "This value uses locally observed RR intervals while the packet-derived HRV validator remains the preferred source once enough validated evidence is available.",
+        resources: snapshot.trend.resources,
+        points: [HealthTrendPoint(label: "RMSSD", value: sample.rmssdMS)]
+      )
     )
   }
 

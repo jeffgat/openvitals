@@ -10,7 +10,8 @@
 use serde::{Deserialize, Serialize};
 
 pub const HISTORICAL_SYNC_DRY_RUN_SCHEMA: &str = "open_vitals.historical-sync-dry-run.v1";
-pub const HISTORICAL_SYNC_DRY_RUN_REPORT_SCHEMA: &str = "open_vitals.historical-sync-dry-run-report.v1";
+pub const HISTORICAL_SYNC_DRY_RUN_REPORT_SCHEMA: &str =
+    "open_vitals.historical-sync-dry-run-report.v1";
 pub const HISTORICAL_SYNC_PHYSICAL_VALIDATION_SCHEMA: &str =
     "open_vitals.historical-sync-physical-validation.v1";
 pub const HISTORICAL_SYNC_PHYSICAL_VALIDATION_REPORT_SCHEMA: &str =

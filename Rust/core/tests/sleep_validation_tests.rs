@@ -240,16 +240,17 @@ fn sleep_v1_stability_validator_cli_reports_complete_stable_output() {
     let output_path = tempdir.path().join("sleep-v1-stability.json");
     write_json(&input_path, &sleep_v1_quality_gate_input());
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-sleep-v1-stability-validator"))
-            .args([
-                "--input",
-                input_path.to_str().unwrap(),
-                "--output",
-                output_path.to_str().unwrap(),
-            ])
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-sleep-v1-stability-validator"
+    ))
+    .args([
+        "--input",
+        input_path.to_str().unwrap(),
+        "--output",
+        output_path.to_str().unwrap(),
+    ])
+    .output()
+    .unwrap();
 
     assert!(
         output.status.success(),
@@ -683,13 +684,13 @@ fn sleep_v1_release_gate_validation_passes_only_when_all_evidence_reports_pass()
 
     let mut forged_input = input.clone();
     let mut forged_physical = forged_input.physical_historical_sync.take().unwrap();
-    forged_physical
-        .next_actions
-        .push(open_vitals_core::historical_sync::HistoricalSyncNextAction {
+    forged_physical.next_actions.push(
+        open_vitals_core::historical_sync::HistoricalSyncNextAction {
             scope: "historical_sync_physical_validation".to_string(),
             reason: "forged_next_action".to_string(),
             action: "Do not accept hand-edited physical proof actions.".to_string(),
-        });
+        },
+    );
     forged_physical.pass = true;
     forged_input.physical_historical_sync = Some(forged_physical);
 
@@ -2022,14 +2023,16 @@ fn sleep_v1_release_gate_validation_passes_only_when_all_evidence_reports_pass()
     if let Some(open_vitals_output) = forged_benchmark.open_vitals_output.as_mut() {
         open_vitals_output["model_status"] = serde_json::json!("hand_edited_status");
         open_vitals_output["model_status_label"] = serde_json::json!("Hand edited");
-        open_vitals_output["model_status_reason"] = serde_json::json!("This is not a Sleep V1 status.");
+        open_vitals_output["model_status_reason"] =
+            serde_json::json!("This is not a Sleep V1 status.");
         open_vitals_output["status_report"]["status"] = serde_json::json!("hand_edited_status");
         open_vitals_output["status_report"]["status_label"] = serde_json::json!("Hand edited");
         open_vitals_output["status_report"]["status_reason"] =
             serde_json::json!("This is not a Sleep V1 status.");
         open_vitals_output["status_report"]["report_state"] = serde_json::json!("provisional");
         open_vitals_output["status_report"]["can_show_final_score"] = serde_json::json!(false);
-        open_vitals_output["status_report"]["can_show_personal_baseline"] = serde_json::json!(false);
+        open_vitals_output["status_report"]["can_show_personal_baseline"] =
+            serde_json::json!(false);
         open_vitals_output["status_report"]["can_show_trained_score"] = serde_json::json!(false);
         open_vitals_output["status_report"]["next_actions"] =
             serde_json::json!(["Regenerate the Sleep V1 status report."]);
@@ -2120,7 +2123,8 @@ fn sleep_v1_release_gate_validation_passes_only_when_all_evidence_reports_pass()
     let mut forged_benchmark = forged_input.benchmark_comparisons.remove(0);
     if let Some(open_vitals_output) = forged_benchmark.open_vitals_output.as_mut() {
         open_vitals_output["status_report"]["can_show_final_score"] = serde_json::json!(false);
-        open_vitals_output["status_report"]["can_show_provisional_score"] = serde_json::json!(false);
+        open_vitals_output["status_report"]["can_show_provisional_score"] =
+            serde_json::json!(false);
         open_vitals_output["status_report"]["report_state"] = serde_json::json!("pending");
     }
     forged_benchmark.pass = true;
@@ -2284,11 +2288,14 @@ fn sleep_v1_release_gate_validation_passes_only_when_all_evidence_reports_pass()
             serde_json::json!("3 valid sleep nights collected; 4 more for baseline.");
         open_vitals_output["status_report"]["report_state"] = serde_json::json!("provisional");
         open_vitals_output["status_report"]["valid_sleep_nights"] = serde_json::json!(3);
-        open_vitals_output["status_report"]["trusted_open_vitals_sleep_nights"] = serde_json::json!(3);
-        open_vitals_output["status_report"]["imported_platform_sleep_nights"] = serde_json::json!(0);
+        open_vitals_output["status_report"]["trusted_open_vitals_sleep_nights"] =
+            serde_json::json!(3);
+        open_vitals_output["status_report"]["imported_platform_sleep_nights"] =
+            serde_json::json!(0);
         open_vitals_output["status_report"]["nights_until_baseline"] = serde_json::json!(4);
         open_vitals_output["status_report"]["can_show_final_score"] = serde_json::json!(false);
-        open_vitals_output["status_report"]["can_show_personal_baseline"] = serde_json::json!(false);
+        open_vitals_output["status_report"]["can_show_personal_baseline"] =
+            serde_json::json!(false);
         open_vitals_output["status_report"]["next_actions"] = serde_json::json!([]);
     }
     forged_benchmark.pass = true;
@@ -2332,9 +2339,11 @@ fn sleep_v1_release_gate_validation_passes_only_when_all_evidence_reports_pass()
             serde_json::json!((u32::MAX as u64) + 1);
         open_vitals_output["status_report"]["trusted_open_vitals_sleep_nights"] =
             serde_json::json!((u32::MAX as u64) + 1);
-        open_vitals_output["status_report"]["imported_platform_sleep_nights"] = serde_json::json!(0);
+        open_vitals_output["status_report"]["imported_platform_sleep_nights"] =
+            serde_json::json!(0);
         open_vitals_output["status_report"]["nights_until_baseline"] = serde_json::json!(0);
-        open_vitals_output["status_report"]["nights_until_open_vitals_training"] = serde_json::json!(0);
+        open_vitals_output["status_report"]["nights_until_open_vitals_training"] =
+            serde_json::json!(0);
     }
     forged_benchmark.pass = true;
     forged_input.benchmark_comparisons = vec![forged_benchmark];
@@ -3102,27 +3111,28 @@ fn sleep_v1_release_gate_cli_composes_individual_evidence_reports() {
     write_json(&stability_path, &stability_report);
     write_json(&benchmark_path, &benchmark_report);
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-sleep-v1-release-gate"))
-        .args([
-            "--physical-historical-sync-report",
-            physical_path.to_str().unwrap(),
-            "--sleep-window-label-report",
-            window_path.to_str().unwrap(),
-            "--sleep-stage-label-report",
-            stage_path.to_str().unwrap(),
-            "--explanation-stability-report",
-            stability_path.to_str().unwrap(),
-            "--benchmark-comparison-reports",
-            benchmark_path.to_str().unwrap(),
-            "--min-hand-reviewed-window-comparisons",
-            "3",
-            "--input-output",
-            input_output_path.to_str().unwrap(),
-            "--output",
-            output_path.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-sleep-v1-release-gate"))
+            .args([
+                "--physical-historical-sync-report",
+                physical_path.to_str().unwrap(),
+                "--sleep-window-label-report",
+                window_path.to_str().unwrap(),
+                "--sleep-stage-label-report",
+                stage_path.to_str().unwrap(),
+                "--explanation-stability-report",
+                stability_path.to_str().unwrap(),
+                "--benchmark-comparison-reports",
+                benchmark_path.to_str().unwrap(),
+                "--min-hand-reviewed-window-comparisons",
+                "3",
+                "--input-output",
+                input_output_path.to_str().unwrap(),
+                "--output",
+                output_path.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
 
     assert!(
         output.status.success(),
@@ -3131,7 +3141,10 @@ fn sleep_v1_release_gate_cli_composes_individual_evidence_reports() {
     );
     let report: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&output_path).unwrap()).unwrap();
-    assert_eq!(report["schema"], "open_vitals.sleep-v1-release-gate-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.sleep-v1-release-gate-report.v1"
+    );
     assert_eq!(report["pass"], true);
     assert_eq!(report["physical_historical_sync_pass"], true);
     assert_eq!(report["sleep_stage_label_pass"], true);
@@ -3948,7 +3961,8 @@ fn sleep_v1_evidence_folder_validation_rejects_passing_report_with_quality_flags
     let report_path = tempdir.path().join("sleep-v1-benchmark.json");
     let mut benchmark_report: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&report_path).unwrap()).unwrap();
-    benchmark_report["open_vitals_quality_flags"] = serde_json::json!(["sleep_architecture_unavailable"]);
+    benchmark_report["open_vitals_quality_flags"] =
+        serde_json::json!(["sleep_architecture_unavailable"]);
     benchmark_report["pass"] = serde_json::json!(true);
     write_json(&report_path, &benchmark_report);
 
@@ -4695,13 +4709,13 @@ fn sleep_v1_evidence_folder_validation_rejects_hand_edited_release_gate_report_c
     )
     .unwrap();
     release_report.hand_reviewed_window_comparisons = 1;
-    release_report
-        .next_actions
-        .push(open_vitals_core::sleep_validation::SleepV1ReleaseGateNextAction {
+    release_report.next_actions.push(
+        open_vitals_core::sleep_validation::SleepV1ReleaseGateNextAction {
             scope: "sleep_window.labels".to_string(),
             reason: "forged_next_action".to_string(),
             action: "Do not accept hand-edited release reports.".to_string(),
-        });
+        },
+    );
     write_json(
         &tempdir.path().join("sleep-v1-release-gate.json"),
         &release_report,
@@ -4746,13 +4760,13 @@ fn sleep_v1_evidence_folder_validation_rejects_hand_edited_release_gate_stage_la
     )
     .unwrap();
     release_report.stage_label_comparison_count = 0;
-    release_report
-        .next_actions
-        .push(open_vitals_core::sleep_validation::SleepV1ReleaseGateNextAction {
+    release_report.next_actions.push(
+        open_vitals_core::sleep_validation::SleepV1ReleaseGateNextAction {
             scope: "sleep_stage.labels".to_string(),
             reason: "forged_next_action".to_string(),
             action: "Do not accept hand-edited stage-label release counts.".to_string(),
-        });
+        },
+    );
     write_json(
         &tempdir.path().join("sleep-v1-release-gate.json"),
         &release_report,
@@ -5109,15 +5123,16 @@ fn sleep_v1_evidence_folder_cli_reports_complete_auditable_folder() {
     write_passing_sleep_v1_evidence_folder(tempdir.path());
     let output_path = tempdir.path().join("sleep-v1-evidence-folder.json");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-sleep-v1-evidence-folder"))
-        .args([
-            "--evidence-dir",
-            tempdir.path().to_str().unwrap(),
-            "--output",
-            output_path.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-sleep-v1-evidence-folder"))
+            .args([
+                "--evidence-dir",
+                tempdir.path().to_str().unwrap(),
+                "--output",
+                output_path.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
 
     assert!(
         output.status.success(),
@@ -5157,17 +5172,18 @@ fn sleep_v1_evidence_folder_cli_fails_for_pinned_manifest_hash_mismatch() {
     write_passing_sleep_v1_evidence_folder(tempdir.path());
     let output_path = tempdir.path().join("sleep-v1-evidence-folder.json");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-sleep-v1-evidence-folder"))
-        .args([
-            "--evidence-dir",
-            tempdir.path().to_str().unwrap(),
-            "--expected-manifest-sha256",
-            &"0".repeat(64),
-            "--output",
-            output_path.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-sleep-v1-evidence-folder"))
+            .args([
+                "--evidence-dir",
+                tempdir.path().to_str().unwrap(),
+                "--expected-manifest-sha256",
+                &"0".repeat(64),
+                "--output",
+                output_path.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
 
     assert!(!output.status.success());
     let report: serde_json::Value =
@@ -5188,17 +5204,18 @@ fn sleep_v1_evidence_folder_cli_fails_for_invalid_pinned_manifest_hash() {
     write_passing_sleep_v1_evidence_folder(tempdir.path());
     let output_path = tempdir.path().join("sleep-v1-evidence-folder.json");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-sleep-v1-evidence-folder"))
-        .args([
-            "--evidence-dir",
-            tempdir.path().to_str().unwrap(),
-            "--expected-manifest-sha256",
-            "not-a-sha256",
-            "--output",
-            output_path.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-sleep-v1-evidence-folder"))
+            .args([
+                "--evidence-dir",
+                tempdir.path().to_str().unwrap(),
+                "--expected-manifest-sha256",
+                "not-a-sha256",
+                "--output",
+                output_path.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
 
     assert!(!output.status.success());
     let report: serde_json::Value =
@@ -5323,26 +5340,27 @@ fn sleep_window_validator_cli_reports_hand_reviewed_window_match() {
     let output_path = tempdir.path().join("sleep-window-validation.json");
     let input_output_path = tempdir.path().join("sleep-window-validation-input.json");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-sleep-window-validator"))
-        .args([
-            "--db",
-            db_path.to_str().unwrap(),
-            "--start",
-            "2026-05-27T22:00:00Z",
-            "--end",
-            "2026-05-28T03:00:00Z",
-            "--min-owned-captures",
-            "1",
-            "--require-trusted-evidence",
-            "--sleep-need-minutes",
-            "240",
-            "--input-output",
-            input_output_path.to_str().unwrap(),
-            "--output",
-            output_path.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-sleep-window-validator"))
+            .args([
+                "--db",
+                db_path.to_str().unwrap(),
+                "--start",
+                "2026-05-27T22:00:00Z",
+                "--end",
+                "2026-05-28T03:00:00Z",
+                "--min-owned-captures",
+                "1",
+                "--require-trusted-evidence",
+                "--sleep-need-minutes",
+                "240",
+                "--input-output",
+                input_output_path.to_str().unwrap(),
+                "--output",
+                output_path.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
 
     assert!(
         output.status.success(),
@@ -5817,7 +5835,9 @@ fn sleep_stage_label_validation_compares_user_owned_stage_labels() {
     );
     assert_eq!(
         report.provenance["report_integrity_policy"],
-        serde_json::json!(open_vitals_core::sleep_validation::SLEEP_STAGE_LABEL_REPORT_INTEGRITY_POLICY)
+        serde_json::json!(
+            open_vitals_core::sleep_validation::SLEEP_STAGE_LABEL_REPORT_INTEGRITY_POLICY
+        )
     );
     assert!(
         report
@@ -5935,18 +5955,19 @@ fn sleep_stage_label_validator_cli_reports_user_owned_stage_matches() {
     let output_path = tempdir.path().join("sleep-stage-validation.json");
     write_json(&input_path, &sleep_v1_quality_gate_input());
 
-    let output =
-        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-sleep-stage-label-validator"))
-            .args([
-                "--db",
-                db.to_str().unwrap(),
-                "--input",
-                input_path.to_str().unwrap(),
-                "--output",
-                output_path.to_str().unwrap(),
-            ])
-            .output()
-            .unwrap();
+    let output = std::process::Command::new(env!(
+        "CARGO_BIN_EXE_open-vitals-sleep-stage-label-validator"
+    ))
+    .args([
+        "--db",
+        db.to_str().unwrap(),
+        "--input",
+        input_path.to_str().unwrap(),
+        "--output",
+        output_path.to_str().unwrap(),
+    ])
+    .output()
+    .unwrap();
 
     assert!(
         output.status.success(),

@@ -9,25 +9,96 @@ extension HealthDataStore {
       .filter { Self.localHealthMetricRowIsDisplaySafe($0) }
   }
 
+  func dailyRecoveryMetricRows() -> [RecoveryDailyMetric] {
+    dailyRecoveryMetrics().compactMap(RecoveryDailyMetric.init(row:))
+  }
+
+  func dailyRecoveryMetricRowsWithValue(_ valueKey: String) -> [RecoveryDailyMetric] {
+    dailyRecoveryMetricRows()
+      .filter { metric in
+        metric.sourceKind == .deviceSensor
+          && metric.value(for: valueKey) != nil
+          && metric.confidence != nil
+      }
+  }
+
   func dailyRecoveryMetricsWithRestingHR() -> [[String: Any]] {
     dailyRecoveryMetricsWithValue("resting_hr_bpm")
   }
 
   func dailyRecoveryMetricsWithValue(_ valueKey: String) -> [[String: Any]] {
-    dailyRecoveryMetrics()
-      .filter { metric in
-        metric["source_kind"] as? String == "device_sensor"
-          && Self.doubleValue(metric[valueKey]) != nil
-          && Self.doubleValue(metric["confidence"]) != nil
-      }
+    dailyRecoveryMetricRowsWithValue(valueKey).map(\.rawRow)
   }
 
   func dailyRecoveryUnavailableMetrics() -> [[String: Any]] {
-    dailyRecoveryMetrics()
+    dailyRecoveryMetricRows()
+      .filter { $0.sourceKind == .unavailable && $0.confidence != nil }
+      .map(\.rawRow)
+  }
+
+  func dailyRecoveryUnavailableMetricRows(
+    for date: Date? = nil,
+    calendar: Calendar = .current
+  ) -> [RecoveryDailyMetric] {
+    let dateKey = date.map { Self.metricDateKey(for: $0, calendar: calendar) }
+    return dailyRecoveryMetricRows()
       .filter { metric in
-        metric["source_kind"] as? String == "unavailable"
-          && Self.doubleValue(metric["confidence"]) != nil
+        metric.sourceKind == .unavailable && metric.confidence != nil
       }
+      .filter { metric in
+        guard let dateKey else {
+          return true
+        }
+        return metric.dateKey == dateKey
+      }
+      .sorted { lhs, rhs in
+        if (lhs.endTimeUnixMS ?? 0) != (rhs.endTimeUnixMS ?? 0) {
+          return (lhs.endTimeUnixMS ?? 0) > (rhs.endTimeUnixMS ?? 0)
+        }
+        return lhs.id > rhs.id
+      }
+  }
+
+  func preferredDailyRecoveryMetricRow(
+    valueKey: String,
+    for date: Date,
+    calendar: Calendar = .current
+  ) -> RecoveryDailyMetric? {
+    let dateKey = Self.metricDateKey(for: date, calendar: calendar)
+    return Self.preferredDailyRecoveryMetricRow(
+      from: dailyRecoveryMetricRowsWithValue(valueKey).filter { $0.dateKey == dateKey },
+      valueKey: valueKey
+    )
+  }
+
+  static func preferredDailyRecoveryMetricRow(
+    from metrics: [RecoveryDailyMetric],
+    valueKey: String
+  ) -> RecoveryDailyMetric? {
+    metrics
+      .filter { $0.value(for: valueKey) != nil }
+      .sorted { lhs, rhs in
+        dailyRecoveryMetricRow(lhs, isBetterThan: rhs, valueKey: valueKey)
+      }
+      .first
+  }
+
+  static func dailyRecoveryMetricRow(
+    _ lhs: RecoveryDailyMetric,
+    isBetterThan rhs: RecoveryDailyMetric,
+    valueKey _: String
+  ) -> Bool {
+    let lhsConfidence = lhs.confidence ?? 0
+    let rhsConfidence = rhs.confidence ?? 0
+    if lhsConfidence != rhsConfidence {
+      return lhsConfidence > rhsConfidence
+    }
+    let lhsEnd = lhs.endTimeUnixMS ?? 0
+    let rhsEnd = rhs.endTimeUnixMS ?? 0
+    if lhsEnd != rhsEnd {
+      return lhsEnd > rhsEnd
+    }
+    return lhs.id > rhs.id
   }
 
   func preferredDailyRecoveryUnavailableMetric(
@@ -542,5 +613,131 @@ extension HealthDataStore {
       "confidence=\(confidence)",
       updatedAt.map { "updated=\($0)" },
     ].compactMap { $0 }.joined(separator: " | ")
+  }
+
+  func recoveryTimelineRows(for date: Date = Date(), calendar: Calendar = .current) -> [RecoveryTimelineRow] {
+    guard !usesPreviewPacketData else {
+      return []
+    }
+
+    let selectedDay = calendar.startOfDay(for: date)
+    let today = calendar.startOfDay(for: Date())
+    let isToday = calendar.isDate(selectedDay, inSameDayAs: today)
+    var rows: [RecoveryTimelineRow] = []
+
+    if isToday, let score = recoveryScoreValue() {
+      let scoreText = Self.numberText(score, fractionDigits: 0) ?? "0"
+      rows.append(
+        RecoveryTimelineRow(
+          id: "recovery-score",
+          kind: .score,
+          title: "Recovery score",
+          value: "\(scoreText)%",
+          detail: "Computed by metrics.recovery_score_from_features",
+          source: .bridge("metrics.recovery_score_from_features"),
+          systemImage: "battery.100percent",
+          sortTimeUnixMS: Int64.max - 500
+        )
+      )
+    } else if isToday, packetScoreStatus.localizedCaseInsensitiveContains("blocked") {
+      rows.append(
+        RecoveryTimelineRow(
+          id: "recovery-score-blocked",
+          kind: .blocker,
+          title: "Recovery score blocked",
+          value: packetScoreStatus,
+          detail: packetDerivedScoreNextActionSummary(),
+          source: .unavailable("metrics.recovery_score_from_features blocked"),
+          systemImage: "exclamationmark.triangle",
+          sortTimeUnixMS: Int64.max - 500
+        )
+      )
+    }
+
+    if isToday, let sleep = primarySleep() {
+      rows.append(
+        RecoveryTimelineRow(
+          id: "primary-sleep-\(sleep.id)",
+          kind: .sleep,
+          title: "Primary sleep window",
+          value: "\(sleep.startLabel)-\(sleep.endLabel)",
+          detail: "\(sleep.durationText) asleep | \(sleep.scoreDisplayText)",
+          source: sleep.source,
+          systemImage: "bed.double",
+          sortTimeUnixMS: Int64.max - 1_000
+        )
+      )
+    }
+
+    let metricSpecs: [(key: String, title: String, unit: String, digits: Int, signed: Bool, image: String)] = [
+      ("hrv_rmssd_ms", "Resting HRV", "ms", 0, false, "waveform.path.ecg"),
+      ("resting_hr_bpm", "Resting HR", "bpm", 0, false, "heart"),
+      ("respiratory_rate_rpm", "Respiratory rate", "rpm", 1, false, "lungs"),
+      ("oxygen_saturation_percent", "Oxygen saturation", "%", 0, false, "drop"),
+      ("skin_temperature_delta_c", "Wrist temperature", "C", 1, true, "thermometer.medium"),
+    ]
+
+    for spec in metricSpecs {
+      guard let metric = preferredDailyRecoveryMetricRow(valueKey: spec.key, for: date, calendar: calendar),
+            let valueText = recoveryMetricValueText(metric, valueKey: spec.key, unit: spec.unit, fractionDigits: spec.digits, signed: spec.signed) else {
+        continue
+      }
+      let confidence = metric.confidence.flatMap { Self.numberText($0, fractionDigits: 2) } ?? "0"
+      rows.append(
+        RecoveryTimelineRow(
+          id: "metric-\(spec.key)-\(metric.id)",
+          kind: .metric,
+          title: spec.title,
+          value: valueText,
+          detail: "daily_recovery_metrics | confidence \(confidence)",
+          source: dailyRecoveryMetricSource(metric.rawRow, metricName: spec.title),
+          systemImage: spec.image,
+          sortTimeUnixMS: metric.endTimeUnixMS ?? 0
+        )
+      )
+    }
+
+    for metric in dailyRecoveryUnavailableMetricRows(for: date, calendar: calendar) {
+      let blocker = metric.blockerReasons.first ?? "metric unavailable"
+      rows.append(
+        RecoveryTimelineRow(
+          id: "blocked-\(metric.id)",
+          kind: .blocker,
+          title: "\(metric.metricName) blocked",
+          value: blocker,
+          detail: "daily_recovery_metrics unavailable",
+          source: .unavailable(Self.recoveryUnavailableSourceDetail(metric.rawRow)),
+          systemImage: "minus.circle",
+          sortTimeUnixMS: metric.endTimeUnixMS ?? 0
+        )
+      )
+    }
+
+    return rows.sorted { lhs, rhs in
+      if lhs.sortTimeUnixMS != rhs.sortTimeUnixMS {
+        return lhs.sortTimeUnixMS > rhs.sortTimeUnixMS
+      }
+      return lhs.title < rhs.title
+    }
+  }
+
+  func recoveryMetricValueText(
+    _ metric: RecoveryDailyMetric,
+    valueKey: String,
+    unit: String,
+    fractionDigits: Int,
+    signed: Bool = false
+  ) -> String? {
+    let value = metric.value(for: valueKey)
+    let text = signed
+      ? Self.signedNumberText(value, fractionDigits: fractionDigits)
+      : Self.numberText(value, fractionDigits: fractionDigits)
+    guard let text else {
+      return nil
+    }
+    if unit == "%" {
+      return "\(text)%"
+    }
+    return "\(text) \(unit)"
   }
 }

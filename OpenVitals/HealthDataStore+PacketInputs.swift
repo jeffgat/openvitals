@@ -6,117 +6,72 @@ import UIKit
 extension HealthDataStore {
   nonisolated static func packetInputBridgeReports(databasePath: String) -> Result<[String: [String: Any]], Error> {
     let bridge = OpenVitalsRustBridge()
-    let baseArgs: [String: Any] = [
+    let featureWindow = packetInputFeatureWindow()
+    let summaryArgs: [String: Any] = [
       "database_path": databasePath,
-      "start": "0000",
-      "end": "9999",
+      "start": featureWindow.start,
+      "end": featureWindow.end,
       "min_owned_captures": 2,
       "require_trusted_evidence": false,
+      "require_owned_captures": false,
+      "require_scores_ready": true,
+      "max_step_candidate_fields": 100,
+      "max_step_ingest_candidate_fields": 1_000,
+      "hrv_min_rr_intervals_to_compute": 2,
+      "hrv_baseline_min_days": 3,
+      "hrv_require_baseline": false,
+      "resting_hr_baseline_min_days": 3,
+      "resting_hr_require_baseline": false,
+      "resting_hr_daily_rollup": restingHeartRateDailyRollupArgs(databasePath: databasePath, writeMetric: true),
+      "step_counter_daily_rollup": stepCounterDailyRollupArgs(databasePath: databasePath, writeMetric: true),
+      "step_counter_hourly_rollup": stepCounterHourlyRollupArgs(databasePath: databasePath, writeMetric: true),
+      "activity_unavailable_daily_status": activityUnavailableDailyStatusArgs(databasePath: databasePath, writeMetric: true),
+      "energy_daily_rollup": energyDailyRollupArgs(
+        databasePath: databasePath,
+        restingHeartRateRollup: nil,
+        writeMetric: true
+      ),
+      "energy_hourly_rollup": energyHourlyRollupArgs(
+        databasePath: databasePath,
+        restingHeartRateRollup: nil,
+        writeMetric: true
+      ),
+      "energy_unavailable_daily_status": energyDailyRollupArgs(
+        databasePath: databasePath,
+        restingHeartRateRollup: nil,
+        writeMetric: true
+      ),
+      "recovery_sensor_daily_rollup": recoverySensorDailyRollupArgs(databasePath: databasePath, writeMetric: true),
+      "recovery_unavailable_daily_status": recoveryUnavailableDailyStatusArgs(databasePath: databasePath, writeMetric: true),
+      "daily_activity_metrics": dailyActivityMetricListArgs(databasePath: databasePath),
+      "hourly_activity_metrics": hourlyActivityMetricListArgs(databasePath: databasePath),
+      "daily_recovery_metrics": dailyRecoveryMetricListArgs(databasePath: databasePath),
     ]
     do {
-      var reports: [String: [String: Any]] = [:]
-      reports["readiness"] = try bridge.request(
-        method: "metrics.input_readiness",
-        args: [
-          "database_path": databasePath,
-          "start": "0000",
-          "end": "9999",
-          "min_owned_captures": 2,
-          "require_owned_captures": false,
-          "require_scores_ready": true,
-        ]
-      )
-      reports["motion"] = try bridge.request(method: "metrics.motion_features", args: baseArgs)
-      reports["step_discovery"] = try bridge.request(
-        method: "metrics.step_packet_discovery",
-        args: baseArgs.merging(["max_candidate_fields": 100]) { _, new in new }
-      )
-      reports["step_counter_ingest"] = try bridge.request(
-        method: "metrics.step_counter_ingest",
-        args: baseArgs.merging(["max_candidate_fields": 1_000]) { _, new in new }
-      )
-      reports["heart_rate"] = try bridge.request(method: "metrics.heart_rate_features", args: baseArgs)
-      reports["vital_event"] = try bridge.request(method: "metrics.vital_event_features", args: baseArgs)
-      reports["hrv"] = try bridge.request(
-        method: "metrics.hrv_features",
-        args: baseArgs.merging([
-          "min_rr_intervals_to_compute": 2,
-          "baseline_min_days": 3,
-          "require_baseline": false,
-        ]) { _, new in new }
-      )
-      reports["window"] = try bridge.request(method: "metrics.window_features", args: baseArgs)
-      reports["resting_hr"] = try bridge.request(
-        method: "metrics.resting_hr_features",
-        args: baseArgs.merging([
-          "baseline_min_days": 3,
-          "require_baseline": false,
-        ]) { _, new in new }
-      )
-      reports["resting_hr_rollup"] = try bridge.request(
-        method: "metrics.resting_hr_daily_rollup",
-        args: restingHeartRateDailyRollupArgs(databasePath: databasePath, writeMetric: true)
-      )
-      reports["step_counter_rollup"] = try bridge.request(
-        method: "metrics.step_counter_daily_rollup",
-        args: stepCounterDailyRollupArgs(databasePath: databasePath, writeMetric: true)
-      )
-      reports["step_counter_hourly_rollup"] = try bridge.request(
-        method: "metrics.step_counter_hourly_rollup",
-        args: stepCounterHourlyRollupArgs(databasePath: databasePath, writeMetric: true)
-      )
-      reports["activity_unavailable_status"] = try bridge.request(
-        method: "metrics.activity_unavailable_daily_status",
-        args: activityUnavailableDailyStatusArgs(databasePath: databasePath, writeMetric: true)
-      )
-      reports["energy_rollup"] = try bridge.request(
-        method: "metrics.energy_daily_rollup",
-        args: energyDailyRollupArgs(
-          databasePath: databasePath,
-          restingHeartRateRollup: reports["resting_hr_rollup"],
-          writeMetric: true
-        )
-      )
-      reports["energy_hourly_rollup"] = try bridge.request(
-        method: "metrics.energy_hourly_rollup",
-        args: energyHourlyRollupArgs(
-          databasePath: databasePath,
-          restingHeartRateRollup: reports["resting_hr_rollup"],
-          writeMetric: true
-        )
-      )
-      reports["energy_unavailable_status"] = try bridge.request(
-        method: "metrics.energy_unavailable_daily_status",
-        args: energyDailyRollupArgs(
-          databasePath: databasePath,
-          restingHeartRateRollup: reports["resting_hr_rollup"],
-          writeMetric: true
-        )
-      )
-      reports["recovery_sensor_rollup"] = try bridge.request(
-        method: "metrics.recovery_sensor_daily_rollup",
-        args: recoveryUnavailableDailyStatusArgs(databasePath: databasePath, writeMetric: true)
-      )
-      reports["recovery_unavailable_status"] = try bridge.request(
-        method: "metrics.recovery_unavailable_daily_status",
-        args: recoveryUnavailableDailyStatusArgs(databasePath: databasePath, writeMetric: true)
-      )
-      reports["daily_activity"] = try bridge.request(
-        method: "metrics.daily_activity_metrics",
-        args: dailyActivityMetricListArgs(databasePath: databasePath)
-      )
-      reports["hourly_activity"] = try bridge.request(
-        method: "metrics.hourly_activity_metrics",
-        args: hourlyActivityMetricListArgs(databasePath: databasePath)
-      )
-      reports["daily_recovery"] = try bridge.request(
-        method: "metrics.daily_recovery_metrics",
-        args: dailyRecoveryMetricListArgs(databasePath: databasePath)
-      )
+      let summary = try bridge.request(method: "metrics.packet_input_summary", args: summaryArgs)
+      let rawReports = summary["reports"] as? [String: Any] ?? [:]
+      let reports = rawReports.reduce(into: [String: [String: Any]]()) { output, element in
+        if let report = element.value as? [String: Any] {
+          output[element.key] = report
+        }
+      }
       return .success(reports)
     } catch {
       return .failure(error)
     }
+  }
+
+  nonisolated static func packetInputFeatureWindow(
+    now: Date = Date(),
+    lookbackDays: Int = 14
+  ) -> (start: String, end: String) {
+    let lookback = TimeInterval(max(1, lookbackDays) * 24 * 60 * 60)
+    let start = now.addingTimeInterval(-lookback)
+    let end = now.addingTimeInterval(60 * 60)
+    let formatter = ISO8601DateFormatter()
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    formatter.formatOptions = [.withInternetDateTime]
+    return (formatter.string(from: start), formatter.string(from: end))
   }
 
   nonisolated static func restingHeartRateDailyRollupArgs(
@@ -157,6 +112,24 @@ extension HealthDataStore {
   }
 
   nonisolated static func recoveryUnavailableDailyStatusArgs(
+    databasePath: String,
+    writeMetric: Bool
+  ) -> [String: Any] {
+    let window = currentDailyMetricWindow()
+    return [
+      "database_path": databasePath,
+      "date_key": window.dateKey,
+      "timezone": window.timezone,
+      "start": window.startISO,
+      "end": window.endISO,
+      "min_owned_captures": 2,
+      "require_trusted_evidence": false,
+      "min_rr_intervals_to_compute": 2,
+      "write_metric": writeMetric,
+    ]
+  }
+
+  nonisolated static func recoverySensorDailyRollupArgs(
     databasePath: String,
     writeMetric: Bool
   ) -> [String: Any] {

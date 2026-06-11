@@ -6,26 +6,27 @@ extension OpenVitalsAppModel {
   func handleNotification(_ event: OpenVitalsNotificationEvent) {
     let (queueDepth, highWatermark) = incrementNotificationIngestQueueDepth()
     let captureImportActive = activeHealthPacketCapture != nil || activeActivityPersistence != nil
-    let parseContext = notificationParseContext(for: event)
+    let reassembler = notificationFrameReassembler
     publishPipelinePerformanceStatus(
       "ingest queued notification bytes=\(event.value.count) | ingestQ \(queueDepth) hwm \(highWatermark)"
     )
 
     notificationIngestQueue.async { [weak self] in
-      guard let self else {
-        return
-      }
-      let result = self.notificationIngestResult(for: event)
-      guard !result.frames.isEmpty else {
-        self.handleEmptyNotificationIngestResult(result)
-        return
-      }
-      guard captureImportActive else {
-        self.handleNotificationIngestResultWithoutCapture(result, parseContext: parseContext)
-        return
-      }
+      let result = reassembler.notificationIngestResult(for: event)
       DispatchQueue.main.async { [weak self] in
-        self?.handleNotificationIngestResult(result)
+        guard let self else {
+          return
+        }
+        guard !result.frames.isEmpty else {
+          self.handleEmptyNotificationIngestResult(result)
+          return
+        }
+        guard captureImportActive else {
+          let parseContext = self.notificationParseContext(for: event)
+          self.handleNotificationIngestResultWithoutCapture(result, parseContext: parseContext)
+          return
+        }
+        self.handleNotificationIngestResult(result)
       }
     }
   }
@@ -191,16 +192,21 @@ extension OpenVitalsAppModel {
         return
       }
       let frameRows = Self.captureFrameRows(for: request)
-      let enqueueResult = self.captureFrameWriteQueue.enqueue(rows: frameRows) { [weak self] result in
-        self?.handleCaptureFrameWriteResult(result)
+      DispatchQueue.main.async { [weak self] in
+        guard let self else {
+          return
+        }
+        let enqueueResult = self.captureFrameWriteQueue.enqueue(rows: frameRows) { [weak self] result in
+          self?.handleCaptureFrameWriteResult(result)
+        }
+        let rowBuildQueue = self.decrementCaptureFrameRowBuildQueueDepth()
+        self.captureFrameEnqueueAggregator.record(
+          enqueueResult,
+          capturedAt: event.capturedAt,
+          rowQueueDepth: rowBuildQueue.depth,
+          rowQueueHighWatermark: rowBuildQueue.highWatermark
+        )
       }
-      let rowBuildQueue = self.decrementCaptureFrameRowBuildQueueDepth()
-      self.captureFrameEnqueueAggregator.record(
-        enqueueResult,
-        capturedAt: event.capturedAt,
-        rowQueueDepth: rowBuildQueue.depth,
-        rowQueueHighWatermark: rowBuildQueue.highWatermark
-      )
     }
   }
 
@@ -298,18 +304,29 @@ extension OpenVitalsAppModel {
 
   func shouldWriteCapturedFrame(at capturedAt: Date) -> Bool {
     let fullRateCaptureActive = activeActivityPersistence != nil || activitySession.isActive
-    guard !fullRateCaptureActive, activeHealthPacketCapture?.mode == .walk else {
+    guard !fullRateCaptureActive else {
       return true
     }
 
-    guard capturedAt.timeIntervalSince(lastRestingHeartRateFrameWriteAt) >= Self.restingHeartRateFrameWriteInterval else {
+    guard let capture = activeHealthPacketCapture, capture.mode == .walk else {
+      return true
+    }
+
+    let writeInterval: TimeInterval
+    if capture.source == "auto.passive_activity_detection" {
+      writeInterval = Self.passiveActivityFrameWriteInterval
+    } else {
+      writeInterval = Self.restingHeartRateFrameWriteInterval
+    }
+
+    guard capturedAt.timeIntervalSince(lastRestingHeartRateFrameWriteAt) >= writeInterval else {
       return false
     }
     lastRestingHeartRateFrameWriteAt = capturedAt
     return true
   }
 
-  static func captureEvidenceID(for frame: NotificationFrame, event: OpenVitalsNotificationEvent, index: Int) -> String {
+  nonisolated static func captureEvidenceID(for frame: NotificationFrame, event: OpenVitalsNotificationEvent, index: Int) -> String {
     let milliseconds = Int((event.capturedAt.timeIntervalSince1970 * 1000).rounded())
     let prefix = String(frame.hex.prefix(16))
     return "ios.\(event.deviceID.uuidString).\(milliseconds).\(index).\(prefix)"
@@ -431,7 +448,9 @@ extension OpenVitalsAppModel {
         batchTiming: batchTiming
       )
       guard !mainResults.isEmpty else {
-        self.handleParsedNotificationFramesWithoutMain(dispatch)
+        DispatchQueue.main.async { [weak self] in
+          self?.handleParsedNotificationFramesWithoutMain(dispatch)
+        }
         return
       }
       DispatchQueue.main.async { [weak self] in
@@ -510,7 +529,7 @@ extension OpenVitalsAppModel {
     )
   }
 
-  static func interpretNotificationFrame(
+  nonisolated static func interpretNotificationFrame(
     _ result: NotificationFrameParseResult,
     event: OpenVitalsNotificationEvent,
     healthCaptureActive: Bool,
@@ -553,7 +572,7 @@ extension OpenVitalsAppModel {
     )
   }
 
-  static func requiresMainParsedFrameHandling(
+  nonisolated static func requiresMainParsedFrameHandling(
     _ interpretation: NotificationFrameInterpretation,
     overnightGuardActive: Bool
   ) -> Bool {
@@ -570,7 +589,7 @@ extension OpenVitalsAppModel {
     return false
   }
 
-  static func canHandleDataSignalOffMain(
+  nonisolated static func canHandleDataSignalOffMain(
     _ interpretation: NotificationFrameInterpretation,
     overnightGuardActive: Bool,
     respiratoryPacketWatchActive: Bool
@@ -587,7 +606,7 @@ extension OpenVitalsAppModel {
       && interpretation.whoopEvent == nil
   }
 
-  static func recordSkippedParsedFrameMainHandling(
+  nonisolated static func recordSkippedParsedFrameMainHandling(
     _ result: ParsedNotificationFrameResult,
     ble: OpenVitalsBLEClient,
     packetUIStateAggregator: PacketUIStateAggregator
@@ -651,11 +670,7 @@ extension OpenVitalsAppModel {
     }
   }
 
-  struct NotificationFrame {
-    let hex: String
-  }
-
-  struct CaptureFrameRowBuildRequest {
+  struct CaptureFrameRowBuildRequest: Sendable {
     let frames: [NotificationFrame]
     let event: OpenVitalsNotificationEvent
     let capturedAt: String
@@ -663,7 +678,7 @@ extension OpenVitalsAppModel {
     let deviceModel: String
   }
 
-  static func captureFrameRows(for request: CaptureFrameRowBuildRequest) -> [CapturedFrameWriteRow] {
+  nonisolated static func captureFrameRows(for request: CaptureFrameRowBuildRequest) -> [CapturedFrameWriteRow] {
     request.frames.enumerated().map { index, frame in
       let evidenceID = Self.captureEvidenceID(for: frame, event: request.event, index: index)
       return CapturedFrameWriteRow(
@@ -678,27 +693,6 @@ extension OpenVitalsAppModel {
         deviceType: request.event.rustDeviceType
       )
     }
-  }
-
-  struct NotificationIngestResult {
-    let event: OpenVitalsNotificationEvent
-    let frames: [NotificationFrame]
-    let bufferedBytes: Int
-    let expectedBytes: Int?
-    let droppedBytes: Int
-    let usedBufferedData: Bool
-  }
-
-  func notificationIngestResult(for event: OpenVitalsNotificationEvent) -> NotificationIngestResult {
-    let reassembly = openVitalsFrames(in: event.value, event: event)
-    return NotificationIngestResult(
-      event: event,
-      frames: reassembly.frames.map { NotificationFrame(hex: $0.hexString) },
-      bufferedBytes: reassembly.bufferedBytes,
-      expectedBytes: reassembly.expectedBytes,
-      droppedBytes: reassembly.droppedBytes,
-      usedBufferedData: reassembly.usedBufferedData
-    )
   }
 
   func incrementNotificationIngestQueueDepth() -> (depth: Int, highWatermark: Int) {
@@ -759,79 +753,7 @@ extension OpenVitalsAppModel {
     return snapshot
   }
 
-
-  struct FrameReassemblyResult {
-    let frames: [Data]
-    let bufferedBytes: Int
-    let expectedBytes: Int?
-    let droppedBytes: Int
-    let usedBufferedData: Bool
-  }
-
-  func openVitalsFrames(in data: Data, event: OpenVitalsNotificationEvent) -> FrameReassemblyResult {
-    let key = frameReassemblyKey(for: event)
-    let hadBufferedData = frameReassemblyBuffers[key]?.isEmpty == false
-    var bytes = Array(frameReassemblyBuffers[key] ?? Data())
-    bytes.append(contentsOf: data)
-    var frames: [Data] = []
-    var droppedBytes = 0
-    var expectedBytes: Int?
-    let headerLength = event.rustDeviceType == "GEN4" ? 4 : 8
-
-    while let startIndex = bytes.firstIndex(of: 0xaa) {
-      if startIndex > 0 {
-        droppedBytes += startIndex
-        bytes.removeFirst(startIndex)
-      }
-      guard bytes.count >= headerLength else {
-        break
-      }
-
-      let declaredLength: Int
-      if event.rustDeviceType == "GEN4" {
-        declaredLength = Int(bytes[1]) | Int(bytes[2]) << 8
-      } else {
-        declaredLength = Int(bytes[2]) | Int(bytes[3]) << 8
-      }
-      guard declaredLength >= 4,
-            declaredLength + headerLength <= Self.maximumBufferedFrameBytes else {
-        droppedBytes += 1
-        bytes.removeFirst()
-        continue
-      }
-
-      let expectedLength = declaredLength + headerLength
-      guard bytes.count >= expectedLength else {
-        expectedBytes = expectedLength
-        break
-      }
-      frames.append(Data(bytes[0..<expectedLength]))
-      bytes.removeFirst(expectedLength)
-    }
-
-    if bytes.isEmpty {
-      frameReassemblyBuffers.removeValue(forKey: key)
-    } else if bytes.first == 0xaa {
-      frameReassemblyBuffers[key] = Data(bytes)
-    } else {
-      droppedBytes += bytes.count
-      frameReassemblyBuffers.removeValue(forKey: key)
-    }
-
-    return FrameReassemblyResult(
-      frames: frames,
-      bufferedBytes: frameReassemblyBuffers[key]?.count ?? 0,
-      expectedBytes: expectedBytes,
-      droppedBytes: droppedBytes,
-      usedBufferedData: hadBufferedData
-    )
-  }
-
-  func frameReassemblyKey(for event: OpenVitalsNotificationEvent) -> String {
-    "\(event.deviceID.uuidString)|\(event.serviceUUID)|\(event.characteristicUUID)|\(event.rustDeviceType)"
-  }
-
-  static func frameSummary(_ parsed: [String: Any]) -> String {
+  nonisolated static func frameSummary(_ parsed: [String: Any]) -> String {
     let packet = intString(parsed["packet_type"])
     let packetName = parsed["packet_type_name"] as? String ?? "unknown"
     let sequence = intString(parsed["sequence"])

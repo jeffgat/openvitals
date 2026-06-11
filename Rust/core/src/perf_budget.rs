@@ -14,7 +14,8 @@ use crate::{
     export::{RawExportOptions, export_raw_timeframe},
     metrics::{
         HrvInput, RecoveryInput, SleepInput, StrainInput, StressInput, open_vitals_hrv_v0,
-        open_vitals_recovery_v0, open_vitals_sleep_v0, open_vitals_strain_v0, open_vitals_stress_v0,
+        open_vitals_recovery_v0, open_vitals_sleep_v0, open_vitals_strain_v0,
+        open_vitals_stress_v0,
     },
     protocol::{DeviceType, FrameAccumulator, build_v5_payload_frame, parse_frame},
     store::OpenVitalsStore,
@@ -343,7 +344,9 @@ fn algorithms_workload(scale: usize, budgets: &PerfBudgets) -> PerfWorkloadRepor
 
         output_failures += open_vitals_sleep_v0(&sleep_input(index)).output.is_none() as usize;
         output_failures += open_vitals_strain_v0(&strain_input(index)).output.is_none() as usize;
-        output_failures += open_vitals_recovery_v0(&recovery_input(index)).output.is_none() as usize;
+        output_failures += open_vitals_recovery_v0(&recovery_input(index))
+            .output
+            .is_none() as usize;
         output_failures += open_vitals_stress_v0(&stress_input(index)).output.is_none() as usize;
         checks += 4;
     }
@@ -780,8 +783,10 @@ impl PerfWorkspace {
                 OpenVitalsError::message(format!("system clock before unix epoch: {error}"))
             })?
             .as_nanos();
-        let path =
-            std::env::temp_dir().join(format!("open-vitals-perf-budget-{}-{unique}", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "open-vitals-perf-budget-{}-{unique}",
+            std::process::id()
+        ));
         fs::create_dir_all(&path).map_err(|source| OpenVitalsError::io(&path, source))?;
         Ok(Self { path })
     }

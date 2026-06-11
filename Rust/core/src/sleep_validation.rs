@@ -28,8 +28,9 @@ use crate::{
         SleepWindowFeature, run_sleep_feature_score_report_for_store,
     },
     metrics::{
-        OPENVITALS_SLEEP_V0_ID, OPENVITALS_SLEEP_V0_VERSION, OPENVITALS_SLEEP_V1_ID, OPENVITALS_SLEEP_V1_VERSION,
-        SleepInput, SleepV1Input, SleepV1Output, open_vitals_sleep_v0, open_vitals_sleep_v1,
+        OPENVITALS_SLEEP_V0_ID, OPENVITALS_SLEEP_V0_VERSION, OPENVITALS_SLEEP_V1_ID,
+        OPENVITALS_SLEEP_V1_VERSION, SleepInput, SleepV1Input, SleepV1Output, open_vitals_sleep_v0,
+        open_vitals_sleep_v1,
     },
     reference::{REFERENCE_SLEEP_ACTIGRAPHY_ID, REFERENCE_SLEEP_ACTIGRAPHY_VERSION},
     store::{OpenVitalsStore, SleepCorrectionLabelRow},
@@ -1321,7 +1322,8 @@ fn sleep_v1_benchmark_cli_data_coverage_valid(
             == Some(report.open_vitals_output.is_some() && report.reference_output.is_some())
         && quality_flag_count
             == Some(
-                (report.open_vitals_quality_flags.len() + report.reference_quality_flags.len()) as u64,
+                (report.open_vitals_quality_flags.len() + report.reference_quality_flags.len())
+                    as u64,
             )
         && error_count == Some(report.errors.len() as u64)
 }
@@ -1859,7 +1861,8 @@ fn sleep_v1_evidence_folder_issue_action(issue: &str) -> String {
             default_min_stage_label_comparisons()
         )
     } else if issue == "stability_report_unparseable" {
-        "Regenerate sleep-v1-stability.json with the current OpenVitals stability validator.".to_string()
+        "Regenerate sleep-v1-stability.json with the current OpenVitals stability validator."
+            .to_string()
     } else if issue == "stability_report_integrity_failed" {
         "Regenerate sleep-v1-stability.json from the current Sleep V1 input and component contract."
             .to_string()
@@ -3321,7 +3324,9 @@ fn sleep_v1_benchmark_data_coverage_integrity_pass(report: &AlgorithmComparisonR
     })
 }
 
-fn sleep_v1_benchmark_open_vitals_output_integrity_pass(report: &AlgorithmComparisonReport) -> bool {
+fn sleep_v1_benchmark_open_vitals_output_integrity_pass(
+    report: &AlgorithmComparisonReport,
+) -> bool {
     let Some(output) = report.open_vitals_output.as_ref() else {
         return false;
     };
@@ -3341,7 +3346,8 @@ fn sleep_v1_benchmark_open_vitals_output_integrity_pass(report: &AlgorithmCompar
     let Some(output_quality_flags) = output_quality_flags else {
         return false;
     };
-    output.get("algorithm_id").and_then(Value::as_str) == Some(report.open_vitals_algorithm_id.as_str())
+    output.get("algorithm_id").and_then(Value::as_str)
+        == Some(report.open_vitals_algorithm_id.as_str())
         && output.get("algorithm_version").and_then(Value::as_str)
             == Some(report.open_vitals_algorithm_version.as_str())
         && output_quality_flags == report.open_vitals_quality_flags
@@ -3357,7 +3363,9 @@ fn sleep_v1_output_provenance_integrity_pass(output: &Value) -> bool {
         return false;
     };
     provenance.get("score_policy").and_then(Value::as_str)
-        == Some("weighted_sleep_v1_components_with_fragmentation_guardrails")
+        == Some(
+            "research_weighted_sleep_v1_components_with_confidence_metadata_and_fragmentation_guardrails",
+        )
         && provenance.get("status_policy").and_then(Value::as_str)
             == Some("rust_sleep_model_status_report")
         && provenance
@@ -3649,7 +3657,7 @@ fn sleep_v1_component_policy_ready(component_name: &str, policy: &str) -> bool {
     match component_name {
         "sleep_need_fulfillment" => policy == "duration_vs_need_with_debt_pressure_and_nap_credit",
         "continuity" => policy == "efficiency_latency_waso_and_wake_episode_curve",
-        "schedule_regularity" => policy == "weighted_bedtime_wake_time_midpoint_deviation",
+        "schedule_regularity" => policy == "weighted_current_timing_and_personal_sleep_regularity",
         "sleep_architecture" => {
             policy
                 == "deep_rem_restorative_balance_vs_personal_baseline_when_available_with_architecture_confidence"
@@ -3849,7 +3857,8 @@ fn sleep_v1_status_report_contract_pass(output: &Value) -> bool {
     let training_progress_coherent = nights_until_training <= 14
         && nights_until_training == 14u64.saturating_sub(calibration_label_count)
         && nights_until_open_vitals_training <= 7
-        && nights_until_open_vitals_training == 7u64.saturating_sub(trusted_open_vitals_sleep_nights)
+        && nights_until_open_vitals_training
+            == 7u64.saturating_sub(trusted_open_vitals_sleep_nights)
         && (!matches!(status, "training" | "trained")
             || (nights_until_training == 0 && nights_until_open_vitals_training == 0));
     let status_quality_flags_clean = status_report
@@ -4180,13 +4189,15 @@ fn sleep_v1_benchmark_delta_output_integrity_pass(report: &AlgorithmComparisonRe
                 reference_output,
                 "disturbance_count",
             ),
-            "fragmentation_index_per_hour" => sleep_v1_benchmark_delta_open_vitals_input_values_match(
-                delta,
-                &report.provenance,
-                "fragmentation_index_per_hour",
-                reference_output,
-                "fragmentation_index_per_hour",
-            ),
+            "fragmentation_index_per_hour" => {
+                sleep_v1_benchmark_delta_open_vitals_input_values_match(
+                    delta,
+                    &report.provenance,
+                    "fragmentation_index_per_hour",
+                    reference_output,
+                    "fragmentation_index_per_hour",
+                )
+            }
             _ => false,
         })
 }

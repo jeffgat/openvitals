@@ -35,10 +35,10 @@ fn run() -> open_vitals_core::OpenVitalsResult<()> {
     let algorithm_version =
         value(&args, "--algorithm-version")?.unwrap_or_else(|| "0.1.0".to_string());
 
-    let input_raw =
-        fs::read_to_string(&input_path).map_err(|source| OpenVitalsError::io(&input_path, source))?;
-    let dataset: CalibrationDataset =
-        serde_json::from_str(&input_raw).map_err(|source| OpenVitalsError::json(&input_path, source))?;
+    let input_raw = fs::read_to_string(&input_path)
+        .map_err(|source| OpenVitalsError::io(&input_path, source))?;
+    let dataset: CalibrationDataset = serde_json::from_str(&input_raw)
+        .map_err(|source| OpenVitalsError::json(&input_path, source))?;
     let report = evaluate_linear_calibration(
         &dataset,
         &CalibrationOptions {

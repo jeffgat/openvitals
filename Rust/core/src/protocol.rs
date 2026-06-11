@@ -27,7 +27,12 @@ pub enum DeviceType {
     Gen4,
     Maverick,
     Puffin,
-    #[serde(rename = "OPENVITALS", alias = "OPEN_VITALS", alias = "OpenVitals", alias = "openVitals")]
+    #[serde(
+        rename = "OPENVITALS",
+        alias = "OPEN_VITALS",
+        alias = "OpenVitals",
+        alias = "openVitals"
+    )]
     OpenVitals,
 }
 

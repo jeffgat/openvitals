@@ -62,15 +62,15 @@ fn run() -> open_vitals_core::OpenVitalsResult<()> {
 }
 
 fn parse_u16(value: &str, name: &str) -> open_vitals_core::OpenVitalsResult<u16> {
-    value
-        .parse::<u16>()
-        .map_err(|error| open_vitals_core::OpenVitalsError::message(format!("{name} must be a u16: {error}")))
+    value.parse::<u16>().map_err(|error| {
+        open_vitals_core::OpenVitalsError::message(format!("{name} must be a u16: {error}"))
+    })
 }
 
 fn parse_u64(value: &str, name: &str) -> open_vitals_core::OpenVitalsResult<u64> {
-    value
-        .parse::<u64>()
-        .map_err(|error| open_vitals_core::OpenVitalsError::message(format!("{name} must be a u64: {error}")))
+    value.parse::<u64>().map_err(|error| {
+        open_vitals_core::OpenVitalsError::message(format!("{name} must be a u64: {error}"))
+    })
 }
 
 fn parse_usize(value: &str, name: &str) -> open_vitals_core::OpenVitalsResult<usize> {

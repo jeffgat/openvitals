@@ -12,31 +12,35 @@ struct HealthView: View {
       LazyVStack(alignment: .leading, spacing: 22) {
         HealthDashboardStatusHeader(
           catalogStatus: store.catalogStatus,
+          packetInputStatus: store.packetInputStatus,
+          packetScoreStatus: store.packetScoreStatus,
+          refreshStatus: store.healthMetricRefreshStatus,
+          isRefreshing: store.healthMetricWorkIsRunning,
           usesSampleData: store.usesSampleData
         )
 
         HealthActivityOverviewSection(
-          steps: store.whoopStepsDisplayText(),
-          activeEnergy: store.whoopActiveCaloriesDisplayText(),
-          stepsFreshness: store.whoopStepsStatusText(),
-          stepsSource: store.whoopStepsSource(),
-          activeEnergyFreshness: store.whoopActiveCaloriesStatusText(),
-          activeEnergySource: store.whoopActiveCaloriesSource(),
+          steps: store.healthDashboardStepsText,
+          activeEnergy: store.healthDashboardActiveEnergyText,
+          stepsFreshness: store.healthDashboardStepsStatus,
+          stepsSource: store.healthDashboardStepsSource,
+          activeEnergyFreshness: store.healthDashboardActiveEnergyStatus,
+          activeEnergySource: store.healthDashboardActiveEnergySource,
           heartRateValue: liveHeartRateValue,
           heartRateStatus: liveHeartRateStatus,
           heartRateSource: liveHeartRateSource
         )
 
-        HealthVitalsPreviewSection(snapshots: vitalSnapshots)
+        HealthVitalsPreviewSection(snapshots: store.healthDashboardVitalSnapshots)
 
         HealthRouteShortcutSection(
           title: "Explore Health",
-          snapshots: snapshots(for: [.sleep, .recovery, .strain, .stress, .cardioLoad, .energyBank])
+          snapshots: store.healthDashboardExploreSnapshots
         )
 
         HealthRouteShortcutSection(
           title: "Data & Algorithms",
-          snapshots: snapshots(for: [.packetInputs, .algorithms, .calibration])
+          snapshots: store.healthDashboardAlgorithmSnapshots
         )
       }
       .padding(.horizontal, 16)
@@ -54,29 +58,23 @@ struct HealthView: View {
         Button {
           refreshDashboard()
         } label: {
-          Image(systemName: "arrow.clockwise")
+          if store.healthMetricWorkIsRunning {
+            ProgressView()
+          } else {
+            Image(systemName: "arrow.clockwise")
+          }
         }
         .accessibilityLabel("Refresh Health")
+        .disabled(store.healthMetricWorkIsRunning)
       }
     }
     .onAppear {
       model.recordUIAction("page.opened", detail: "Health")
+      store.refreshHealthDashboardSnapshots()
       store.loadBridgeCatalogsIfNeeded()
+      store.loadPersistedPacketScoresIfNeeded()
       store.refreshHeartRateTimeline()
     }
-  }
-
-  private var landingSnapshots: [HealthMetricSnapshot] {
-    store
-      .landingSnapshots(
-        liveHeartRateBPM: model.ble.liveHeartRateBPM,
-        liveHeartRateSource: model.ble.liveHeartRateSource,
-        liveHeartRateUpdatedAt: model.ble.liveHeartRateUpdatedAt
-      )
-  }
-
-  private var vitalSnapshots: [HealthMetricSnapshot] {
-    Array(store.healthMonitorSnapshots().prefix(4))
   }
 
   private var liveHeartRateValue: String {
@@ -99,16 +97,8 @@ struct HealthView: View {
       : .live(model.ble.liveHeartRateSource)
   }
 
-  private func snapshots(for routes: [HealthRoute]) -> [HealthMetricSnapshot] {
-    routes.compactMap { route in
-      landingSnapshots.first { $0.route == route } ?? store.snapshot(for: route)
-    }
-  }
-
   @MainActor
   private func refreshDashboard() {
-    store.refreshBridgeCatalogs()
-    store.refreshHeartRateTimeline()
-    store.refreshPacketInputsIfNeeded()
+    store.refreshHealthMetrics()
   }
 }

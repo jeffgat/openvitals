@@ -138,9 +138,9 @@ private struct SyncStatusToastView: View {
 
   private var tint: Color {
     switch toast.phase {
-    case .syncing: Color(red: 0.18, green: 0.48, blue: 0.95)
-    case .synced: Color(red: 0.20, green: 0.68, blue: 0.27)
-    case .failed: Color(red: 0.95, green: 0.23, blue: 0.18)
+    case .syncing: OpenVitalsTheme.champagne
+    case .synced: OpenVitalsTheme.gold
+    case .failed: OpenVitalsTheme.bronze
     }
   }
 
@@ -148,20 +148,20 @@ private struct SyncStatusToastView: View {
     if colorScheme == .dark {
       switch toast.phase {
       case .syncing:
-        Color(red: 0.07, green: 0.16, blue: 0.25)
+        OpenVitalsTheme.surface
       case .synced:
-        Color(red: 0.07, green: 0.20, blue: 0.12)
+        OpenVitalsTheme.surface
       case .failed:
-        Color(red: 0.26, green: 0.10, blue: 0.09)
+        OpenVitalsTheme.elevatedSurface
       }
     } else {
       switch toast.phase {
       case .syncing:
-        Color(red: 0.84, green: 0.91, blue: 1.0)
+        OpenVitalsTheme.elevatedSurface
       case .synced:
-        Color(red: 0.86, green: 0.96, blue: 0.88)
+        OpenVitalsTheme.elevatedSurface
       case .failed:
-        Color(red: 1.0, green: 0.88, blue: 0.86)
+        OpenVitalsTheme.surface
       }
     }
   }
@@ -230,7 +230,7 @@ private struct SyncFailureSheet: View {
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
-            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(OpenVitalsTheme.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .padding(20)
       }

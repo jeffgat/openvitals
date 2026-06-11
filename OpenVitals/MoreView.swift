@@ -62,6 +62,8 @@ struct MoreView: View {
       }
     }
     .listStyle(.insetGrouped)
+    .tint(OpenVitalsTheme.accent)
+    .listRowSeparatorTint(OpenVitalsTheme.separator)
     .openVitalsListBackground()
     .navigationTitle("More")
     .navigationBarTitleDisplayMode(.inline)
@@ -112,7 +114,7 @@ struct MoreView: View {
         router.openHealth(.algorithms)
       }
     case .debug:
-      MoreDebugView(store: store)
+      MoreDebugView(healthStore: healthStore, store: store)
     case .appearance:
       MoreAppearanceView()
     case .privacy:

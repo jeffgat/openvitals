@@ -18,12 +18,13 @@ struct MoreGreetingHeader: View {
       VStack(alignment: .leading, spacing: 3) {
         Text(greeting)
           .font(.subheadline.weight(.semibold))
-          .foregroundStyle(.secondary)
+          .foregroundStyle(OpenVitalsTheme.textSecondary)
         Text(displayName)
           .font(.headline)
+          .foregroundStyle(OpenVitalsTheme.textPrimary)
         Text(profileSummary)
           .font(.caption)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(OpenVitalsTheme.textSecondary)
           .lineLimit(1)
       }
 
@@ -31,7 +32,7 @@ struct MoreGreetingHeader: View {
 
       Image(systemName: "person.crop.circle.badge.pencil")
         .font(.title3.weight(.semibold))
-        .foregroundStyle(.blue)
+        .foregroundStyle(OpenVitalsTheme.accent)
         .frame(width: 32, height: 32)
     }
     .padding(.vertical, 5)
@@ -75,7 +76,8 @@ struct MoreDeveloperView: View {
           title: "Developer Surface",
           value: "Internal capture, export, storage, bridge, and algorithm tools live here instead of the main More page.",
           systemImage: "hammer",
-          status: .pending
+          status: .ready,
+          statusTitle: "Available"
         )
       }
     }
@@ -201,7 +203,7 @@ struct MoreProfileView: View {
         Section {
           Text(statusMessage)
             .font(.footnote)
-            .foregroundStyle(statusMessage.hasPrefix("Profile") || statusMessage.hasPrefix("Updated") ? .green : .red)
+            .foregroundStyle(statusMessage.hasPrefix("Profile") || statusMessage.hasPrefix("Updated") ? OpenVitalsTheme.gold : OpenVitalsTheme.bronze)
         }
       }
     }
@@ -597,9 +599,10 @@ struct MoreRouteRow: View {
       VStack(alignment: .leading, spacing: 3) {
         Text(route.title)
           .font(.body.weight(.semibold))
+          .foregroundStyle(OpenVitalsTheme.textPrimary)
         Text(route.subtitle)
           .font(.caption)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(OpenVitalsTheme.textSecondary)
           .lineLimit(2)
       }
 
@@ -614,17 +617,23 @@ struct MoreRouteRow: View {
 
 struct MoreStatusBadge: View {
   let status: MoreStatusKind
+  var titleOverride: String? = nil
 
   var body: some View {
-    Label(status.title, systemImage: status.systemImage)
+    let title = titleOverride ?? status.title
+    Label(title, systemImage: status.systemImage)
       .font(.caption2.weight(.semibold))
       .labelStyle(.titleAndIcon)
       .padding(.horizontal, 8)
       .padding(.vertical, 4)
-      .background(status.tint.opacity(0.14), in: Capsule())
+      .background(status.tint.opacity(0.13), in: Capsule())
+      .overlay {
+        Capsule()
+          .strokeBorder(status.tint.opacity(0.22), lineWidth: 1)
+      }
       .foregroundStyle(status.tint)
       .lineLimit(1)
       .minimumScaleFactor(0.8)
-      .accessibilityLabel(status.title)
+      .accessibilityLabel(title)
   }
 }

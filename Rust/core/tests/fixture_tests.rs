@@ -279,7 +279,10 @@ fn indexes_openwhoop_activity_health_sync_comparison_fixture_with_planned_sessio
         .iter()
         .find(|fixture| fixture.id == "synthetic.openwhoop.activity_health_sync_comparison")
         .unwrap();
-    assert_eq!(fixture.schema, "open_vitals.activity-health-sync-dry-run.v1");
+    assert_eq!(
+        fixture.schema,
+        "open_vitals.activity-health-sync-dry-run.v1"
+    );
     assert_eq!(fixture.kind, "synthetic");
     assert!(fixture.source.contains(OPENWHOOP_REFERENCE_COMMIT));
     assert!(fixture.notes.contains(OPENWHOOP_REFERENCE_LICENSE_CAVEAT));

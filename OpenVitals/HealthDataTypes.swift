@@ -281,6 +281,185 @@ struct DailyMetricWindow {
 enum HealthPreviewState {
   case populated
   case missing
+  case recoveryNoData
+  case recoveryBridgeData
+  case recoveryPacketRunBlocked
+}
+
+struct RecoveryDailyMetric: Identifiable {
+  let id: String
+  let dateKey: String?
+  let timezone: String?
+  let startTimeUnixMS: Int64?
+  let endTimeUnixMS: Int64?
+  let restingHRBPM: Double?
+  let hrvRMSSDMS: Double?
+  let respiratoryRateRPM: Double?
+  let oxygenSaturationPercent: Double?
+  let skinTemperatureDeltaC: Double?
+  let sourceKind: MetricSourceKind
+  let confidence: Double?
+  let inputs: [String: Any]
+  let qualityFlags: [String]
+  let provenance: [String: Any]
+  let rawRow: [String: Any]
+
+  init?(row: [String: Any]) {
+    guard let rawSourceKind = row["source_kind"] as? String,
+          let sourceKind = MetricSourceKind(rawValue: rawSourceKind) else {
+      return nil
+    }
+    rawRow = row
+    id = row["daily_metric_id"] as? String
+      ?? row["metric_id"] as? String
+      ?? "\(row["date_key"] as? String ?? "unknown")-\(rawSourceKind)"
+    dateKey = row["date_key"] as? String ?? row["date"] as? String
+    timezone = row["timezone"] as? String
+    startTimeUnixMS = Self.int64Value(row["start_time_unix_ms"])
+    endTimeUnixMS = Self.int64Value(row["end_time_unix_ms"])
+    restingHRBPM = Self.doubleValue(row["resting_hr_bpm"])
+    hrvRMSSDMS = Self.doubleValue(row["hrv_rmssd_ms"])
+    respiratoryRateRPM = Self.doubleValue(row["respiratory_rate_rpm"])
+    oxygenSaturationPercent = Self.doubleValue(row["oxygen_saturation_percent"])
+    skinTemperatureDeltaC = Self.doubleValue(row["skin_temperature_delta_c"])
+    self.sourceKind = sourceKind
+    confidence = Self.doubleValue(row["confidence"])
+    inputs = Self.jsonObject(fromJSONString: row["inputs_json"]) ?? [:]
+    qualityFlags = Self.jsonArray(fromJSONString: row["quality_flags_json"]) as? [String] ?? []
+    provenance = Self.jsonObject(fromJSONString: row["provenance_json"]) ?? [:]
+  }
+
+  var isDeviceSensor: Bool {
+    sourceKind == .deviceSensor
+  }
+
+  var hasAnyValue: Bool {
+    restingHRBPM != nil
+      || hrvRMSSDMS != nil
+      || respiratoryRateRPM != nil
+      || oxygenSaturationPercent != nil
+      || skinTemperatureDeltaC != nil
+  }
+
+  var metricID: String {
+    inputs["metric_id"] as? String
+      ?? provenance["metric_id"] as? String
+      ?? id
+  }
+
+  var metricName: String {
+    inputs["metric_name"] as? String
+      ?? provenance["metric_name"] as? String
+      ?? Self.displayName(for: metricID)
+  }
+
+  var blockerReasons: [String] {
+    let inputBlockers = inputs["blocker_reasons"] as? [String] ?? []
+    let provenanceBlockers = provenance["blocker_reasons"] as? [String] ?? []
+    let flagBlockers = qualityFlags.filter {
+      !$0.contains("unavailable") && !$0.contains("source_kind")
+    }
+    return Array(Set(inputBlockers + provenanceBlockers + flagBlockers)).sorted()
+  }
+
+  func value(for key: String) -> Double? {
+    switch key {
+    case "resting_hr_bpm":
+      return restingHRBPM
+    case "hrv_rmssd_ms":
+      return hrvRMSSDMS
+    case "respiratory_rate_rpm":
+      return respiratoryRateRPM
+    case "oxygen_saturation_percent":
+      return oxygenSaturationPercent
+    case "skin_temperature_delta_c":
+      return skinTemperatureDeltaC
+    default:
+      return Self.doubleValue(rawRow[key])
+    }
+  }
+
+  static func doubleValue(_ value: Any?) -> Double? {
+    if let double = value as? Double {
+      return double
+    }
+    if let number = value as? NSNumber {
+      return number.doubleValue
+    }
+    if let text = value as? String {
+      return Double(text)
+    }
+    return nil
+  }
+
+  static func int64Value(_ value: Any?) -> Int64? {
+    if let int64 = value as? Int64 {
+      return int64
+    }
+    if let int = value as? Int {
+      return Int64(int)
+    }
+    if let number = value as? NSNumber {
+      return number.int64Value
+    }
+    if let text = value as? String {
+      return Int64(text)
+    }
+    return nil
+  }
+
+  static func jsonObject(fromJSONString value: Any?) -> [String: Any]? {
+    guard let string = value as? String,
+          let data = string.data(using: .utf8),
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+      return nil
+    }
+    return object
+  }
+
+  static func jsonArray(fromJSONString value: Any?) -> [Any]? {
+    guard let string = value as? String,
+          let data = string.data(using: .utf8),
+          let array = try? JSONSerialization.jsonObject(with: data) as? [Any] else {
+      return nil
+    }
+    return array
+  }
+
+  static func displayName(for metricID: String) -> String {
+    switch metricID {
+    case "resting_hr_bpm":
+      return "Resting HR"
+    case "hrv_rmssd_ms":
+      return "Resting HRV"
+    case "respiratory_rate_rpm":
+      return "Respiratory Rate"
+    case "oxygen_saturation_percent":
+      return "Oxygen Saturation"
+    case "skin_temperature_delta_c":
+      return "Wrist Temperature"
+    default:
+      return metricID
+    }
+  }
+}
+
+struct RecoveryTimelineRow: Identifiable {
+  enum Kind {
+    case score
+    case sleep
+    case metric
+    case blocker
+  }
+
+  let id: String
+  let kind: Kind
+  let title: String
+  let value: String
+  let detail: String
+  let source: HealthDataSource
+  let systemImage: String
+  let sortTimeUnixMS: Int64
 }
 
 struct HealthAlgorithmDefinition: Identifiable {

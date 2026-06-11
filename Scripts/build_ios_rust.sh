@@ -11,6 +11,12 @@ if [[ "${OPENVITALS_SKIP_RUST_CORE_BUILD:-0}" == "1" ]]; then
   exit 0
 fi
 
+# Xcode launched from the GUI does not inherit a login shell PATH.
+if [[ -n "${HOME:-}" ]]; then
+  export PATH="$HOME/.cargo/bin:$PATH"
+fi
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 CONFIGURATION="${CONFIGURATION:-Debug}"
 PLATFORM_NAME="${PLATFORM_NAME:-iphonesimulator}"
 CURRENT_ARCH="${CURRENT_ARCH:-${ARCHS:-arm64}}"
@@ -116,7 +122,14 @@ cargo_args=(
 if [[ "$CARGO_RELEASE" == "1" ]]; then
   cargo_args+=(--release)
 fi
-cargo "${cargo_args[@]}"
+
+CARGO_BIN="${OPENVITALS_CARGO:-cargo}"
+if ! CARGO_PATH="$(command -v "$CARGO_BIN")"; then
+  echo "OpenVitals Rust core build requires Cargo, but '$CARGO_BIN' was not found." >&2
+  echo "Install Rust with rustup, or set OPENVITALS_CARGO to the cargo executable path." >&2
+  exit 1
+fi
+"$CARGO_PATH" "${cargo_args[@]}"
 
 mkdir -p "$PLATFORM_RUST_DIR"
 cp "$CARGO_TARGET_DIR/$RUST_TARGET/$CARGO_PROFILE_DIR/libopen_vitals_core.a" \

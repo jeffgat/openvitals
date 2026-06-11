@@ -175,6 +175,11 @@ enum OnboardingProfilePersistence {
     }
   }
 
+  static func deletePersistedState() {
+    UserDefaults.standard.removeObject(forKey: OnboardingStorage.persistedState)
+    SecItemDelete(keychainQuery() as CFDictionary)
+  }
+
   private static func save(_ state: OnboardingPersistedState) {
     guard let data = try? JSONEncoder().encode(state) else {
       return

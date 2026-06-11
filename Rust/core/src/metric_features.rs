@@ -10,10 +10,11 @@ use crate::{
         DEFAULT_MIN_OWNED_CAPTURES_PER_SUMMARY, run_capture_correlation_for_store,
     },
     metrics::{
-        AlgorithmRunResult, OPENVITALS_HRV_V0_ID, OPENVITALS_HRV_V0_VERSION, HrvInput, HrvOutput,
+        AlgorithmRunResult, HrvInput, HrvOutput, OPENVITALS_HRV_V0_ID, OPENVITALS_HRV_V0_VERSION,
         RecoveryInput, RecoveryScoreOutput, SleepInput, SleepScoreOutput, StrainInput,
-        StrainScoreOutput, StressInput, StressScoreOutput, open_vitals_hrv_v0, open_vitals_recovery_v0,
-        open_vitals_sleep_v0, open_vitals_strain_v0, open_vitals_stress_v0,
+        StrainScoreOutput, StressInput, StressScoreOutput, open_vitals_hrv_v0,
+        open_vitals_recovery_v0, open_vitals_sleep_v0, open_vitals_strain_v0,
+        open_vitals_stress_v0,
     },
     protocol::{
         DataPacketBodySummary, I16SeriesSummary, ParsedPayload, decode_hex_with_whitespace,
@@ -28,7 +29,10 @@ use crate::{
 pub const MOTION_FEATURE_REPORT_SCHEMA: &str = "open_vitals.motion-feature-report.v1";
 pub const HEART_RATE_FEATURE_REPORT_SCHEMA: &str = "open_vitals.heart-rate-feature-report.v1";
 pub const HRV_FEATURE_REPORT_SCHEMA: &str = "open_vitals.hrv-feature-report.v1";
-pub const HRV_CAPTURE_VALIDATION_REPORT_SCHEMA: &str = "open_vitals.hrv-capture-validation-report.v1";
+pub const BEAT_INTERVAL_CANDIDATE_SCAN_REPORT_SCHEMA: &str =
+    "open_vitals.beat-interval-candidate-scan-report.v1";
+pub const HRV_CAPTURE_VALIDATION_REPORT_SCHEMA: &str =
+    "open_vitals.hrv-capture-validation-report.v1";
 pub const VITAL_EVENT_FEATURE_REPORT_SCHEMA: &str = "open_vitals.vital-event-feature-report.v1";
 pub const RESPIRATORY_RATE_CAPTURE_VALIDATION_REPORT_SCHEMA: &str =
     "open_vitals.respiratory-rate-capture-validation-report.v1";
@@ -42,7 +46,8 @@ pub const METRIC_WINDOW_FEATURE_REPORT_SCHEMA: &str = "open_vitals.metric-window
 pub const RESTING_HEART_RATE_FEATURE_REPORT_SCHEMA: &str =
     "open_vitals.resting-heart-rate-feature-report.v1";
 pub const SLEEP_FEATURE_SCORE_REPORT_SCHEMA: &str = "open_vitals.sleep-feature-score-report.v1";
-pub const RECOVERY_FEATURE_SCORE_REPORT_SCHEMA: &str = "open_vitals.recovery-feature-score-report.v1";
+pub const RECOVERY_FEATURE_SCORE_REPORT_SCHEMA: &str =
+    "open_vitals.recovery-feature-score-report.v1";
 pub const STRAIN_FEATURE_SCORE_REPORT_SCHEMA: &str = "open_vitals.strain-feature-score-report.v1";
 pub const STRESS_FEATURE_SCORE_REPORT_SCHEMA: &str = "open_vitals.stress-feature-score-report.v1";
 const MIN_SMOOTHED_SLEEP_STAGE_DURATION_MINUTES: f64 = 5.0;
@@ -75,6 +80,14 @@ pub struct HrvFeatureOptions {
     pub min_rr_intervals_to_compute: usize,
     pub baseline_min_days: usize,
     pub require_baseline: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct BeatIntervalCandidateScanOptions {
+    pub sample_rate_hz: f64,
+    pub peak_threshold_i16: f64,
+    pub min_peak_spacing_samples: usize,
+    pub max_frame_summaries: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -202,6 +215,17 @@ impl Default for HrvFeatureOptions {
             min_rr_intervals_to_compute: 2,
             baseline_min_days: 3,
             require_baseline: false,
+        }
+    }
+}
+
+impl Default for BeatIntervalCandidateScanOptions {
+    fn default() -> Self {
+        Self {
+            sample_rate_hz: 25.0,
+            peak_threshold_i16: 800.0,
+            min_peak_spacing_samples: 8,
+            max_frame_summaries: 24,
         }
     }
 }
@@ -711,6 +735,48 @@ pub struct RecoverySensorWidgetDiscovery {
     pub candidate_source_signals: Vec<String>,
     pub quality_flags: Vec<String>,
     pub blocker_reasons: Vec<String>,
+    pub provenance: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BeatIntervalCandidateScanReport {
+    pub schema: String,
+    pub generated_by: String,
+    pub pass: bool,
+    pub start_time: String,
+    pub end_time: String,
+    pub decoded_frame_count: usize,
+    pub candidate_frame_count: usize,
+    pub packet_counts: BTreeMap<String, usize>,
+    pub direct_rr_value_count: usize,
+    pub peak_spacing_candidate_count: usize,
+    pub sample_rate_hz: f64,
+    pub peak_threshold_i16: f64,
+    pub min_peak_spacing_samples: usize,
+    pub frame_summaries: Vec<BeatIntervalCandidateFrameSummary>,
+    pub issues: Vec<String>,
+    #[serde(default)]
+    pub next_actions: Vec<MetricFeatureNextAction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BeatIntervalCandidateFrameSummary {
+    pub frame_id: String,
+    pub evidence_id: String,
+    pub captured_at: String,
+    pub packet_k: u8,
+    pub domain: String,
+    pub body_summary_kind: String,
+    pub body_byte_count: usize,
+    pub i16_sample_count: usize,
+    pub min_i16: Option<i16>,
+    pub max_i16: Option<i16>,
+    pub mean_abs_i16: f64,
+    pub direct_rr_value_count: usize,
+    pub peak_count: usize,
+    pub peak_spacing_count: usize,
+    pub candidate_rr_intervals_ms_preview: Vec<f64>,
+    pub quality_flags: Vec<String>,
     pub provenance: serde_json::Value,
 }
 
@@ -1872,6 +1938,303 @@ pub fn run_hrv_feature_report(
     })
 }
 
+pub fn run_beat_interval_candidate_scan_for_store(
+    store: &OpenVitalsStore,
+    start: &str,
+    end: &str,
+    options: BeatIntervalCandidateScanOptions,
+) -> OpenVitalsResult<BeatIntervalCandidateScanReport> {
+    let decoded_rows = store.decoded_frames_between(start, end)?;
+    run_beat_interval_candidate_scan(&decoded_rows, start, end, options)
+}
+
+pub fn run_beat_interval_candidate_scan(
+    decoded_rows: &[DecodedFrameRow],
+    start: &str,
+    end: &str,
+    options: BeatIntervalCandidateScanOptions,
+) -> OpenVitalsResult<BeatIntervalCandidateScanReport> {
+    let mut candidate_frame_count = 0usize;
+    let mut packet_counts = BTreeMap::new();
+    let mut direct_rr_value_count = 0usize;
+    let mut peak_spacing_candidate_count = 0usize;
+    let mut frame_summaries = Vec::new();
+    let sample_rate_hz = if options.sample_rate_hz.is_finite() && options.sample_rate_hz > 0.0 {
+        options.sample_rate_hz
+    } else {
+        25.0
+    };
+    let peak_threshold_i16 =
+        if options.peak_threshold_i16.is_finite() && options.peak_threshold_i16 > 0.0 {
+            options.peak_threshold_i16
+        } else {
+            800.0
+        };
+    let min_peak_spacing_samples = options.min_peak_spacing_samples.max(1);
+
+    for row in decoded_rows {
+        let Some(ParsedPayload::DataPacket {
+            packet_k: Some(packet_k),
+            domain,
+            body_hex,
+            body_summary,
+            ..
+        }) = parsed_payload_from_row(row)?
+        else {
+            continue;
+        };
+        if !matches!(packet_k, 16 | 17 | 20) {
+            continue;
+        }
+
+        candidate_frame_count += 1;
+        let domain = domain.unwrap_or_else(|| "unknown".to_string());
+        *packet_counts
+            .entry(format!("K{packet_k} {domain}"))
+            .or_insert(0) += 1;
+        let body = decode_hex_with_whitespace(&body_hex)?;
+        let samples = i16_samples_from_bytes(&body);
+        let direct_rr_values = samples
+            .iter()
+            .filter(|&&sample| (300..=2000).contains(&sample))
+            .copied()
+            .collect::<Vec<_>>();
+        let peak_intervals = beat_interval_peak_spacing_candidates(
+            &samples,
+            sample_rate_hz,
+            peak_threshold_i16,
+            min_peak_spacing_samples,
+        );
+        direct_rr_value_count += direct_rr_values.len();
+        peak_spacing_candidate_count += peak_intervals.intervals_ms.len();
+
+        if frame_summaries.len() < options.max_frame_summaries {
+            let mut quality_flags = BTreeSet::new();
+            quality_flags.insert("discovery_only_not_score_input".to_string());
+            quality_flags.insert("beat_interval_source_unvalidated".to_string());
+            if body.len() < 4 {
+                quality_flags.insert("body_too_short_for_i16_scan".to_string());
+            }
+            match packet_k {
+                16 => {
+                    quality_flags.insert("raw_ecg_k16_candidate_not_promoted".to_string());
+                }
+                17 => {
+                    quality_flags.insert("r17_direct_i16_candidate_not_promoted".to_string());
+                }
+                20 => {
+                    quality_flags.insert("raw_research_k20_candidate_not_promoted".to_string());
+                }
+                _ => {}
+            }
+            if !direct_rr_values.is_empty() {
+                quality_flags.insert("direct_plausible_rr_values_present".to_string());
+            }
+            if !peak_intervals.intervals_ms.is_empty() {
+                quality_flags.insert("waveform_peak_spacing_candidates_present".to_string());
+                quality_flags.insert("peak_spacing_scan_heuristic_only".to_string());
+            }
+            if options.sample_rate_hz != sample_rate_hz {
+                quality_flags.insert("sample_rate_defaulted".to_string());
+            }
+            if options.peak_threshold_i16 != peak_threshold_i16 {
+                quality_flags.insert("peak_threshold_defaulted".to_string());
+            }
+
+            frame_summaries.push(BeatIntervalCandidateFrameSummary {
+                frame_id: row.frame_id.clone(),
+                evidence_id: row.evidence_id.clone(),
+                captured_at: row.captured_at.clone(),
+                packet_k,
+                domain: domain.clone(),
+                body_summary_kind: body_summary_kind_name(body_summary.as_ref()).to_string(),
+                body_byte_count: body.len(),
+                i16_sample_count: samples.len(),
+                min_i16: samples.iter().copied().min(),
+                max_i16: samples.iter().copied().max(),
+                mean_abs_i16: round_1(mean_abs_i16(&samples)),
+                direct_rr_value_count: direct_rr_values.len(),
+                peak_count: peak_intervals.peak_count,
+                peak_spacing_count: peak_intervals.intervals_ms.len(),
+                candidate_rr_intervals_ms_preview: interval_preview(
+                    &direct_rr_values,
+                    &peak_intervals.intervals_ms,
+                ),
+                quality_flags: quality_flags.into_iter().collect(),
+                provenance: json!({
+                    "input_source": "decoded_frame",
+                    "parser_version": row.parser_version,
+                    "packet_k": packet_k,
+                    "domain": domain,
+                    "scan_policy": "discovery_only_requires_external_validation_before_hrv_promotion",
+                    "direct_rr_range_ms": "300..2000",
+                    "sample_rate_hz": sample_rate_hz,
+                    "peak_threshold_i16": peak_threshold_i16,
+                    "min_peak_spacing_samples": min_peak_spacing_samples,
+                }),
+            });
+        }
+    }
+
+    let mut issues = Vec::new();
+    if candidate_frame_count == 0 {
+        issues.push("no_k16_k17_k20_candidate_frames".to_string());
+    }
+    if direct_rr_value_count + peak_spacing_candidate_count == 0 {
+        issues.push("no_direct_rr_or_waveform_peak_candidates".to_string());
+    }
+    if !(options.sample_rate_hz.is_finite() && options.sample_rate_hz > 0.0) {
+        issues.push("sample_rate_defaulted".to_string());
+    }
+    if !(options.peak_threshold_i16.is_finite() && options.peak_threshold_i16 > 0.0) {
+        issues.push("peak_threshold_defaulted".to_string());
+    }
+    let next_actions = beat_interval_candidate_scan_next_actions(
+        candidate_frame_count,
+        direct_rr_value_count,
+        peak_spacing_candidate_count,
+    );
+
+    Ok(BeatIntervalCandidateScanReport {
+        schema: BEAT_INTERVAL_CANDIDATE_SCAN_REPORT_SCHEMA.to_string(),
+        generated_by: "open-vitals-beat-interval-candidate-scan".to_string(),
+        pass: issues.is_empty(),
+        start_time: start.to_string(),
+        end_time: end.to_string(),
+        decoded_frame_count: decoded_rows.len(),
+        candidate_frame_count,
+        packet_counts,
+        direct_rr_value_count,
+        peak_spacing_candidate_count,
+        sample_rate_hz,
+        peak_threshold_i16,
+        min_peak_spacing_samples,
+        frame_summaries,
+        issues,
+        next_actions,
+    })
+}
+
+#[derive(Debug, Clone, Default)]
+struct BeatIntervalPeakSpacing {
+    peak_count: usize,
+    intervals_ms: Vec<f64>,
+}
+
+fn beat_interval_candidate_scan_next_actions(
+    candidate_frame_count: usize,
+    direct_rr_value_count: usize,
+    peak_spacing_candidate_count: usize,
+) -> Vec<MetricFeatureNextAction> {
+    let mut actions = Vec::new();
+    if candidate_frame_count == 0 {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.capture".to_string(),
+            reason: "no_k16_k17_k20_candidate_frames".to_string(),
+            action: "Run an aggregate capture while the band is on-body, then export the local bundle and rerun this scan.".to_string(),
+        });
+    }
+    if candidate_frame_count > 0 && direct_rr_value_count + peak_spacing_candidate_count == 0 {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.scan".to_string(),
+            reason: "no_direct_rr_or_waveform_peak_candidates".to_string(),
+            action: "Try a longer quiet on-body capture and keep probing command payloads until K16, K17, or richer K20 waveform bodies appear.".to_string(),
+        });
+    }
+    if direct_rr_value_count + peak_spacing_candidate_count > 0 {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.validation".to_string(),
+            reason: "candidate_source_unvalidated".to_string(),
+            action: "Plot the candidate frames and compare derived intervals against live HR or an external beat-interval reference before promoting them into HRV.".to_string(),
+        });
+    }
+    actions
+}
+
+fn body_summary_kind_name(summary: Option<&DataPacketBodySummary>) -> &'static str {
+    match summary {
+        Some(DataPacketBodySummary::NormalHistory { .. }) => "normal_history",
+        Some(DataPacketBodySummary::R17OpticalOrLabradorFiltered { .. }) => {
+            "r17_optical_or_labrador_filtered"
+        }
+        Some(DataPacketBodySummary::RawMotionK10 { .. }) => "raw_motion_k10",
+        Some(DataPacketBodySummary::RawMotionK21 { .. }) => "raw_motion_k21",
+        None => "raw",
+    }
+}
+
+fn i16_samples_from_bytes(bytes: &[u8]) -> Vec<i16> {
+    bytes
+        .chunks_exact(2)
+        .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]))
+        .collect()
+}
+
+fn mean_abs_i16(samples: &[i16]) -> f64 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    samples
+        .iter()
+        .map(|sample| i32::from(*sample).abs() as f64)
+        .sum::<f64>()
+        / samples.len() as f64
+}
+
+fn beat_interval_peak_spacing_candidates(
+    samples: &[i16],
+    sample_rate_hz: f64,
+    peak_threshold_i16: f64,
+    min_peak_spacing_samples: usize,
+) -> BeatIntervalPeakSpacing {
+    if samples.len() < 3 || !(sample_rate_hz.is_finite() && sample_rate_hz > 0.0) {
+        return BeatIntervalPeakSpacing::default();
+    }
+    let mean = samples.iter().map(|sample| f64::from(*sample)).sum::<f64>() / samples.len() as f64;
+    let mut peaks = Vec::new();
+    for index in 1..samples.len() - 1 {
+        let previous = samples[index - 1];
+        let current = samples[index];
+        let next = samples[index + 1];
+        if current <= previous || current < next {
+            continue;
+        }
+        if f64::from(current) - mean < peak_threshold_i16 {
+            continue;
+        }
+        if peaks
+            .last()
+            .is_some_and(|last_index| index - last_index < min_peak_spacing_samples)
+        {
+            continue;
+        }
+        peaks.push(index);
+    }
+    let intervals_ms = peaks
+        .windows(2)
+        .filter_map(|pair| {
+            let spacing_samples = pair[1].saturating_sub(pair[0]);
+            let interval_ms = spacing_samples as f64 * 1_000.0 / sample_rate_hz;
+            (300.0..=2_000.0)
+                .contains(&interval_ms)
+                .then(|| round_1(interval_ms))
+        })
+        .collect();
+    BeatIntervalPeakSpacing {
+        peak_count: peaks.len(),
+        intervals_ms,
+    }
+}
+
+fn interval_preview(direct_rr_values: &[i16], peak_intervals_ms: &[f64]) -> Vec<f64> {
+    direct_rr_values
+        .iter()
+        .map(|value| f64::from(*value))
+        .chain(peak_intervals_ms.iter().copied())
+        .take(16)
+        .collect()
+}
+
 pub fn run_recovery_sensor_discovery_report_for_store(
     store: &OpenVitalsStore,
     database_path: &str,
@@ -2885,7 +3248,9 @@ fn validate_respiratory_rate_validation_options(
     options: &RespiratoryRateCaptureValidationOptions,
 ) -> OpenVitalsResult<()> {
     if !options.tolerance_rpm.is_finite() || options.tolerance_rpm < 0.0 {
-        return Err(OpenVitalsError::message("tolerance_rpm must be nonnegative"));
+        return Err(OpenVitalsError::message(
+            "tolerance_rpm must be nonnegative",
+        ));
     }
     if let Some(value) = options.official_whoop_respiratory_rate_rpm {
         if !value.is_finite() || value <= 0.0 {
@@ -2901,7 +3266,9 @@ fn validate_oxygen_saturation_validation_options(
     options: &OxygenSaturationCaptureValidationOptions,
 ) -> OpenVitalsResult<()> {
     if !options.tolerance_percent.is_finite() || options.tolerance_percent < 0.0 {
-        return Err(OpenVitalsError::message("tolerance_percent must be nonnegative"));
+        return Err(OpenVitalsError::message(
+            "tolerance_percent must be nonnegative",
+        ));
     }
     if let Some(value) = options.official_whoop_oxygen_saturation_percent {
         if !value.is_finite() || !(0.0..=100.0).contains(&value) {
@@ -3126,7 +3493,7 @@ fn hrv_validation_next_actions(issues: &[String]) -> Vec<MetricFeatureNextAction
             scope: "hrv.local_candidate".to_string(),
             reason: "local_hrv_rmssd_missing".to_string(),
             action:
-                "Capture enough trusted R17/beat-interval packet evidence before comparing local HRV against labels."
+                "Capture enough trusted beat-interval packet or waveform evidence before comparing local HRV against labels."
                     .to_string(),
         });
     }
@@ -3138,7 +3505,7 @@ fn hrv_validation_next_actions(issues: &[String]) -> Vec<MetricFeatureNextAction
             scope: "hrv.validation_delta".to_string(),
             reason: "hrv_label_delta_out_of_tolerance".to_string(),
             action:
-                "Keep R17-derived HRV blocked and collect more owned captures or a beat-interval reference before validating the interval scale."
+                "Keep packet-derived HRV blocked and collect more owned captures or a beat-interval reference before validating the interval scale."
                     .to_string(),
         });
     }
@@ -3365,10 +3732,10 @@ fn hrv_widget_discovery(hrv_report: &HrvFeatureReport) -> RecoverySensorWidgetDi
     {
         blockers.insert("hrv_rr_interval_scale_unverified".to_string());
     }
-    if quality_flags
-        .iter()
-        .any(|flag| flag == "preliminary_r17_i16_rr_interval_candidate")
-    {
+    if quality_flags.iter().any(|flag| {
+        flag == "preliminary_beat_interval_i16_candidate"
+            || flag == "preliminary_r17_i16_rr_interval_candidate"
+    }) {
         blockers.insert("hrv_rr_interval_candidate_not_proven".to_string());
     }
     if hrv_report
@@ -3670,10 +4037,10 @@ fn recovery_sensor_discovery_next_actions(
 fn recovery_sensor_blocker_action(metric_id: &str, reason: &str) -> &'static str {
     match reason {
         "no_trusted_hrv_rr_intervals" | "no_trusted_hrv_features" | "not_enough_rr_intervals" => {
-            "Capture or import trusted overnight R17/optical frames with enough plausible beat-interval candidates."
+            "Capture or import trusted overnight beat-interval packets or waveform candidates with enough plausible intervals."
         }
         "hrv_rr_interval_scale_unverified" | "hrv_rr_interval_candidate_not_proven" => {
-            "Validate the R17 interval scale against owned packet captures and an external beat-interval reference before showing HRV."
+            "Validate the beat-interval source against owned packet captures and an external beat-interval reference before showing HRV."
         }
         "no_respiratory_rate_packet_candidate" => {
             "Run overnight/history captures and inspect decoded normal-history or optical packets for direct respiratory-rate evidence."
@@ -3703,7 +4070,7 @@ fn recovery_sensor_blocker_action(metric_id: &str, reason: &str) -> &'static str
         _ if metric_id == "oxygen_saturation_percent" => {
             "Keep oxygen saturation unavailable until a verified packet decoder exists."
         }
-        _ => "Resolve this sensor blocker before showing the metric as WHOOP-derived.",
+        _ => "Resolve this sensor blocker before showing the metric as device-derived.",
     }
 }
 
@@ -3740,12 +4107,12 @@ fn metric_feature_issue_action(
         "no_trusted_hrv_features" => (
             "hrv.current",
             "no_trusted_hrv_features",
-            "Capture or import trusted R17/optical frames before promoting HRV-derived metric inputs.",
+            "Capture or import trusted beat-interval packets or waveform candidates before promoting HRV-derived metric inputs.",
         ),
         "not_enough_rr_intervals" => (
             "hrv.rr_intervals",
             "not_enough_rr_intervals",
-            "Capture enough plausible R17/optical samples to build the required RR interval count.",
+            "Capture enough plausible beat-interval candidates to build the required RR interval count.",
         ),
         "hrv_score_errors" => (
             "hrv.score",
@@ -3805,7 +4172,7 @@ fn metric_feature_issue_action(
         "hrv_report_not_passed" | "hrv_rmssd_missing" => (
             "hrv.current",
             issue_reason(issue),
-            "Capture trusted R17/optical frames with enough plausible RR intervals, then rerun HRV features.",
+            "Capture trusted beat-interval packets or waveform candidates with enough plausible RR intervals, then rerun HRV features.",
         ),
         "hrv_baseline_report_not_passed" | "hrv_baseline_missing" => (
             "hrv.baseline",
@@ -3840,7 +4207,7 @@ fn metric_feature_issue_action(
         "provided_resp_temp_inputs_not_packet_derived" => (
             "recovery.provided_vitals",
             "provided_resp_temp_inputs_not_packet_derived",
-            "Use decoded WHOOP packet recovery vitals before promoting respiratory rate or temperature into recovery scoring.",
+            "Use decoded device-packet recovery vitals before promoting respiratory rate or temperature into recovery scoring.",
         ),
         "provided_resp_temp_provenance_untrusted" => (
             "recovery.provided_vitals",
@@ -4267,6 +4634,7 @@ fn hrv_feature_from_plan(
     trusted_frames: &BTreeMap<String, bool>,
 ) -> OpenVitalsResult<Option<HrvFeature>> {
     let mut quality_flags = BTreeSet::new();
+    quality_flags.insert("preliminary_beat_interval_i16_candidate".to_string());
     quality_flags.insert("preliminary_r17_i16_rr_interval_candidate".to_string());
     quality_flags.insert("rr_interval_scale_unvalidated".to_string());
     for warning in parse_warnings(row)? {
@@ -4316,7 +4684,7 @@ fn hrv_feature_from_plan(
         evidence_id: row.evidence_id.clone(),
         captured_at: row.captured_at.clone(),
         body_summary_kind: "r17_optical_or_labrador_filtered".to_string(),
-        source_signal: "r17_optical_or_labrador_filtered_i16_candidate".to_string(),
+        source_signal: "beat_interval_i16_candidate_unvalidated".to_string(),
         scale_basis: "preliminary_plausible_i16_as_rr_interval_ms".to_string(),
         rr_intervals_ms,
         raw_sample_count: plan.samples.parsed_count,

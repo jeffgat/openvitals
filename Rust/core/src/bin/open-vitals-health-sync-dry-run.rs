@@ -22,10 +22,10 @@ fn run() -> open_vitals_core::OpenVitalsResult<()> {
         "fixtures/synthetic/health_sync_dry_run_healthkit.json",
     )?;
     let output = path_value(&args, "--output")?;
-    let input_raw =
-        fs::read_to_string(&input_path).map_err(|source| OpenVitalsError::io(&input_path, source))?;
-    let input: HealthSyncDryRunInput =
-        serde_json::from_str(&input_raw).map_err(|source| OpenVitalsError::json(&input_path, source))?;
+    let input_raw = fs::read_to_string(&input_path)
+        .map_err(|source| OpenVitalsError::io(&input_path, source))?;
+    let input: HealthSyncDryRunInput = serde_json::from_str(&input_raw)
+        .map_err(|source| OpenVitalsError::json(&input_path, source))?;
     let report = run_health_sync_dry_run(&input);
 
     write_json_report(&report, output.as_deref())?;

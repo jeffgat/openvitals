@@ -2,14 +2,15 @@ use std::collections::BTreeMap;
 
 use open_vitals_core::{
     metrics::{
-        OPENVITALS_HRV_V0_ID, OPENVITALS_HRV_V0_VERSION, OPENVITALS_RECOVERY_V0_ID, OPENVITALS_SLEEP_V0_ID,
-        OPENVITALS_SLEEP_V1_ID, OPENVITALS_STRAIN_V0_ID, OPENVITALS_STRESS_V0_ID, HrvInput, RecoveryInput,
-        SleepInput, SleepModelStatus, SleepModelStatusInput, SleepNightHistoryInput,
-        SleepStageSegment, SleepV1Input, SleepV1Output, StrainInput, StressInput,
-        algorithm_run_record, built_in_algorithm_definitions,
-        built_in_default_algorithm_preferences, evaluate_sleep_model_status, open_vitals_hrv_v0,
-        open_vitals_recovery_v0, open_vitals_sleep_v0, open_vitals_sleep_v1, open_vitals_strain_v0, open_vitals_stress_v0,
-        hrv_run_record, sleep_baseline_from_history,
+        HrvInput, OPENVITALS_HRV_V0_ID, OPENVITALS_HRV_V0_VERSION, OPENVITALS_RECOVERY_V0_ID,
+        OPENVITALS_SLEEP_V0_ID, OPENVITALS_SLEEP_V1_ID, OPENVITALS_STRAIN_V0_ID,
+        OPENVITALS_STRESS_V0_ID, RecoveryInput, SleepInput, SleepModelStatus,
+        SleepModelStatusInput, SleepNightHistoryInput, SleepStageSegment, SleepV1Input,
+        SleepV1Output, StrainInput, StressInput, algorithm_run_record,
+        built_in_algorithm_definitions, built_in_default_algorithm_preferences,
+        evaluate_sleep_model_status, hrv_run_record, open_vitals_hrv_v0, open_vitals_recovery_v0,
+        open_vitals_sleep_v0, open_vitals_sleep_v1, open_vitals_strain_v0, open_vitals_stress_v0,
+        sleep_baseline_from_history,
     },
     store::OpenVitalsStore,
 };
@@ -726,7 +727,7 @@ fn open_vitals_sleep_v1_computes_hand_derived_component_score() {
     assert_eq!(output.algorithm_id, OPENVITALS_SLEEP_V1_ID);
     assert_eq!(output.model_status, SleepModelStatus::BaselineReady);
     assert_eq!(output.model_status_label, "Baseline ready");
-    assert_close(output.score_0_to_100, 82.01361892264234);
+    assert_close(output.score_0_to_100, 80.64194480408024);
     assert_close(output.sleep_need_minutes, 480.0);
     assert_close(output.rolling_sleep_debt_minutes, 90.0);
     assert_close(output.bedtime_deviation_minutes, 20.0);
@@ -749,7 +750,7 @@ fn open_vitals_sleep_v1_computes_hand_derived_component_score() {
     assert_eq!(output.quality_flags, result.quality_flags);
     assert_eq!(
         output.provenance["score_policy"],
-        "weighted_sleep_v1_components_with_fragmentation_guardrails"
+        "research_weighted_sleep_v1_components_with_confidence_metadata_and_fragmentation_guardrails"
     );
     assert_eq!(
         output.provenance["status_policy"],
@@ -811,6 +812,8 @@ fn open_vitals_sleep_v1_computes_hand_derived_component_score() {
         data_confidence.score_0_to_100,
         output.confidence_0_to_1 * output.sleep_window_confidence_0_to_1 * 0.92 * 100.0,
     );
+    assert_close(data_confidence.weight, 0.0);
+    assert_close(data_confidence.contribution, 0.0);
     assert_eq!(
         output.component_provenance["data_confidence"]["policy"],
         "combined_sleep_v1_confidence_window_confidence_and_coverage"
@@ -2241,7 +2244,7 @@ fn open_vitals_sleep_v1_input_and_output_round_trip_json() {
     );
     assert_eq!(
         serialized_output["provenance"]["score_policy"],
-        "weighted_sleep_v1_components_with_fragmentation_guardrails"
+        "research_weighted_sleep_v1_components_with_confidence_metadata_and_fragmentation_guardrails"
     );
     let output_round_trip: SleepV1Output = serde_json::from_value(serialized_output).unwrap();
     assert_eq!(output_round_trip, output);
@@ -2264,7 +2267,7 @@ fn open_vitals_strain_v0_computes_hand_derived_zone_and_hr_reserve_score() {
     assert_eq!(output.algorithm_id, OPENVITALS_STRAIN_V0_ID);
     assert_close(output.zone_load, 140.0);
     assert_close(output.average_hr_reserve_fraction, 0.5);
-    assert_close(output.score_0_to_21, 8.05);
+    assert_close(output.score_0_to_21, 8.73104974192709);
 }
 
 #[test]
@@ -2316,8 +2319,8 @@ fn open_vitals_recovery_v0_computes_hand_derived_interpretable_composite() {
 
     let output = result.output.unwrap();
     assert_eq!(output.algorithm_id, OPENVITALS_RECOVERY_V0_ID);
-    assert_close(output.score_0_to_100, 77.5);
-    assert_eq!(output.components.len(), 6);
+    assert_close(output.score_0_to_100, 77.6);
+    assert_eq!(output.components.len(), 5);
 }
 
 #[test]
@@ -2442,15 +2445,21 @@ fn flagship_score_fixtures_match_hand_derived_expected_outputs() {
         "../fixtures/synthetic/strain_open_vitals_v0_hand_derived.json"
     ))
     .unwrap();
-    assert_close(open_vitals_strain_v0(&strain).output.unwrap().score_0_to_21, 8.05);
+    assert_close(
+        open_vitals_strain_v0(&strain).output.unwrap().score_0_to_21,
+        8.73104974192709,
+    );
 
     let recovery: RecoveryInput = serde_json::from_str(include_str!(
         "../fixtures/synthetic/recovery_open_vitals_v0_hand_derived.json"
     ))
     .unwrap();
     assert_close(
-        open_vitals_recovery_v0(&recovery).output.unwrap().score_0_to_100,
-        77.5,
+        open_vitals_recovery_v0(&recovery)
+            .output
+            .unwrap()
+            .score_0_to_100,
+        77.6,
     );
 
     let stress: StressInput = serde_json::from_str(include_str!(
@@ -2458,7 +2467,10 @@ fn flagship_score_fixtures_match_hand_derived_expected_outputs() {
     ))
     .unwrap();
     assert_close(
-        open_vitals_stress_v0(&stress).output.unwrap().score_0_to_100,
+        open_vitals_stress_v0(&stress)
+            .output
+            .unwrap()
+            .score_0_to_100,
         50.0,
     );
 }

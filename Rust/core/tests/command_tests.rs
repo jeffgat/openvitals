@@ -165,7 +165,10 @@ fn command_definitions_cover_generated_protocol_command_map_ids() {
         .iter()
         .filter_map(|definition| definition.command_number)
         .collect();
-    let missing: Vec<_> = generated_ids.difference(&open_vitals_ids).copied().collect();
+    let missing: Vec<_> = generated_ids
+        .difference(&open_vitals_ids)
+        .copied()
+        .collect();
     assert!(
         missing.is_empty(),
         "missing generated protocol command ids: {missing:?}"
@@ -2273,8 +2276,8 @@ fn ready_command_evidence_for_definition(definition: &CommandDefinition) -> Comm
     let command_number = definition
         .command_number
         .expect("command definitions used for direct-send gates need command numbers");
-    let command =
-        u8::try_from(command_number).expect("OpenVitals command frame builder expects u8 command ids");
+    let command = u8::try_from(command_number)
+        .expect("OpenVitals command frame builder expects u8 command ids");
     let frame = hex::encode(build_v5_command_frame(1, command, &[1]));
     let critical = definition.risk_gate == CommandRiskGate::CriticalStateChange;
     with_trusted_capture(CommandEvidence {
@@ -2330,7 +2333,9 @@ fn ready_select_wrist_gate(
     direct_send_gate_from_result("select_wrist", Some(ready))
 }
 
-fn ready_start_firmware_gate(critical_frame: &str) -> open_vitals_core::commands::CommandDirectSendGate {
+fn ready_start_firmware_gate(
+    critical_frame: &str,
+) -> open_vitals_core::commands::CommandDirectSendGate {
     let report = validate_commands(&[critical_command_evidence(
         critical_frame,
         command_failure_response_frame_hex(142),

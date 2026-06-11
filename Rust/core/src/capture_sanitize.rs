@@ -154,7 +154,8 @@ pub fn sanitize_capture_path(
 
     if input_path.is_dir() {
         reject_output_inside_input(input_path, output_path)?;
-        fs::create_dir_all(output_path).map_err(|source| OpenVitalsError::io(output_path, source))?;
+        fs::create_dir_all(output_path)
+            .map_err(|source| OpenVitalsError::io(output_path, source))?;
         let mut paths = Vec::new();
         collect_files(input_path, &mut paths)?;
         paths.sort();
@@ -747,8 +748,9 @@ fn write_sanitize_manifest(
     let manifest_json = serde_json::to_vec_pretty(&manifest).map_err(|source| {
         OpenVitalsError::message(format!("cannot serialize sanitize manifest: {source}"))
     })?;
-    fs::write(output_path.join("sanitize-manifest.json"), manifest_json)
-        .map_err(|source| OpenVitalsError::io(output_path.join("sanitize-manifest.json"), source))?;
+    fs::write(output_path.join("sanitize-manifest.json"), manifest_json).map_err(|source| {
+        OpenVitalsError::io(output_path.join("sanitize-manifest.json"), source)
+    })?;
     Ok(())
 }
 

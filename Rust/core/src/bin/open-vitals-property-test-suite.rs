@@ -41,7 +41,10 @@ fn optional_u64(args: &[String], name: &str) -> open_vitals_core::OpenVitalsResu
         .transpose()?)
 }
 
-fn optional_usize(args: &[String], name: &str) -> open_vitals_core::OpenVitalsResult<Option<usize>> {
+fn optional_usize(
+    args: &[String],
+    name: &str,
+) -> open_vitals_core::OpenVitalsResult<Option<usize>> {
     Ok(value(args, name)?
         .map(|raw| {
             raw.parse::<usize>().map_err(|source| {

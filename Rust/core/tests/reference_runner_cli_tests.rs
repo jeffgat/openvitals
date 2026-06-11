@@ -186,7 +186,10 @@ fn ggir_sleep_summary_adapter_emits_external_reference_contract() {
     assert_eq!(report["algorithm_id"], "reference.sleep.ggir_summary.v1");
     assert_eq!(report["provider"], "external.ggir.sleep");
     assert_eq!(report["provider_version"], "3.3-4");
-    assert_eq!(report["input_schema"], "open_vitals.sleep-ggir-summary-input.v1");
+    assert_eq!(
+        report["input_schema"],
+        "open_vitals.sleep-ggir-summary-input.v1"
+    );
     assert_eq!(
         report["output_units"]["wake_after_sleep_onset_minutes"],
         "minutes"
@@ -424,7 +427,9 @@ fn reference_runner_executes_named_pyhrv_adapter_and_stores_run() {
 fn reference_runner_executes_named_pyactigraphy_sadeh_adapter_and_stores_run() {
     let tempdir = tempfile::tempdir().unwrap();
     let report_path = tempdir.path().join("pyactigraphy-reference-report.json");
-    let db_path = tempdir.path().join("open-vitals-pyactigraphy-reference.sqlite");
+    let db_path = tempdir
+        .path()
+        .join("open-vitals-pyactigraphy-reference.sqlite");
 
     let status = Command::new(env!("CARGO_BIN_EXE_open-vitals-reference-algo-runner"))
         .current_dir(env!("CARGO_MANIFEST_DIR"))

@@ -20,11 +20,11 @@ extension OpenVitalsAppModel {
     return nil
   }
 
-  static func intString(_ value: Any?) -> String {
+  nonisolated static func intString(_ value: Any?) -> String {
     intValue(value).map(String.init) ?? "?"
   }
 
-  static func intValue(_ value: Any?) -> Int? {
+  nonisolated static func intValue(_ value: Any?) -> Int? {
     if let value = value as? Int {
       return value
     }
@@ -561,8 +561,8 @@ extension OpenVitalsAppModel {
     guard !metrics.isEmpty else {
       return
     }
-    do {
-      let report = try rust.request(
+    OpenVitalsRustBridge.performInBackground(qos: .utility, {
+      try OpenVitalsRustBridge().request(
         method: "activity.attach_metrics",
         args: [
           "database_path": HealthDataStore.defaultDatabasePath(),
@@ -570,6 +570,12 @@ extension OpenVitalsAppModel {
           "metrics": metrics,
         ]
       )
+    }) { [weak self] result in
+      guard let self else {
+        return
+      }
+      switch result {
+      case .success(let report):
       let inserted = intValue(report["inserted"]) ?? 0
       let existing = intValue(report["existing"]) ?? 0
       ble.record(
@@ -578,8 +584,9 @@ extension OpenVitalsAppModel {
         title: "activity.metrics.store.ok",
         body: "inserted=\(inserted) existing=\(existing) requested=\(metrics.count)"
       )
-    } catch {
+      case .failure(let error):
       ble.record(level: .warn, source: "rust", title: "activity.metrics.store.failed", body: "count=\(metrics.count): \(String(describing: error))")
+      }
     }
   }
 

@@ -96,11 +96,6 @@ extension OpenVitalsAppModel {
       .prefix(8)
       .map { "\($0.key)=\($0.value)" }
       .joined(separator: " | ")
-    ble.record(
-      source: "health.packet_capture",
-      title: "summary",
-      body: "\(healthPacketCaptureTargetSummary) last=\(healthPacketCaptureLastPacketSummary) families=\(topFamilies.isEmpty ? "none" : topFamilies) signals=\(signalCounts.isEmpty ? "none" : signalCounts)"
-    )
     writeCaptureStatusSnapshot(topFamilies: topFamilies, signalCounts: signalCounts)
   }
 
@@ -144,7 +139,7 @@ extension OpenVitalsAppModel {
     }
   }
 
-  static func healthPacketCaptureFamily(for parsed: [String: Any], capturedAt: Date) -> HealthPacketCaptureFamily {
+  nonisolated static func healthPacketCaptureFamily(for parsed: [String: Any], capturedAt: Date) -> HealthPacketCaptureFamily {
     let packetName = parsed["packet_type_name"] as? String ?? "unknown"
     let packetType = intString(parsed["packet_type"])
     guard let payload = parsed["parsed_payload"] as? [String: Any] else {
@@ -201,7 +196,7 @@ extension OpenVitalsAppModel {
     )
   }
 
-  static func healthPacketCaptureFamily(for compact: NotificationFrameCompactSummary, capturedAt: Date) -> HealthPacketCaptureFamily {
+  nonisolated static func healthPacketCaptureFamily(for compact: NotificationFrameCompactSummary, capturedAt: Date) -> HealthPacketCaptureFamily {
     let packetName = compact.packetTypeName ?? "unknown"
     let packetType = compact.packetType.map(String.init) ?? "?"
     guard let payloadKind = compact.payloadKind else {
@@ -251,7 +246,7 @@ extension OpenVitalsAppModel {
     )
   }
 
-  static func healthPacketCaptureStatus(packetK: Int?, bodyKind: String) -> HealthPacketCaptureFamilyStatus {
+  nonisolated static func healthPacketCaptureStatus(packetK: Int?, bodyKind: String) -> HealthPacketCaptureFamilyStatus {
     guard let packetK else {
       return .unresolved
     }
@@ -260,14 +255,14 @@ extension OpenVitalsAppModel {
       return .expected
     case 10, 11:
       return .target
-    case 17, 18, 21, 24, 25, 26, 47:
+    case 16, 17, 18, 21, 24, 25, 26, 47:
       return .target
     default:
       return bodyKind == "raw" ? .unresolved : .unknown
     }
   }
 
-  static func healthPacketCaptureEventStatus(eventID: Int?, eventName: String) -> HealthPacketCaptureFamilyStatus {
+  nonisolated static func healthPacketCaptureEventStatus(eventID: Int?, eventName: String) -> HealthPacketCaptureFamilyStatus {
     if eventID == 17 || eventName == "TEMPERATURE_LEVEL" {
       return .target
     }
@@ -280,7 +275,7 @@ extension OpenVitalsAppModel {
     return .unknown
   }
 
-  static func healthPacketCaptureFamilyName(packetK: Int) -> String {
+  nonisolated static func healthPacketCaptureFamilyName(packetK: Int) -> String {
     switch packetK {
     case 2:
       return "Status K2"
@@ -288,6 +283,8 @@ extension OpenVitalsAppModel {
       return "Motion/HR"
     case 11:
       return "Raw Stream"
+    case 16:
+      return "Raw ECG K16"
     case 17:
       return "Optical R17"
     case 18:
@@ -319,6 +316,7 @@ extension OpenVitalsAppModel {
     let motion = countForIDs("data.k10.")
     let rawStream = countForIDs("data.k11.")
     let realtimeStatus = countForIDs("data.k2.")
+    let rawEcg = countForIDs("data.k16.")
     let rawResearch = countForIDs("data.k20.")
     let heartRate = motion
     let r21 = countForIDs("data.k21.")
@@ -335,14 +333,14 @@ extension OpenVitalsAppModel {
       .reduce(0) { $0 + $1.count }
     if activeHealthPacketCapture?.mode == .temperature {
       healthPacketCaptureTargetSummary = "frames \(healthPacketCaptureFrameCount) | K18 \(k18History) | K24 \(k24History) | K47 \(k47History) | event17 \(eventTemperature) | metadata \(metadataEvents) | temp \(temperature) | unknown \(unresolved)"
-    } else if r21 + optical + pulse + temperature > 0 {
-      healthPacketCaptureTargetSummary = "frames \(healthPacketCaptureFrameCount) | motion \(motion) | K11 \(rawStream) | K20 \(rawResearch) | K2 \(realtimeStatus) | HR \(heartRate) | R21 \(r21) | optical \(optical) | pulse \(pulse) | K47 \(k47History) | metadata \(metadataEvents) | temp \(temperature) | unknown \(unresolved)"
+    } else if rawEcg + r21 + optical + pulse + temperature > 0 {
+      healthPacketCaptureTargetSummary = "frames \(healthPacketCaptureFrameCount) | motion \(motion) | K11 \(rawStream) | K16 \(rawEcg) | K20 \(rawResearch) | K2 \(realtimeStatus) | HR \(heartRate) | R21 \(r21) | optical \(optical) | pulse \(pulse) | K47 \(k47History) | metadata \(metadataEvents) | temp \(temperature) | unknown \(unresolved)"
     } else {
-      healthPacketCaptureTargetSummary = "frames \(healthPacketCaptureFrameCount) | motion \(motion) | K11 \(rawStream) | K20 \(rawResearch) | K2 \(realtimeStatus) | HR \(heartRate) | K47 \(k47History) | metadata \(metadataEvents) | activity \(activityDetectionStatus) | unknown \(unresolved)"
+      healthPacketCaptureTargetSummary = "frames \(healthPacketCaptureFrameCount) | motion \(motion) | K11 \(rawStream) | K16 \(rawEcg) | K20 \(rawResearch) | K2 \(realtimeStatus) | HR \(heartRate) | K47 \(k47History) | metadata \(metadataEvents) | activity \(activityDetectionStatus) | unknown \(unresolved)"
     }
   }
 
-  static func extractHeartRate(from parsed: [String: Any]) -> Int? {
+  nonisolated static func extractHeartRate(from parsed: [String: Any]) -> Int? {
     guard
       let payload = parsed["parsed_payload"] as? [String: Any],
       payload["kind"] as? String == "data_packet",
@@ -354,7 +352,7 @@ extension OpenVitalsAppModel {
     return intValue(body["heart_rate"])
   }
 
-  static func extractMovementPacket(
+  nonisolated static func extractMovementPacket(
     from parsed: [String: Any],
     compact: NotificationFrameCompactSummary?,
     capturedAt: Date,
@@ -375,19 +373,19 @@ extension OpenVitalsAppModel {
     )
   }
 
-  static func extractWhoopEvent(from parsed: [String: Any], capturedAt: Date) -> WhoopEventSample? {
+  nonisolated static func extractWhoopEvent(from parsed: [String: Any], capturedAt: Date) -> WhoopEventSample? {
     WhoopEventSample.fromParsedFrame(parsed, capturedAt: capturedAt)
   }
 
-  static func extractWhoopEvent(from compact: NotificationFrameCompactSummary?, capturedAt: Date) -> WhoopEventSample? {
+  nonisolated static func extractWhoopEvent(from compact: NotificationFrameCompactSummary?, capturedAt: Date) -> WhoopEventSample? {
     compact.flatMap { WhoopEventSample.fromCompactSummary($0, capturedAt: capturedAt) }
   }
 
-  static func extractWhoopDataSignal(from parsed: [String: Any], capturedAt: Date) -> WhoopDataSignalSample? {
+  nonisolated static func extractWhoopDataSignal(from parsed: [String: Any], capturedAt: Date) -> WhoopDataSignalSample? {
     WhoopDataSignalSample.fromParsedFrame(parsed, capturedAt: capturedAt)
   }
 
-  static func extractWhoopDataSignal(from compact: NotificationFrameCompactSummary?, capturedAt: Date) -> WhoopDataSignalSample? {
+  nonisolated static func extractWhoopDataSignal(from compact: NotificationFrameCompactSummary?, capturedAt: Date) -> WhoopDataSignalSample? {
     compact.flatMap { WhoopDataSignalSample.fromCompactSummary($0, capturedAt: capturedAt) }
   }
 
@@ -602,6 +600,13 @@ extension OpenVitalsAppModel {
     }
     publishPipelinePerformanceStatus(status)
 
+    let shouldLogPerformanceEvent = elapsedMS >= Self.pipelinePerformanceLogMinElapsedMS
+      || queueDepth >= Self.pipelinePerformanceLogMinQueueDepth
+      || queueHighWatermark >= Self.pipelinePerformanceLogMinHighWatermark
+    guard shouldLogPerformanceEvent else {
+      return
+    }
+
     let now = Date()
     pipelinePerformanceLogLock.lock()
     let shouldLog = now.timeIntervalSince(lastPipelinePerformanceLoggedAt) >= Self.pipelinePerformanceLogInterval
@@ -613,7 +618,7 @@ extension OpenVitalsAppModel {
       return
     }
     ble.record(
-      level: elapsedMS >= 50 || queueDepth > 4 ? .warn : .debug,
+      level: .warn,
       source: "performance.pipeline",
       title: "rust.bridge.timing",
       body: status

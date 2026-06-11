@@ -1450,7 +1450,9 @@ fn health_cleanup_scope_ready(blocked_deletes: &[BlockedHealthDelete]) -> bool {
             reason.ends_with("_required")
                 || matches!(
                     reason.as_str(),
-                    "outside_backfill_window" | "end_time_not_after_start_time" | "not_open_vitals_owned"
+                    "outside_backfill_window"
+                        | "end_time_not_after_start_time"
+                        | "not_open_vitals_owned"
                 )
         })
 }
@@ -1544,7 +1546,8 @@ fn next_actions_for_health_reasons(
 
 fn health_sync_issue_action(issue: &str) -> String {
     if issue.starts_with("unsupported schema ") {
-        return "Use open_vitals.health-sync-dry-run.v1 input before planning Health sync.".to_string();
+        return "Use open_vitals.health-sync-dry-run.v1 input before planning Health sync."
+            .to_string();
     }
     if issue == "backfill.start_required" {
         return "Choose a Health sync backfill start before planning Health sync.".to_string();

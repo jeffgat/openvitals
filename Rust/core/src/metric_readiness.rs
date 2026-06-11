@@ -10,7 +10,8 @@ use crate::{
     metrics::built_in_algorithm_definitions,
 };
 
-pub const METRIC_INPUT_READINESS_REPORT_SCHEMA: &str = "open_vitals.metric-input-readiness-report.v1";
+pub const METRIC_INPUT_READINESS_REPORT_SCHEMA: &str =
+    "open_vitals.metric-input-readiness-report.v1";
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MetricInputReadinessOptions {
@@ -324,9 +325,9 @@ fn input_readiness(
         .sum();
     let mut blocker_reasons = Vec::new();
     if !plan.required_summary_kinds.is_empty() && trusted_evidence_count == 0 {
+        let evidence_label = required_evidence_label(input_name, &plan);
         blocker_reasons.push(format!(
-            "no trusted owned capture evidence for {}",
-            plan.required_summary_kinds.join("|")
+            "no trusted owned capture evidence for {evidence_label}",
         ));
     }
     if !plan.extraction_ready {
@@ -370,7 +371,16 @@ fn next_actions_for_input(
     let mut actions = Vec::new();
     if !plan.required_summary_kinds.is_empty() && trusted_evidence_count == 0 {
         let summaries = plan.required_summary_kinds.join("|");
-        let action = if candidate_observation_count == 0 {
+        let evidence_label = required_evidence_label(input_name, plan);
+        let action = if input_needs_beat_interval_evidence(input_name) {
+            if candidate_observation_count == 0 {
+                "Import or live-capture owned frames that decode to direct beat intervals, raw ECG/optical beat candidates, or validated waveform candidates, then rerun Capture Trust and Metric Inputs.".to_string()
+            } else {
+                format!(
+                    "Replace synthetic-only {summaries} beat candidates with owned live BLE/File captures, then rerun Capture Trust and Metric Inputs."
+                )
+            }
+        } else if candidate_observation_count == 0 {
             format!(
                 "Import or live-capture owned frames that decode as {summaries}, then rerun Capture Trust and Metric Inputs."
             )
@@ -381,7 +391,7 @@ fn next_actions_for_input(
         };
         actions.push(MetricInputNextAction {
             scope: input_name.to_string(),
-            reason: format!("no trusted owned capture evidence for {summaries}"),
+            reason: format!("no trusted owned capture evidence for {evidence_label}"),
             action,
         });
     }
@@ -410,7 +420,7 @@ fn extraction_next_action(input_name: &str, blocker: &str) -> String {
             "Validate normal-history respiratory-rate candidate offsets against owned captures and product/API respiratory values, then allow score promotion.".to_string()
         }
         "hrv_rr_interval_scale_unverified" => {
-            "Validate the R17 interval scale against owned packet captures and an external beat-interval reference before allowing HRV or stress score promotion.".to_string()
+            "Validate a beat-interval source against owned packet captures and an external beat-interval reference before allowing HRV or stress score promotion.".to_string()
         }
         "temperature_units_unverified" => {
             "Validate temperature event/history units and delta semantics against owned captures before allowing recovery score promotion.".to_string()
@@ -430,6 +440,21 @@ fn dedupe_next_actions(actions: Vec<MetricInputNextAction>) -> Vec<MetricInputNe
         }
     }
     deduped
+}
+
+fn input_needs_beat_interval_evidence(input_name: &str) -> bool {
+    matches!(
+        input_name,
+        "rr_intervals_ms" | "hrv_rmssd_ms" | "hrv_baseline_rmssd_ms"
+    )
+}
+
+fn required_evidence_label(input_name: &str, plan: &InputPlan) -> String {
+    if input_needs_beat_interval_evidence(input_name) {
+        "validated beat-interval candidates".to_string()
+    } else {
+        plan.required_summary_kinds.join("|")
+    }
 }
 
 fn summary_evidence(correlation: &CaptureCorrelationReport) -> BTreeMap<String, SummaryEvidence> {
@@ -501,7 +526,7 @@ fn activity_session_promotion_next_actions(
 fn input_plan(input_name: &str) -> InputPlan {
     match input_name {
         "rr_intervals_ms" => InputPlan {
-            source_signal: "r17_optical_rr_interval_candidates",
+            source_signal: "validated_beat_interval_candidates",
             required_summary_kinds: &["r17_optical_or_labrador_filtered"],
             extraction_ready: false,
             blocker: "hrv_rr_interval_scale_unverified",

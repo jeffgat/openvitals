@@ -685,7 +685,10 @@ fn recovery_sensor_discovery_keeps_unverified_health_widgets_unavailable() {
     .unwrap();
 
     assert!(!report.pass);
-    assert_eq!(report.schema, "open_vitals.recovery-sensor-discovery-report.v1");
+    assert_eq!(
+        report.schema,
+        "open_vitals.recovery-sensor-discovery-report.v1"
+    );
     assert_eq!(report.widgets.len(), 4);
 
     let hrv = widget(&report.widgets, "hrv_rmssd_ms");
@@ -1955,7 +1958,7 @@ fn recovery_feature_score_report_builds_local_recovery_from_trusted_feature_repo
     assert_close(input.respiratory_rate_baseline_rpm, 14.0);
     assert_close(input.skin_temp_delta_c, 0.0);
     assert_close(input.sleep_score_0_to_100, 80.75);
-    assert_close(input.prior_strain_0_to_21, 5.25);
+    assert_close(input.prior_strain_0_to_21, 5.151225377542748);
     let result = report.score_result.unwrap();
     assert_eq!(
         result.provenance["provided_vitals"]["source"],
@@ -1972,7 +1975,7 @@ fn recovery_feature_score_report_builds_local_recovery_from_trusted_feature_repo
             .any(|flag| flag == "provided_resp_temp_inputs_not_packet_derived")
     );
     let output = result.output.unwrap();
-    assert_close(output.score_0_to_100, 62.1125);
+    assert_close(output.score_0_to_100, 54.47822132129922);
 }
 
 #[test]
@@ -2228,7 +2231,7 @@ fn strain_feature_score_report_builds_local_strain_from_trusted_features() {
     let output = result.output.unwrap();
     assert_close(output.zone_load, 60.0);
     assert_close(output.average_hr_reserve_fraction, 0.5);
-    assert_close(output.score_0_to_21, 5.25);
+    assert_close(output.score_0_to_21, 5.151225377542748);
 }
 
 #[test]

@@ -11,48 +11,48 @@ struct EnergyAndStressChart: View {
     GeometryReader { proxy in
       if points.isEmpty {
         RoundedRectangle(cornerRadius: 8, style: .continuous)
-          .fill(Color(.tertiarySystemFill))
+          .fill(OpenVitalsTheme.separator)
           .overlay {
             Text("No energy or stress data")
               .font(.caption.weight(.semibold))
-              .foregroundStyle(.secondary)
+              .foregroundStyle(OpenVitalsTheme.textSecondary)
           }
       } else {
         ZStack(alignment: .topLeading) {
           RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(Color(.secondarySystemGroupedBackground))
+            .fill(OpenVitalsTheme.surface)
           ForEach(Array(points.enumerated()), id: \.element.id) { index, point in
             if point.isSleepWindow {
               Rectangle()
-                .fill(Color.indigo.opacity(0.10))
+                .fill(OpenVitalsTheme.accent.opacity(0.08))
                 .frame(width: max(proxy.size.width / CGFloat(points.count), 28), height: proxy.size.height - 28)
                 .position(x: xPosition(index: index, width: proxy.size.width), y: (proxy.size.height - 28) / 2)
             }
             Capsule()
-              .fill(point.stress > 55 ? Color.red.opacity(0.55) : Color.orange.opacity(0.40))
+              .fill(point.stress > 55 ? OpenVitalsTheme.bronze.opacity(0.55) : OpenVitalsTheme.gold.opacity(0.40))
               .frame(width: 6, height: max(8, CGFloat(point.usage)))
               .position(x: xPosition(index: index, width: proxy.size.width), y: proxy.size.height - 24 - CGFloat(point.usage) / 2)
             if point.isChargeEvent {
               Circle()
-                .fill(Color.green)
+                .fill(OpenVitalsTheme.champagne)
                 .frame(width: 8, height: 8)
                 .position(x: xPosition(index: index, width: proxy.size.width), y: proxy.size.height - 20)
             }
           }
           energyPath(in: proxy.size)
-            .stroke(.teal, style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+            .stroke(OpenVitalsTheme.champagne, style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
           stressPath(in: proxy.size)
-            .stroke(.yellow, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+            .stroke(OpenVitalsTheme.bronze, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
           if let selectedPoint,
              let selectedIndex = points.firstIndex(where: { $0.id == selectedPoint.id }) {
             let x = xPosition(index: selectedIndex, width: proxy.size.width)
             Rectangle()
-              .fill(Color.primary.opacity(0.18))
+              .fill(OpenVitalsTheme.accent.opacity(0.18))
               .frame(width: 1, height: proxy.size.height - 28)
               .position(x: x, y: (proxy.size.height - 28) / 2)
             Text("Energy \(Int(selectedPoint.energy)) | Stress \(Int(selectedPoint.stress))")
               .font(.caption2.weight(.semibold))
-              .foregroundStyle(.primary)
+              .foregroundStyle(OpenVitalsTheme.textPrimary)
               .padding(.horizontal, 7)
               .padding(.vertical, 4)
               .background(.thinMaterial, in: Capsule())
@@ -62,7 +62,7 @@ struct EnergyAndStressChart: View {
             ForEach(points) { point in
               Text(point.timeLabel)
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(OpenVitalsTheme.textSecondary)
                 .frame(maxWidth: .infinity)
             }
           }
@@ -76,7 +76,7 @@ struct EnergyAndStressChart: View {
             Text("0%")
           }
           .font(.caption2)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(OpenVitalsTheme.textSecondary)
           .frame(width: proxy.size.width - 8, height: proxy.size.height - 28, alignment: .trailing)
           .padding(.top, 8)
         }
@@ -135,7 +135,7 @@ struct StressDailyChart: View {
         .frame(height: 132)
       Text(summary.hasData ? timelineSummary : "Stress needs local heart-rate samples from today.")
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(OpenVitalsTheme.textSecondary)
     }
     .padding(14)
     .healthCardSurface()
@@ -165,12 +165,12 @@ struct StressBreakdownRows: View {
         if summary.hasData {
           Text("Duration: \(HealthDataStore.minutesText(totalDurationMinutes))")
             .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(OpenVitalsTheme.textSecondary)
         }
       }
-      BreakdownRow(label: "High", value: percentText(summary.high.percent), tint: .red, width: summary.high.percent)
-      BreakdownRow(label: "Med", value: percentText(summary.medium.percent), tint: .orange, width: summary.medium.percent)
-      BreakdownRow(label: "Low", value: percentText(summary.low.percent), tint: .teal, width: summary.low.percent)
+      BreakdownRow(label: "High", value: percentText(summary.high.percent), tint: OpenVitalsTheme.bronze, width: summary.high.percent)
+      BreakdownRow(label: "Med", value: percentText(summary.medium.percent), tint: OpenVitalsTheme.gold, width: summary.medium.percent)
+      BreakdownRow(label: "Low", value: percentText(summary.low.percent), tint: OpenVitalsTheme.champagne, width: summary.low.percent)
     }
     .padding(14)
     .healthCardSurface()
@@ -192,23 +192,23 @@ struct StressTimelineChart: View {
     GeometryReader { proxy in
       if windows.isEmpty {
         RoundedRectangle(cornerRadius: 8, style: .continuous)
-          .fill(Color(.tertiarySystemFill))
+          .fill(OpenVitalsTheme.separator)
           .overlay {
             Text("No stress timeline")
               .font(.caption.weight(.semibold))
-              .foregroundStyle(.secondary)
+              .foregroundStyle(OpenVitalsTheme.textSecondary)
           }
       } else {
         ZStack(alignment: .topLeading) {
           RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(Color(.secondarySystemGroupedBackground))
+            .fill(OpenVitalsTheme.surface)
           ForEach([25, 50, 75, 100], id: \.self) { value in
             let y = yPosition(value: Double(value), height: proxy.size.height)
             Path { path in
               path.move(to: CGPoint(x: 8, y: y))
               path.addLine(to: CGPoint(x: proxy.size.width - 30, y: y))
             }
-            .stroke(Color.primary.opacity(0.10), style: StrokeStyle(lineWidth: 1, dash: [4, 5]))
+            .stroke(OpenVitalsTheme.separator, style: StrokeStyle(lineWidth: 1, dash: [4, 5]))
           }
           ForEach(Array(0..<max(windows.count - 1, 0)), id: \.self) { index in
             Path { path in
@@ -223,7 +223,7 @@ struct StressTimelineChart: View {
           ForEach(Array(windows.enumerated()), id: \.element.id) { index, window in
             if window.isSleepWindow {
               Rectangle()
-                .fill(Color.indigo.opacity(0.10))
+                .fill(OpenVitalsTheme.accent.opacity(0.08))
                 .frame(width: max(proxy.size.width / CGFloat(max(windows.count, 1)), 10), height: proxy.size.height - 24)
                 .position(x: chartPoint(index: index, size: proxy.size).x, y: (proxy.size.height - 24) / 2)
             }
@@ -243,7 +243,7 @@ struct StressTimelineChart: View {
             Text("0")
           }
           .font(.caption2)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(OpenVitalsTheme.textSecondary)
           .frame(width: proxy.size.width - 8, height: proxy.size.height - 22, alignment: .trailing)
           .padding(.top, 6)
         }
@@ -275,12 +275,12 @@ struct StressTimelineChart: View {
 
   private func color(for stress: Double) -> Color {
     if stress >= 66 {
-      return .red
+      return OpenVitalsTheme.bronze
     }
     if stress >= 33 {
-      return .yellow
+      return OpenVitalsTheme.gold
     }
-    return .teal
+    return OpenVitalsTheme.champagne
   }
 }
 
@@ -288,10 +288,10 @@ struct HeartRateZonesSection: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       HealthSectionTitle("Heart Rate Zones")
-      BreakdownRow(label: "Zone 5", value: "0 min", tint: .red, width: 0)
-      BreakdownRow(label: "Zone 4", value: "0 min", tint: .orange, width: 0)
-      BreakdownRow(label: "Zone 3", value: "0 min", tint: .yellow, width: 0)
-      BreakdownRow(label: "Zone 2", value: "0 min", tint: .green, width: 0)
+      BreakdownRow(label: "Zone 5", value: "0 min", tint: OpenVitalsTheme.bronze, width: 0)
+      BreakdownRow(label: "Zone 4", value: "0 min", tint: OpenVitalsTheme.gold, width: 0)
+      BreakdownRow(label: "Zone 3", value: "0 min", tint: OpenVitalsTheme.champagne, width: 0)
+      BreakdownRow(label: "Zone 2", value: "0 min", tint: OpenVitalsTheme.accentMuted, width: 0)
     }
     .padding(14)
     .healthCardSurface()
@@ -311,7 +311,7 @@ struct BreakdownRow: View {
         .frame(width: 74, alignment: .leading)
       GeometryReader { proxy in
         ZStack(alignment: .leading) {
-          Capsule().fill(Color(.tertiarySystemFill))
+          Capsule().fill(OpenVitalsTheme.separator)
           Capsule()
             .fill(tint)
             .frame(width: proxy.size.width * min(max(width, 0), 1))
@@ -320,7 +320,7 @@ struct BreakdownRow: View {
       .frame(height: 8)
       Text(value)
         .font(.caption.weight(.semibold))
-        .foregroundStyle(.secondary)
+        .foregroundStyle(OpenVitalsTheme.textSecondary)
         .frame(width: 54, alignment: .trailing)
     }
   }
@@ -335,7 +335,9 @@ struct HealthSectionTitle: View {
 
   var body: some View {
     Text(title)
-      .font(.title3.bold())
+      .font(.subheadline.weight(.bold))
+      .foregroundStyle(OpenVitalsTheme.textSecondary)
+      .textCase(.uppercase)
       .frame(maxWidth: .infinity, alignment: .leading)
   }
 }
@@ -344,23 +346,23 @@ extension View {
   func healthDashboardSurface(tint: Color, tintOpacity: Double = 0.06) -> some View {
     background {
       ZStack {
-        RoundedRectangle(cornerRadius: 18, style: .continuous)
-          .fill(Color(.secondarySystemGroupedBackground))
-        RoundedRectangle(cornerRadius: 18, style: .continuous)
-          .fill(tint.opacity(tintOpacity))
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+          .fill(OpenVitalsTheme.surface)
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+          .fill(OpenVitalsTheme.accent.opacity(tintOpacity))
       }
     }
     .overlay {
-      RoundedRectangle(cornerRadius: 18, style: .continuous)
-        .strokeBorder(tint.opacity(0.13))
+      RoundedRectangle(cornerRadius: 8, style: .continuous)
+        .strokeBorder(OpenVitalsTheme.border, lineWidth: 1)
     }
   }
 
   func healthCardSurface() -> some View {
-    background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    background(OpenVitalsTheme.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
       .overlay {
         RoundedRectangle(cornerRadius: 8, style: .continuous)
-          .strokeBorder(Color.primary.opacity(0.06))
+          .strokeBorder(OpenVitalsTheme.border, lineWidth: 1)
       }
   }
 }

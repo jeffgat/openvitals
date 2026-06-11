@@ -6,8 +6,9 @@ use std::{
 
 use open_vitals_core::{
     bridge::{
-        BRIDGE_RESPONSE_SCHEMA, BridgeResponse, open_vitals_bridge_free_string, open_vitals_bridge_handle_json,
-        open_vitals_core_version_json, handle_bridge_request_json,
+        BRIDGE_RESPONSE_SCHEMA, BridgeResponse, handle_bridge_request_json,
+        open_vitals_bridge_free_string, open_vitals_bridge_handle_json,
+        open_vitals_core_version_json,
     },
     calibration::{
         CalibrationDataset, CalibrationOptions, calibration_run_record, evaluate_linear_calibration,
@@ -16,22 +17,28 @@ use open_vitals_core::{
     commands::{COMMAND_DEFINITIONS, CommandEvidence, validate_commands},
     energy_rollup::{
         OPENVITALS_ENERGY_LOCAL_ESTIMATE_V0_ID, OPENVITALS_ENERGY_LOCAL_ESTIMATE_V0_VERSION,
-        OPENVITALS_ENERGY_UNAVAILABLE_STATUS_V0_ID, OPENVITALS_ENERGY_UNAVAILABLE_STATUS_V0_VERSION,
+        OPENVITALS_ENERGY_UNAVAILABLE_STATUS_V0_ID,
+        OPENVITALS_ENERGY_UNAVAILABLE_STATUS_V0_VERSION,
     },
     export::validate_export_bundle,
     fixtures::build_fixture_index,
-    metrics::{OPENVITALS_HRV_V0_ID, OPENVITALS_HRV_V0_VERSION, built_in_algorithm_definitions},
+    metrics::{
+        OPENVITALS_HRV_V0_ID, OPENVITALS_HRV_V0_VERSION, OPENVITALS_STRAIN_V0_ID,
+        OPENVITALS_STRAIN_V0_VERSION, built_in_algorithm_definitions,
+    },
     protocol::{
         DeviceType, PACKET_TYPE_EVENT, PACKET_TYPE_HISTORICAL_DATA, PACKET_TYPE_REALTIME_RAW_DATA,
         build_v5_payload_frame, parse_frame_hex,
     },
     recovery_rollup::{
-        OPENVITALS_RECOVERY_UNAVAILABLE_STATUS_V0_ID, OPENVITALS_RECOVERY_UNAVAILABLE_STATUS_V0_VERSION,
+        OPENVITALS_RECOVERY_UNAVAILABLE_STATUS_V0_ID,
+        OPENVITALS_RECOVERY_UNAVAILABLE_STATUS_V0_VERSION,
         OPENVITALS_RESTING_HEART_RATE_DEVICE_SENSOR_V0_ID,
         OPENVITALS_RESTING_HEART_RATE_DEVICE_SENSOR_V0_VERSION,
     },
     step_counter::{
-        OPENVITALS_ACTIVITY_UNAVAILABLE_STATUS_V0_ID, OPENVITALS_ACTIVITY_UNAVAILABLE_STATUS_V0_VERSION,
+        OPENVITALS_ACTIVITY_UNAVAILABLE_STATUS_V0_ID,
+        OPENVITALS_ACTIVITY_UNAVAILABLE_STATUS_V0_VERSION,
     },
     step_motion_estimator::{
         OPENVITALS_STEPS_RAW_MOTION_ESTIMATE_V0_ID, OPENVITALS_STEPS_RAW_MOTION_ESTIMATE_V0_VERSION,
@@ -39,7 +46,7 @@ use open_vitals_core::{
     store::{
         ActivitySessionInput, AlgorithmRunRecord, CURRENT_SCHEMA_VERSION, CalibrationLabelInput,
         CaptureSessionInput, CommandValidationRecord, DailyActivityMetricInput,
-        DailyRecoveryMetricInput, DecodedFrameRow, OpenVitalsStore, HourlyActivityMetricInput,
+        DailyRecoveryMetricInput, DecodedFrameRow, HourlyActivityMetricInput, OpenVitalsStore,
         RawEvidenceInput, StepCounterSampleInput,
     },
 };
@@ -63,7 +70,10 @@ fn bridge_returns_core_version_payload() {
     assert!(response.ok, "{:?}", response.error);
     assert_eq!(response.request_id, "version-1");
     let result = response.result.unwrap();
-    assert_eq!(result["bridge_request_schema"], "open_vitals.bridge.request.v1");
+    assert_eq!(
+        result["bridge_request_schema"],
+        "open_vitals.bridge.request.v1"
+    );
     assert_eq!(result["bridge_response_schema"], BRIDGE_RESPONSE_SCHEMA);
     assert_eq!(result["storage_schema_version"], CURRENT_SCHEMA_VERSION);
 }
@@ -79,7 +89,10 @@ fn bridge_returns_openwhoop_reference_report() {
 
     assert!(response.ok, "{:?}", response.error);
     let result = response.result.unwrap();
-    assert_eq!(result["schema"], "open_vitals.openwhoop-reference-report.v1");
+    assert_eq!(
+        result["schema"],
+        "open_vitals.openwhoop-reference-report.v1"
+    );
     assert_eq!(result["generated_by"], "open-vitals-bridge");
     assert_eq!(result["service_role_count"], 2);
     assert_eq!(result["history_field_count"], 11);
@@ -151,8 +164,14 @@ fn bridge_runs_historical_sync_dry_run() {
 
     assert!(response.ok, "{:?}", response.error);
     let result = response.result.unwrap();
-    assert_eq!(result["schema"], "open_vitals.historical-sync-dry-run-report.v1");
-    assert_eq!(result["generated_by"], "open-vitals-historical-sync-dry-run");
+    assert_eq!(
+        result["schema"],
+        "open_vitals.historical-sync-dry-run-report.v1"
+    );
+    assert_eq!(
+        result["generated_by"],
+        "open-vitals-historical-sync-dry-run"
+    );
     assert_eq!(result["generation"], "gen5");
     assert_eq!(result["pass"], true);
     assert_eq!(result["state"], "complete");
@@ -332,7 +351,10 @@ fn bridge_validates_sleep_v1_release_gates_fail_closed() {
 
     assert!(response.ok, "{:?}", response.error);
     let result = response.result.unwrap();
-    assert_eq!(result["schema"], "open_vitals.sleep-v1-release-gate-report.v1");
+    assert_eq!(
+        result["schema"],
+        "open_vitals.sleep-v1-release-gate-report.v1"
+    );
     assert_eq!(result["pass"], false);
     assert_eq!(result["physical_historical_sync_pass"], false);
     assert_eq!(result["timestamp_evidence_pass"], false);
@@ -520,7 +542,7 @@ fn bridge_exposes_algorithm_registry_and_score_methods() {
         .as_f64()
         .unwrap();
     assert!(
-        (sleep_v1_score - 82.01361892264234).abs() < 1e-9,
+        (sleep_v1_score - 80.64194480408024).abs() < 1e-9,
         "expected hand-derived sleep v1 score, got {sleep_v1_score}"
     );
     assert_eq!(sleep_v1_result["output"]["deep_sleep_minutes"], 90.0);
@@ -534,7 +556,7 @@ fn bridge_exposes_algorithm_registry_and_score_methods() {
     );
     assert_eq!(
         sleep_v1_result["output"]["provenance"]["score_policy"],
-        "weighted_sleep_v1_components_with_fragmentation_guardrails"
+        "research_weighted_sleep_v1_components_with_confidence_metadata_and_fragmentation_guardrails"
     );
     assert_eq!(
         sleep_v1_result["output"]["status_report"]["can_show_personal_baseline"],
@@ -814,7 +836,10 @@ fn bridge_exposes_algorithm_registry_and_score_methods() {
         external_sleep_v1_comparison.error
     );
     let external_sleep_v1 = external_sleep_v1_comparison.result.unwrap();
-    assert_eq!(external_sleep_v1["open_vitals_algorithm_id"], "open_vitals.sleep.v1");
+    assert_eq!(
+        external_sleep_v1["open_vitals_algorithm_id"],
+        "open_vitals.sleep.v1"
+    );
     assert_eq!(
         external_sleep_v1["reference_algorithm_id"],
         "reference.sleep.ggir_summary.v1"
@@ -849,6 +874,73 @@ fn bridge_rejects_unsupported_primary_algorithm_for_packet_derived_score() {
     assert_eq!(error.code, "method_error");
     assert!(error.message.contains("unsupported primary algorithm"));
     assert!(error.message.contains("open_vitals.hrv.v0@0.1.0"));
+}
+
+#[test]
+fn bridge_returns_batched_packet_input_summary_reports() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let db = tempdir.path().join("open_vitals.sqlite");
+    let db_path = db.display().to_string();
+    let start_ms = 1_779_926_400_000i64;
+    let end_ms = 1_780_012_800_000i64;
+
+    let response = request(serde_json::json!({
+        "schema": "open_vitals.bridge.request.v1",
+        "request_id": "packet-input-summary-1",
+        "method": "metrics.packet_input_summary",
+        "args": {
+            "database_path": db_path.clone(),
+            "start": "2026-05-28T00:00:00Z",
+            "end": "2026-05-29T00:00:00Z",
+            "min_owned_captures": 1,
+            "require_owned_captures": true,
+            "require_scores_ready": true,
+            "daily_activity_metrics": {
+                "database_path": db_path.clone(),
+                "start_time_unix_ms": start_ms,
+                "end_time_unix_ms": end_ms
+            },
+            "hourly_activity_metrics": {
+                "database_path": db_path.clone(),
+                "start_time_unix_ms": start_ms,
+                "end_time_unix_ms": end_ms
+            },
+            "daily_recovery_metrics": {
+                "database_path": db_path,
+                "start_time_unix_ms": start_ms,
+                "end_time_unix_ms": end_ms
+            }
+        }
+    }));
+
+    assert!(response.ok, "{:?}", response.error);
+    let summary = response.result.unwrap();
+    assert_eq!(summary["schema"], "open_vitals.packet-input-summary.v1");
+    assert_eq!(summary["generated_by"], "open-vitals-bridge");
+    let reports = summary["reports"].as_object().unwrap();
+    for key in [
+        "readiness",
+        "motion",
+        "heart_rate",
+        "vital_event",
+        "step_discovery",
+        "step_counter_ingest",
+        "hrv",
+        "window",
+        "resting_hr",
+        "daily_activity",
+        "hourly_activity",
+        "daily_recovery",
+    ] {
+        assert!(reports.contains_key(key), "missing report {key}");
+    }
+    assert_eq!(
+        summary["report_count"].as_u64().unwrap(),
+        reports.len() as u64
+    );
+    assert_eq!(reports["daily_activity"]["metric_count"], 0);
+    assert_eq!(reports["hourly_activity"]["metric_count"], 0);
+    assert_eq!(reports["daily_recovery"]["metric_count"], 0);
 }
 
 #[test]
@@ -1284,7 +1376,10 @@ fn bridge_imports_and_lists_user_owned_calibration_labels() {
 
     assert!(listed.ok, "{:?}", listed.error);
     let list_result = listed.result.unwrap();
-    assert_eq!(list_result["schema"], "open_vitals.calibration-label-list.v1");
+    assert_eq!(
+        list_result["schema"],
+        "open_vitals.calibration-label-list.v1"
+    );
     assert_eq!(list_result["label_count"], 1);
     assert_eq!(list_result["official_labels_are_labels"], true);
     assert_eq!(list_result["labels"][0]["value"], 79.0);
@@ -1749,7 +1844,10 @@ fn bridge_records_capture_session_lifecycle_for_live_owned_capture() {
     }));
     assert!(start.ok, "{:?}", start.error);
     let start_result = start.result.unwrap();
-    assert_eq!(start_result["schema"], "open_vitals.capture-session-result.v1");
+    assert_eq!(
+        start_result["schema"],
+        "open_vitals.capture-session-result.v1"
+    );
     assert_eq!(start_result["inserted"], true);
     assert_eq!(start_result["session"]["status"], "active");
 
@@ -1817,7 +1915,10 @@ fn bridge_manages_local_activity_sessions_metrics_and_intervals() {
     }));
     assert!(create.ok, "{:?}", create.error);
     let create_result = create.result.unwrap();
-    assert_eq!(create_result["schema"], "open_vitals.activity-session-result.v1");
+    assert_eq!(
+        create_result["schema"],
+        "open_vitals.activity-session-result.v1"
+    );
     assert_eq!(create_result["inserted"], true);
     assert_eq!(
         create_result["session"]["session_id"],
@@ -1836,7 +1937,10 @@ fn bridge_manages_local_activity_sessions_metrics_and_intervals() {
     }));
     assert!(fetch.ok, "{:?}", fetch.error);
     let fetch_result = fetch.result.unwrap();
-    assert_eq!(fetch_result["schema"], "open_vitals.activity-session-result.v1");
+    assert_eq!(
+        fetch_result["schema"],
+        "open_vitals.activity-session-result.v1"
+    );
     assert_eq!(fetch_result["session"]["activity_type"], "running");
     assert_eq!(fetch_result["session"]["sync_status"], "verified");
 
@@ -1865,7 +1969,10 @@ fn bridge_manages_local_activity_sessions_metrics_and_intervals() {
     }));
     assert!(update.ok, "{:?}", update.error);
     let update_result = update.result.unwrap();
-    assert_eq!(update_result["schema"], "open_vitals.activity-session-result.v1");
+    assert_eq!(
+        update_result["schema"],
+        "open_vitals.activity-session-result.v1"
+    );
     assert_eq!(update_result["updated"], true);
     assert_eq!(update_result["session"]["custom_label"], "bridge run");
     assert_eq!(
@@ -1996,7 +2103,10 @@ fn bridge_manages_local_activity_sessions_metrics_and_intervals() {
     }));
     assert!(list.ok, "{:?}", list.error);
     let list_result = list.result.unwrap();
-    assert_eq!(list_result["schema"], "open_vitals.activity-session-list.v1");
+    assert_eq!(
+        list_result["schema"],
+        "open_vitals.activity-session-list.v1"
+    );
     assert_eq!(list_result["session_count"], 1);
     assert_eq!(
         list_result["sessions"][0]["session_id"],
@@ -2046,7 +2156,10 @@ fn bridge_manages_local_activity_sessions_metrics_and_intervals() {
     }));
     assert!(metrics.ok, "{:?}", metrics.error);
     let metrics_result = metrics.result.unwrap();
-    assert_eq!(metrics_result["schema"], "open_vitals.activity-metric-list.v1");
+    assert_eq!(
+        metrics_result["schema"],
+        "open_vitals.activity-metric-list.v1"
+    );
     assert_eq!(metrics_result["metric_count"], 1);
     assert_eq!(
         metrics_result["metrics"][0]["metric_id"],
@@ -2120,7 +2233,10 @@ fn bridge_manages_local_activity_sessions_metrics_and_intervals() {
     }));
     assert!(chart.ok, "{:?}", chart.error);
     let chart_result = chart.result.unwrap();
-    assert_eq!(chart_result["schema"], "open_vitals.activity-metric-window.v1");
+    assert_eq!(
+        chart_result["schema"],
+        "open_vitals.activity-metric-window.v1"
+    );
     assert_eq!(chart_result["metric_count"], 1);
     assert_eq!(
         chart_result["metrics"][0]["metric_id"],
@@ -2194,7 +2310,10 @@ fn bridge_runs_capture_correlation_for_debug_trust_gate() {
     }));
     assert!(permissive.ok, "{:?}", permissive.error);
     let report = permissive.result.unwrap();
-    assert_eq!(report["schema"], "open_vitals.capture-correlation-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.capture-correlation-report.v1"
+    );
     assert_eq!(report["pass"], true);
     assert!(
         report["summaries"]
@@ -2263,7 +2382,10 @@ fn bridge_reports_metric_input_readiness_for_debug_scoring_gate() {
 
     assert!(response.ok, "{:?}", response.error);
     let report = response.result.unwrap();
-    assert_eq!(report["schema"], "open_vitals.metric-input-readiness-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.metric-input-readiness-report.v1"
+    );
     assert_eq!(report["pass"], false);
     assert_eq!(report["family_count"], 6);
     assert_eq!(report["ready_family_count"], 0);
@@ -2323,7 +2445,10 @@ fn bridge_reports_capture_arrival_plan_for_device_day_readiness() {
 
     assert!(response.ok, "{:?}", response.error);
     let report = response.result.unwrap();
-    assert_eq!(report["schema"], "open_vitals.capture-arrival-plan-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.capture-arrival-plan-report.v1"
+    );
     assert_eq!(report["pass"], false);
     assert_eq!(report["min_owned_captures"], 1);
     assert_eq!(report["physical_arrival_row_count"], 11);
@@ -2678,7 +2803,10 @@ fn bridge_runs_step_packet_discovery_over_decoded_motion_frames() {
 
     assert!(response.ok, "{:?}", response.error);
     let report = response.result.unwrap();
-    assert_eq!(report["schema"], "open_vitals.step-packet-discovery-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.step-packet-discovery-report.v1"
+    );
     assert_eq!(report["pass"], false);
     assert_eq!(report["decoded_frame_count"], 1);
     assert_eq!(report["inspected_frame_count"], 1);
@@ -2744,7 +2872,10 @@ fn bridge_runs_step_capture_validation_with_validation_labels() {
 
     assert!(response.ok, "{:?}", response.error);
     let report = response.result.unwrap();
-    assert_eq!(report["schema"], "open_vitals.step-capture-validation-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.step-capture-validation-report.v1"
+    );
     assert_eq!(report["pass"], false);
     assert_eq!(report["capture_kind"], "100_counted_steps");
     assert_eq!(report["manual_step_delta"], 100);
@@ -2859,7 +2990,10 @@ fn bridge_runs_step_counter_daily_rollup_from_persisted_device_samples() {
 
     assert!(list.ok, "{:?}", list.error);
     let list_report = list.result.unwrap();
-    assert_eq!(list_report["schema"], "open_vitals.daily-activity-metric-list.v1");
+    assert_eq!(
+        list_report["schema"],
+        "open_vitals.daily-activity-metric-list.v1"
+    );
     assert_eq!(list_report["metric_count"], 1);
     assert_eq!(list_report["metrics"][0]["steps"], 105);
     assert_eq!(list_report["metrics"][0]["source_kind"], "device_counter");
@@ -3040,7 +3174,10 @@ fn bridge_writes_validated_raw_motion_step_estimate_as_local_activity_metric() {
 
     assert!(response.ok, "{:?}", response.error);
     let report = response.result.unwrap();
-    assert_eq!(report["schema"], "open_vitals.raw-motion-step-estimate-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.raw-motion-step-estimate-report.v1"
+    );
     assert_eq!(report["pass"], true);
     assert_eq!(report["source_kind_if_promoted"], "local_estimate");
     assert_eq!(report["estimated_steps"], 5);
@@ -3165,7 +3302,10 @@ fn bridge_extracts_vital_event_candidates_without_resolved_units() {
 
     assert!(response.ok, "{:?}", response.error);
     let report = response.result.unwrap();
-    assert_eq!(report["schema"], "open_vitals.vital-event-feature-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.vital-event-feature-report.v1"
+    );
     assert_eq!(report["pass"], true);
     assert_eq!(report["feature_count"], 1);
     assert_eq!(report["trusted_feature_count"], 1);
@@ -3434,7 +3574,10 @@ fn bridge_validates_hrv_against_whoop_label_without_promoting_metric() {
     }));
     assert!(response.ok, "{:?}", response.error);
     let report = response.result.unwrap();
-    assert_eq!(report["schema"], "open_vitals.hrv-capture-validation-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.hrv-capture-validation-report.v1"
+    );
     assert_eq!(report["pass"], true);
     assert_eq!(
         report["label_policy"],
@@ -3579,7 +3722,10 @@ fn bridge_aggregates_metric_window_features_for_debug_score_inputs() {
 
     assert!(response.ok, "{:?}", response.error);
     let report = response.result.unwrap();
-    assert_eq!(report["schema"], "open_vitals.metric-window-feature-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.metric-window-feature-report.v1"
+    );
     assert_eq!(report["pass"], true);
     assert_eq!(report["heart_rate_feature_count"], 3);
     assert_eq!(report["trusted_heart_rate_feature_count"], 3);
@@ -3832,7 +3978,10 @@ fn bridge_rolls_up_resting_heart_rate_into_daily_recovery_metric() {
 
     assert!(list.ok, "{:?}", list.error);
     let list_report = list.result.unwrap();
-    assert_eq!(list_report["schema"], "open_vitals.daily-recovery-metric-list.v1");
+    assert_eq!(
+        list_report["schema"],
+        "open_vitals.daily-recovery-metric-list.v1"
+    );
     assert_eq!(list_report["metric_count"], 2);
     assert!(
         list_report["metrics"]
@@ -4255,7 +4404,10 @@ fn bridge_rolls_up_local_energy_into_daily_activity_metric() {
 
     assert!(response.ok, "{:?}", response.error);
     let report = response.result.unwrap();
-    assert_eq!(report["schema"], "open_vitals.energy-daily-rollup-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.energy-daily-rollup-report.v1"
+    );
     assert_eq!(report["pass"], true);
     assert_eq!(report["daily_metric_written"], true);
     assert_eq!(report["metric_provenance_written"], true);
@@ -4419,7 +4571,10 @@ fn bridge_energy_confidence_uses_only_device_counter_step_cadence_support() {
 
     assert!(response.ok, "{:?}", response.error);
     let report = response.result.unwrap();
-    assert_eq!(report["schema"], "open_vitals.energy-daily-rollup-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.energy-daily-rollup-report.v1"
+    );
     assert_eq!(report["pass"], true);
     assert_eq!(report["confidence"], 0.81);
     assert_eq!(report["step_cadence_source_kind"], "device_counter");
@@ -4635,7 +4790,10 @@ fn bridge_rolls_up_local_energy_into_hourly_activity_metric() {
 
     assert!(response.ok, "{:?}", response.error);
     let report = response.result.unwrap();
-    assert_eq!(report["schema"], "open_vitals.energy-hourly-rollup-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.energy-hourly-rollup-report.v1"
+    );
     assert_eq!(report["pass"], true);
     assert_eq!(report["hourly_metric_written"], true);
     assert_eq!(report["metric_provenance_written"], true);
@@ -4925,7 +5083,10 @@ fn bridge_builds_local_strain_score_from_feature_reports() {
 
     assert!(response.ok, "{:?}", response.error);
     let report = response.result.unwrap();
-    assert_eq!(report["schema"], "open_vitals.strain-feature-score-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.strain-feature-score-report.v1"
+    );
     assert_eq!(report["pass"], true);
     assert_eq!(report["max_hr_basis"], "observed_window_max_hr_bpm");
     assert_eq!(report["strain_input"]["resting_hr_bpm"], 60.0);
@@ -4933,7 +5094,69 @@ fn bridge_builds_local_strain_score_from_feature_reports() {
     assert_eq!(report["strain_input"]["max_hr_bpm"], 100.0);
     assert_eq!(
         report["score_result"]["output"]["score_0_to_21"],
-        serde_json::json!(5.25)
+        serde_json::json!(5.151225377542748)
+    );
+}
+
+#[test]
+fn bridge_loads_persisted_score_reports_from_algorithm_runs() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let db = tempdir.path().join("open_vitals.sqlite");
+    let db_path = db.display().to_string();
+    let store = OpenVitalsStore::open(&db).unwrap();
+    for definition in built_in_algorithm_definitions() {
+        store.upsert_algorithm_definition(&definition).unwrap();
+    }
+    assert!(
+        store
+            .insert_algorithm_run(&AlgorithmRunRecord {
+                run_id: "persisted-strain-score-1".to_string(),
+                algorithm_id: OPENVITALS_STRAIN_V0_ID.to_string(),
+                version: OPENVITALS_STRAIN_V0_VERSION.to_string(),
+                start_time: "2026-05-28T12:00:00Z".to_string(),
+                end_time: "2026-05-28T12:30:00Z".to_string(),
+                output_json: serde_json::json!({
+                    "algorithm_id": OPENVITALS_STRAIN_V0_ID,
+                    "algorithm_version": OPENVITALS_STRAIN_V0_VERSION,
+                    "score_0_to_21": 7.25,
+                    "zone_load": 18.0,
+                    "average_hr_reserve_fraction": 0.42,
+                    "components": []
+                })
+                .to_string(),
+                quality_flags_json: "[]".to_string(),
+                provenance_json: serde_json::json!({
+                    "provenance": {
+                        "input_ids": ["persisted-strain-input"]
+                    },
+                    "errors": []
+                })
+                .to_string(),
+            })
+            .unwrap()
+    );
+
+    let response = request(serde_json::json!({
+        "schema": "open_vitals.bridge.request.v1",
+        "request_id": "persisted-score-reports-1",
+        "method": "metrics.persisted_score_reports",
+        "args": {
+            "database_path": db_path,
+            "families": ["strain"]
+        }
+    }));
+
+    assert!(response.ok, "{:?}", response.error);
+    let result = response.result.unwrap();
+    assert_eq!(result["schema"], "open_vitals.persisted-score-reports.v1");
+    assert_eq!(result["report_count"], 1);
+    let report = &result["reports"]["strain"];
+    assert_eq!(report["source"], "algorithm_runs");
+    assert_eq!(report["pass"], true);
+    assert_eq!(report["run_id"], "persisted-strain-score-1");
+    assert_eq!(
+        report["score_result"]["output"]["score_0_to_21"],
+        serde_json::json!(7.25)
     );
 }
 
@@ -5027,7 +5250,10 @@ fn bridge_builds_local_sleep_score_from_motion_features() {
 
     assert!(response.ok, "{:?}", response.error);
     let report = response.result.unwrap();
-    assert_eq!(report["schema"], "open_vitals.sleep-feature-score-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.sleep-feature-score-report.v1"
+    );
     assert_eq!(report["pass"], true);
     assert_eq!(report["sleep_window"]["time_in_bed_minutes"], 240.0);
     assert_eq!(report["sleep_window"]["sleep_duration_minutes"], 180.0);
@@ -5360,7 +5586,10 @@ fn bridge_builds_local_sleep_score_from_motion_features() {
     }));
     assert!(v1_response.ok, "{:?}", v1_response.error);
     let v1_report = v1_response.result.unwrap();
-    assert_eq!(v1_report["score_result"]["algorithm_id"], "open_vitals.sleep.v1");
+    assert_eq!(
+        v1_report["score_result"]["algorithm_id"],
+        "open_vitals.sleep.v1"
+    );
     assert_eq!(
         v1_report["score_result"]["output"]["model_status"],
         "importing_history"
@@ -5987,7 +6216,11 @@ fn bridge_rejects_unknown_external_sleep_stage_kind_atomically() {
 #[test]
 fn bridge_persists_sleep_manual_corrections_as_labels() {
     let tempdir = tempfile::tempdir().unwrap();
-    let db_path = tempdir.path().join("open_vitals.sqlite").display().to_string();
+    let db_path = tempdir
+        .path()
+        .join("open_vitals.sqlite")
+        .display()
+        .to_string();
 
     let correction = request(serde_json::json!({
         "schema": "open_vitals.bridge.request.v1",
@@ -6053,7 +6286,11 @@ fn bridge_persists_sleep_manual_corrections_as_labels() {
 #[test]
 fn bridge_lists_sleep_correction_label_proof_counts() {
     let tempdir = tempfile::tempdir().unwrap();
-    let db_path = tempdir.path().join("open_vitals.sqlite").display().to_string();
+    let db_path = tempdir
+        .path()
+        .join("open_vitals.sqlite")
+        .display()
+        .to_string();
 
     for (label_id, sleep_id, label_type, value) in [
         (
@@ -6133,7 +6370,11 @@ fn bridge_lists_sleep_correction_label_proof_counts() {
 #[test]
 fn bridge_validates_packet_sleep_window_against_manual_label_tolerance() {
     let tempdir = tempfile::tempdir().unwrap();
-    let db_path = tempdir.path().join("open_vitals.sqlite").display().to_string();
+    let db_path = tempdir
+        .path()
+        .join("open_vitals.sqlite")
+        .display()
+        .to_string();
 
     let frames = [
         ("sleep-window-motion-0", "2026-05-27T22:00:00Z", 10000),
@@ -6401,7 +6642,10 @@ fn bridge_builds_local_recovery_score_from_feature_reports_and_provided_vitals()
 
     assert!(response.ok, "{:?}", response.error);
     let report = response.result.unwrap();
-    assert_eq!(report["schema"], "open_vitals.recovery-feature-score-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.recovery-feature-score-report.v1"
+    );
     assert_eq!(report["pass"], true);
     assert_eq!(report["recovery_input"]["hrv_rmssd_ms"], 25.0);
     assert_eq!(report["recovery_input"]["hrv_baseline_rmssd_ms"], 50.0);
@@ -6590,7 +6834,10 @@ fn bridge_builds_local_stress_score_from_feature_reports() {
 
     assert!(response.ok, "{:?}", response.error);
     let report = response.result.unwrap();
-    assert_eq!(report["schema"], "open_vitals.stress-feature-score-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.stress-feature-score-report.v1"
+    );
     assert_eq!(report["pass"], true);
     assert_eq!(report["stress_input"]["heart_rate_bpm"], 81.0);
     assert_eq!(report["stress_input"]["resting_hr_bpm"], 60.0);
@@ -6980,7 +7227,10 @@ fn bridge_reports_command_capture_plan_for_official_validation_work() {
     }));
     assert!(plan.ok, "{:?}", plan.error);
     let report = plan.result.unwrap();
-    assert_eq!(report["schema"], "open_vitals.command-capture-plan-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.command-capture-plan-report.v1"
+    );
     assert_eq!(report["pass"], false);
     assert_eq!(report["requested_commands_valid"], true);
     assert_eq!(report["validation_records_valid"], true);
@@ -7072,7 +7322,11 @@ fn bridge_imports_exported_command_validation_records_with_provenance_gate() {
     assert_eq!(get_hello["validated_owner"], "user");
 
     let tempdir = tempfile::tempdir().unwrap();
-    let db_path = tempdir.path().join("open_vitals.sqlite").display().to_string();
+    let db_path = tempdir
+        .path()
+        .join("open_vitals.sqlite")
+        .display()
+        .to_string();
     let imported = request(serde_json::json!({
         "schema": "open_vitals.bridge.request.v1",
         "request_id": "command-validation-import",
@@ -7582,7 +7836,10 @@ fn bridge_exports_raw_timeframe_for_debug_export_flow() {
     }));
     assert!(bridge_privacy_lint.ok, "{:?}", bridge_privacy_lint.error);
     let privacy_result = bridge_privacy_lint.result.unwrap();
-    assert_eq!(privacy_result["schema"], "open_vitals.privacy-lint-report.v1");
+    assert_eq!(
+        privacy_result["schema"],
+        "open_vitals.privacy-lint-report.v1"
+    );
     assert_eq!(privacy_result["pass"], true);
     assert_eq!(privacy_result["input_valid"], true);
     assert_eq!(privacy_result["files_readable"], true);
@@ -7863,7 +8120,9 @@ fn bridge_raw_export_honors_capture_session_filter() {
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");
     let db_path = db.display().to_string();
-    let export_dir = tempdir.path().join("capture-filtered-export.openvitalsbundle");
+    let export_dir = tempdir
+        .path()
+        .join("capture-filtered-export.openvitalsbundle");
 
     for session_id in ["capture-session-a", "capture-session-b"] {
         let response = request(serde_json::json!({

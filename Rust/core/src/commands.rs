@@ -1514,7 +1514,8 @@ fn emulator_log_issue_next_action(issue: &str) -> (&'static str, String) {
     if issue.starts_with("emulator_write_parse_failed:") {
         (
             "official_write_frame_parseable",
-            "Recapture or repair the official app write frame so OpenVitals can parse it.".to_string(),
+            "Recapture or repair the official app write frame so OpenVitals can parse it."
+                .to_string(),
         )
     } else if issue.starts_with("emulator_write_not_command_payload:") {
         (
@@ -1635,7 +1636,8 @@ pub fn command_evidence_with_local_frame_matches(
                 local_frame_hex: None,
                 source: None,
                 warnings: vec![
-                    "import a OpenVitals dry-run/local frame candidate for this command".to_string(),
+                    "import a OpenVitals dry-run/local frame candidate for this command"
+                        .to_string(),
                 ],
             });
             continue;
@@ -1859,9 +1861,12 @@ pub fn validate_commands(evidence: &[CommandEvidence]) -> CommandValidationRepor
     }
 }
 
-pub fn command_result_from_report_json(report_json: &str) -> OpenVitalsResult<CommandValidationResult> {
-    serde_json::from_str::<CommandValidationResult>(report_json)
-        .map_err(|error| OpenVitalsError::message(format!("invalid command validation JSON: {error}")))
+pub fn command_result_from_report_json(
+    report_json: &str,
+) -> OpenVitalsResult<CommandValidationResult> {
+    serde_json::from_str::<CommandValidationResult>(report_json).map_err(|error| {
+        OpenVitalsError::message(format!("invalid command validation JSON: {error}"))
+    })
 }
 
 pub fn direct_send_gate_from_result(
@@ -2635,7 +2640,11 @@ fn structured_emulator_command_write_record(
     options: &CommandEmulatorLogEvidenceOptions,
 ) -> Option<EmulatorCommandWriteRecord> {
     let value = serde_json::from_str::<serde_json::Value>(message).ok()?;
-    if !structured_emulator_role_matches(&value, "command_to_strap", OPENVITALS_COMMAND_TO_STRAP_UUID) {
+    if !structured_emulator_role_matches(
+        &value,
+        "command_to_strap",
+        OPENVITALS_COMMAND_TO_STRAP_UUID,
+    ) {
         return None;
     }
     if structured_emulator_direction(&value).as_deref() == Some("device_to_phone") {

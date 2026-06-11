@@ -3,6 +3,10 @@ import Foundation
 import SwiftUI
 import UIKit
 
+enum OpenVitalsPacketScoreAlgorithmID {
+  static let sleep = "open_vitals.sleep.v0"
+}
+
 @MainActor
 final class HealthDataStore: ObservableObject {
   @Published var algorithmDefinitions: [HealthAlgorithmDefinition]
@@ -12,6 +16,10 @@ final class HealthDataStore: ObservableObject {
   @Published var catalogSource = HealthDataSource.unavailable("metric registry not loaded")
   @Published var packetInputStatus = "No run"
   @Published var packetScoreStatus = "No run"
+  @Published var packetInputIsRunning = false
+  @Published var packetScoreIsRunning = false
+  @Published var healthMetricRefreshIsRunning = false
+  @Published var healthMetricRefreshStatus = "No refresh"
   @Published var bandSleepImportStatus = "No band sync yet"
   @Published var externalSleepImportStatus = "External sleep imports disabled"
   @Published var referenceRunStatusByFamily: [String: String] = [:]
@@ -19,6 +27,16 @@ final class HealthDataStore: ObservableObject {
   @Published var calibrationTargetFamily = "recovery"
   @Published var calibrationLabelsImported = false
   @Published var calibrationRunComplete = false
+  @Published var healthDashboardVitalSnapshots: [HealthMetricSnapshot] = []
+  @Published var healthDashboardExploreSnapshots: [HealthMetricSnapshot] = []
+  @Published var healthDashboardAlgorithmSnapshots: [HealthMetricSnapshot] = []
+  @Published var healthDashboardStepsText = "--"
+  @Published var healthDashboardStepsStatus = "Needs device packet extract"
+  @Published var healthDashboardStepsSource = HealthDataSource.unavailable("Device step extraction pending")
+  @Published var healthDashboardActiveEnergyText = "-- kcal"
+  @Published var healthDashboardActiveEnergyStatus = "Needs device packet extract"
+  @Published var healthDashboardActiveEnergySource = HealthDataSource.unavailable("metrics.energy_daily_rollup not run")
+  @Published var healthDashboardCardioLoadDays: [CardioLoadDay] = []
   @Published var heartRateHourlyRanges: [HeartRateHourlyRange] = []
   @Published var heartRateTimelineStatus = "No HR samples stored"
 
@@ -31,10 +49,12 @@ final class HealthDataStore: ObservableObject {
   var referenceComparisonReports: [String: [String: Any]] = [:]
   var packetInputRefreshWorkItem: DispatchWorkItem?
   var packetInputRunID: UUID?
-  var packetInputIsRunning = false
+  var packetScoreRunID: UUID?
   var heartRateTimelineRefreshID: UUID?
   var heartRateSeriesUpdateObserver: NSObjectProtocol?
+  var hrvSeriesUpdateObserver: NSObjectProtocol?
   let packetInputQueue = DispatchQueue(label: "com.open_vitals.swift.health.packet-inputs", qos: .utility)
+  let packetScoreQueue = DispatchQueue(label: "com.open_vitals.swift.health.packet-scores", qos: .utility)
   let heartRateTimelineQueue = DispatchQueue(label: "com.open_vitals.swift.health.heart-rate-timeline", qos: .utility)
   lazy var databasePath = HealthDataStore.defaultDatabasePath()
 
@@ -53,6 +73,7 @@ final class HealthDataStore: ObservableObject {
     referenceDefinitions = []
     selectedAlgorithmByFamily = [:]
     primarySleepDetail = nil
+    refreshHealthDashboardSnapshots()
     refreshHeartRateTimeline()
     heartRateSeriesUpdateObserver = NotificationCenter.default.addObserver(
       forName: HeartRateSeriesStore.didUpdateNotification,
@@ -61,6 +82,16 @@ final class HealthDataStore: ObservableObject {
     ) { [weak self] _ in
       Task { @MainActor in
         self?.refreshHeartRateTimeline()
+        self?.refreshHealthDashboardSnapshots()
+      }
+    }
+    hrvSeriesUpdateObserver = NotificationCenter.default.addObserver(
+      forName: HRVSeriesStore.didUpdateNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      Task { @MainActor in
+        self?.refreshHealthDashboardSnapshots()
       }
     }
   }
@@ -68,6 +99,9 @@ final class HealthDataStore: ObservableObject {
   deinit {
     if let heartRateSeriesUpdateObserver {
       NotificationCenter.default.removeObserver(heartRateSeriesUpdateObserver)
+    }
+    if let hrvSeriesUpdateObserver {
+      NotificationCenter.default.removeObserver(hrvSeriesUpdateObserver)
     }
   }
 
@@ -103,6 +137,35 @@ final class HealthDataStore: ObservableObject {
     ].joined(separator: "\n")
   }
 
+  var healthMetricWorkIsRunning: Bool {
+    healthMetricRefreshIsRunning || packetInputIsRunning || packetScoreIsRunning
+  }
+
+  func resetAfterLocalDataWipe() {
+    packetInputRefreshWorkItem?.cancel()
+    packetInputRefreshWorkItem = nil
+    packetInputRunID = nil
+    packetScoreRunID = nil
+    heartRateTimelineRefreshID = nil
+    packetInputReports = [:]
+    packetScoreReports = [:]
+    referenceComparisonReports = [:]
+    primarySleepDetail = nil
+    referenceRunStatusByFamily = [:]
+    packetInputIsRunning = false
+    packetScoreIsRunning = false
+    healthMetricRefreshIsRunning = false
+    packetInputStatus = "No run"
+    packetScoreStatus = "No run"
+    healthMetricRefreshStatus = "Local app data wiped"
+    bandSleepImportStatus = "No band sync yet"
+    externalSleepImportStatus = "External sleep imports disabled"
+    heartRateHourlyRanges = []
+    heartRateTimelineStatus = "No HR samples stored"
+    calibrationLabelsImported = false
+    calibrationRunComplete = false
+  }
+
   func loadBridgeCatalogsIfNeeded() {
     guard !attemptedCatalogLoad else {
       return
@@ -116,6 +179,31 @@ final class HealthDataStore: ObservableObject {
       return
     }
     runPacketInputs()
+  }
+
+  func refreshHealthMetrics() {
+    guard !healthMetricWorkIsRunning else {
+      healthMetricRefreshStatus = "Health metric refresh already running"
+      return
+    }
+
+    healthMetricRefreshIsRunning = true
+    healthMetricRefreshStatus = "Extracting packet-derived inputs..."
+    refreshBridgeCatalogs()
+    refreshHeartRateTimeline()
+    runPacketInputs { [weak self] in
+      guard let self else {
+        return
+      }
+      self.healthMetricRefreshStatus = "Recomputing packet-derived scores..."
+      self.runPacketScores { [weak self] in
+        guard let self else {
+          return
+        }
+        self.healthMetricRefreshIsRunning = false
+        self.healthMetricRefreshStatus = self.packetScoreStatus
+      }
+    }
   }
 
   func refreshHeartRateTimeline(for date: Date = Date()) {
@@ -162,7 +250,9 @@ final class HealthDataStore: ObservableObject {
   }
 
   func refreshBridgeCatalogs() {
-    do {
+    catalogStatus = "Loading bridge catalog..."
+    OpenVitalsRustBridge.performInBackground(qos: .utility, {
+      let bridge = OpenVitalsRustBridge()
       let algorithmsValue = try bridge.requestValue(method: "metrics.built_in_definitions")
       let referencesValue = try bridge.requestValue(method: "metrics.reference_definitions")
       let preferencesValue = try bridge.requestValue(method: "metrics.default_preferences")
@@ -173,27 +263,37 @@ final class HealthDataStore: ObservableObject {
         .map { HealthAlgorithmDefinition(row: $0, source: .bridge("metrics.reference_definitions")) }
       let parsedPreferences = Self.preferenceRows(from: preferencesValue)
 
-      if !parsedAlgorithms.isEmpty {
-        algorithmDefinitions = parsedAlgorithms
+      return (parsedAlgorithms, parsedReferences, parsedPreferences)
+    }) { [weak self] result in
+      guard let self else {
+        return
       }
-      if !parsedReferences.isEmpty {
-        referenceDefinitions = parsedReferences
+      switch result {
+      case .success(let (parsedAlgorithms, parsedReferences, parsedPreferences)):
+        if !parsedAlgorithms.isEmpty {
+          algorithmDefinitions = parsedAlgorithms
+        }
+        if !parsedReferences.isEmpty {
+          referenceDefinitions = parsedReferences
+        }
+        if !parsedPreferences.isEmpty {
+          selectedAlgorithmByFamily = parsedPreferences
+        } else {
+          selectedAlgorithmByFamily = Dictionary(
+            uniqueKeysWithValues: algorithmDefinitions.map { ($0.family, $0.id) }
+          )
+        }
+        catalogSource = .bridge("Rust metric registry")
+        catalogStatus = "Bridge catalog loaded"
+        refreshHealthDashboardSnapshots()
+      case .failure(let error):
+        algorithmDefinitions = []
+        referenceDefinitions = []
+        selectedAlgorithmByFamily = [:]
+        catalogSource = .unavailable("Rust catalog unavailable")
+        catalogStatus = "Metric catalog unavailable: \(Self.shortError(error))"
+        refreshHealthDashboardSnapshots()
       }
-      if !parsedPreferences.isEmpty {
-        selectedAlgorithmByFamily = parsedPreferences
-      } else {
-        selectedAlgorithmByFamily = Dictionary(
-          uniqueKeysWithValues: algorithmDefinitions.map { ($0.family, $0.id) }
-        )
-      }
-      catalogSource = .bridge("Rust metric registry")
-      catalogStatus = "Bridge catalog loaded"
-    } catch {
-      algorithmDefinitions = []
-      referenceDefinitions = []
-      selectedAlgorithmByFamily = [:]
-      catalogSource = .unavailable("Rust catalog unavailable")
-      catalogStatus = "Metric catalog unavailable: \(Self.shortError(error))"
     }
   }
 
@@ -228,6 +328,7 @@ final class HealthDataStore: ObservableObject {
         case .failure(let error):
           self.packetInputStatus = "Bridge input extraction blocked: \(HealthDataStore.shortError(error))"
         }
+        self.refreshHealthDashboardSnapshots()
         completion?()
       }
     }
@@ -251,8 +352,12 @@ final class HealthDataStore: ObservableObject {
       guard let self else {
         return
       }
-      self.runSleepScore()
-      self.bandSleepImportStatus = "Band sync captured \(packetCount) packets | \(self.packetScoreStatus)"
+      self.runSleepScore { [weak self] in
+        guard let self else {
+          return
+        }
+        self.bandSleepImportStatus = "Band sync captured \(packetCount) packets | \(self.packetScoreStatus)"
+      }
     }
   }
 }

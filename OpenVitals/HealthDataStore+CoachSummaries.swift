@@ -21,6 +21,120 @@ extension HealthDataStore {
     return packetInputStatus == "No run" ? "Run Extract to populate packet-derived inputs" : ""
   }
 
+  func homeMissingDataItems() -> [HomeMissingDataItem] {
+    var items: [HomeMissingDataItem] = []
+    let sleep = snapshot(for: .sleep)
+    let recovery = snapshot(for: .recovery)
+    let strain = snapshot(for: .strain)
+    let vitals = Dictionary(uniqueKeysWithValues: healthDashboardVitalSnapshots.map { ($0.id, $0) })
+
+    if sleep.source.kind == .unavailable || (firstNumber(in: sleep.displayValue) ?? 0) <= 0 {
+      items.append(
+        HomeMissingDataItem(
+          id: "sleep",
+          title: "Sleep",
+          detail: Self.shortActionText(
+            Self.firstActionText(in: packetScoreReports["sleep"])
+              ?? readinessAction(for: "sleep")
+              ?? "Need trusted band sleep packets in the local metric store."
+          ),
+          systemImage: "bed.double",
+          tint: .indigo,
+          route: .sleep
+        )
+      )
+    }
+
+    if recoveryScoreValue() == nil || recovery.source.kind == .unavailable {
+      items.append(
+        HomeMissingDataItem(
+          id: "recovery",
+          title: "Recovery",
+          detail: Self.shortActionText(
+            Self.firstActionText(in: packetScoreReports["recovery"])
+              ?? readinessAction(for: "recovery")
+              ?? recoveryProvidedVitalsSummary()
+          ),
+          systemImage: "battery.100percent",
+          tint: .green,
+          route: .recovery
+        )
+      )
+    }
+
+    if vitals["resting-hrv"]?.source.kind == .unavailable || recoveryHRVDisplayText() == "--" {
+      items.append(
+        HomeMissingDataItem(
+          id: "resting-hrv",
+          title: "Resting HRV",
+          detail: Self.shortActionText(
+            Self.firstActionText(in: packetInputReports["hrv"])
+              ?? readinessAction(for: "recovery")
+              ?? "Need validated RR interval evidence before displaying HRV."
+          ),
+          systemImage: "waveform.path.ecg",
+          tint: .blue,
+          route: .healthMonitor
+        )
+      )
+    }
+
+    if vitals["respiratory-rate"]?.source.kind == .unavailable || currentRecoveryRespiratoryRateRPM() == nil {
+      items.append(
+        HomeMissingDataItem(
+          id: "respiratory-rate",
+          title: "Respiratory Rate",
+          detail: Self.shortActionText(
+            Self.firstActionText(in: packetInputReports["recovery_sensor_rollup"])
+              ?? Self.firstActionText(in: packetInputReports["vital_event"])
+              ?? readinessAction(for: "recovery")
+              ?? "Need resolved respiratory history packet semantics."
+          ),
+          systemImage: "lungs",
+          tint: .green,
+          route: .healthMonitor
+        )
+      )
+    }
+
+    if let strainAction = readinessAction(for: "strain"),
+       strain.source.kind == .unavailable || packetInputReports["readiness"] != nil {
+      items.append(
+        HomeMissingDataItem(
+          id: "strain-quality",
+          title: "Strain Inputs",
+          detail: Self.shortActionText(strainAction),
+          systemImage: "figure.run",
+          tint: .orange,
+          route: .strain
+        )
+      )
+    }
+
+    return Array(items.prefix(5))
+  }
+
+  func readinessAction(for family: String) -> String? {
+    Self.array(packetInputReports["readiness"]?["families"])
+      .first { ($0["metric_family"] as? String) == family }
+      .flatMap { familyReport in
+        Self.firstActionText(in: familyReport)
+          ?? Self.stringArray(familyReport["blocker_reasons"]).first
+      }
+  }
+
+  static func shortActionText(_ text: String, maxLength: Int = 118) -> String {
+    let collapsed = text
+      .replacingOccurrences(of: "\n", with: " ")
+      .replacingOccurrences(of: "  ", with: " ")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard collapsed.count > maxLength else {
+      return collapsed
+    }
+    let index = collapsed.index(collapsed.startIndex, offsetBy: maxLength)
+    return String(collapsed[..<index]).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
+  }
+
   func latestHeartRateSummary(bpm: Int?, source: String, updatedAt: Date?) -> String {
     guard let bpm else {
       return "No HR extraction"

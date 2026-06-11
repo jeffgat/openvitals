@@ -288,6 +288,231 @@ extension HealthDataStore {
       catalogSource = .unavailable("preview missing catalog")
       calibrationLabelsImported = false
       calibrationRunComplete = false
+    case .recoveryNoData:
+      previewMissingData = false
+      primarySleepDetail = nil
+      packetInputStatus = "No run"
+      packetScoreStatus = "No run"
+      externalSleepImportStatus = "External sleep imports disabled"
+      packetInputReports = [:]
+      packetScoreReports = [:]
+      referenceComparisonReports = [:]
+      referenceRunStatusByFamily = [:]
+      calibrationLabelsImported = false
+      calibrationRunComplete = false
+    case .recoveryBridgeData:
+      applyRecoveryBridgeDataPreview()
+    case .recoveryPacketRunBlocked:
+      applyRecoveryPacketRunBlockedPreview()
     }
+    refreshHealthDashboardSnapshots()
+  }
+
+  func applyRecoveryBridgeDataPreview() {
+    previewMissingData = false
+    packetInputStatus = "Bridge packet-derived inputs extracted"
+    packetScoreStatus = "Bridge packet-derived scores recomputed"
+    referenceComparisonReports = [:]
+    referenceRunStatusByFamily = [:]
+    calibrationLabelsImported = false
+    calibrationRunComplete = false
+
+    let window = Self.currentDailyMetricWindow()
+    let dates = previewRecoveryDateWindows(endingAt: window.start, count: 4)
+    let scoreRows = zip(dates, [58.0, 64.0, 71.0, 76.0]).map { dateWindow, score in
+      [
+        "date": dateWindow.dateKey,
+        "score_0_to_100": score,
+      ] as [String: Any]
+    }
+    packetScoreReports = [
+      "recovery": [
+        "schema": "open_vitals.preview.recovery_score.v1",
+        "pass": true,
+        "daily": scoreRows,
+        "score_result": [
+          "output": [
+            "score_0_to_100": 76.0,
+          ],
+        ],
+        "provided_vitals": [
+          "trusted_metric_input": true,
+          "source": "preview packet-derived recovery vitals",
+          "respiratory_rate_rpm": 14.7,
+          "respiratory_rate_baseline_rpm": 14.4,
+          "skin_temp_delta_c": 0.2,
+          "quality_flags": [],
+        ],
+      ],
+    ]
+
+    let metrics = dates.enumerated().flatMap { index, dateWindow -> [[String: Any]] in
+      let hrv = [49.0, 52.0, 55.0, 58.0][index]
+      let rhr = [57.0, 56.0, 55.0, 54.0][index]
+      let rr = [14.9, 14.8, 14.7, 14.6][index]
+      let spo2 = [96.0, 97.0, 97.0, 98.0][index]
+      let temp = [-0.1, 0.0, 0.1, 0.2][index]
+      return [
+        Self.recoveryPreviewMetricRow(dateWindow: dateWindow, metricID: "hrv_rmssd_ms", metricName: "Resting HRV", valueKey: "hrv_rmssd_ms", value: hrv, confidence: 0.84),
+        Self.recoveryPreviewMetricRow(dateWindow: dateWindow, metricID: "resting_hr_bpm", metricName: "Resting HR", valueKey: "resting_hr_bpm", value: rhr, confidence: 0.86),
+        Self.recoveryPreviewMetricRow(dateWindow: dateWindow, metricID: "respiratory_rate_rpm", metricName: "Respiratory Rate", valueKey: "respiratory_rate_rpm", value: rr, confidence: 0.81),
+        Self.recoveryPreviewMetricRow(dateWindow: dateWindow, metricID: "oxygen_saturation_percent", metricName: "Oxygen Saturation", valueKey: "oxygen_saturation_percent", value: spo2, confidence: 0.78),
+        Self.recoveryPreviewMetricRow(dateWindow: dateWindow, metricID: "skin_temperature_delta_c", metricName: "Wrist Temperature", valueKey: "skin_temperature_delta_c", value: temp, confidence: 0.79),
+      ]
+    }
+    packetInputReports = [
+      "daily_recovery": [
+        "schema": "open_vitals.preview.daily_recovery_metrics.v1",
+        "metrics": metrics,
+      ],
+    ]
+
+    primarySleepDetail = PrimarySleepDetail(
+      id: "preview-primary-sleep",
+      dateLabel: "Today",
+      startLabel: "10:48 PM",
+      endLabel: "6:42 AM",
+      durationText: "7h 18m",
+      timeInBedText: "7h 54m",
+      scoreText: "82",
+      qualityText: "Good",
+      source: .bridge("preview sleep score output"),
+      stages: []
+    )
+  }
+
+  func applyRecoveryPacketRunBlockedPreview() {
+    previewMissingData = false
+    primarySleepDetail = nil
+    packetInputStatus = "Bridge input extraction blocked: no trusted recovery packet inputs"
+    packetScoreStatus = "Bridge score run blocked: recovery is not ready"
+    referenceComparisonReports = [:]
+    referenceRunStatusByFamily = [:]
+    calibrationLabelsImported = false
+    calibrationRunComplete = false
+
+    let window = Self.currentDailyMetricWindow()
+    let metrics = [
+      Self.recoveryPreviewUnavailableRow(dateWindow: window, metricID: "hrv_rmssd_ms", metricName: "Resting HRV", blocker: "no_trusted_hrv_rr_intervals"),
+      Self.recoveryPreviewUnavailableRow(dateWindow: window, metricID: "respiratory_rate_rpm", metricName: "Respiratory Rate", blocker: "respiratory_rate_semantics_unverified"),
+      Self.recoveryPreviewUnavailableRow(dateWindow: window, metricID: "oxygen_saturation_percent", metricName: "Oxygen Saturation", blocker: "oxygen_saturation_decoder_not_implemented"),
+      Self.recoveryPreviewUnavailableRow(dateWindow: window, metricID: "skin_temperature_delta_c", metricName: "Wrist Temperature", blocker: "temperature_units_unverified"),
+    ]
+    packetInputReports = [
+      "daily_recovery": [
+        "schema": "open_vitals.preview.daily_recovery_metrics.v1",
+        "metrics": metrics,
+      ],
+      "recovery_unavailable_status": [
+        "schema": "open_vitals.preview.recovery-unavailable-daily-status-report.v1",
+        "pass": true,
+        "statuses": metrics,
+      ],
+    ]
+    packetScoreReports = [:]
+  }
+
+  func previewRecoveryDateWindows(endingAt endDate: Date, count: Int) -> [DailyMetricWindow] {
+    var calendar = Calendar.autoupdatingCurrent
+    calendar.locale = Locale(identifier: "en_US_POSIX")
+    return (0..<count).compactMap { offset in
+      let start = calendar.date(byAdding: .day, value: offset - count + 1, to: endDate)
+        ?? endDate.addingTimeInterval(Double(offset - count + 1) * 86_400)
+      return Self.dailyMetricWindow(for: start, calendar: calendar)
+    }
+  }
+
+  static func dailyMetricWindow(for start: Date, calendar: Calendar) -> DailyMetricWindow {
+    let end = calendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
+    let dateFormatter = DateFormatter()
+    dateFormatter.calendar = calendar
+    dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+    dateFormatter.timeZone = calendar.timeZone
+    dateFormatter.dateFormat = "yyyy-MM-dd"
+    let isoFormatter = ISO8601DateFormatter()
+    isoFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+    isoFormatter.formatOptions = [.withInternetDateTime]
+    return DailyMetricWindow(
+      dateKey: dateFormatter.string(from: start),
+      timezone: calendar.timeZone.identifier,
+      start: start,
+      end: end,
+      startISO: isoFormatter.string(from: start),
+      endISO: isoFormatter.string(from: end),
+      startTimeUnixMS: unixMilliseconds(start),
+      endTimeUnixMS: unixMilliseconds(end)
+    )
+  }
+
+  static func recoveryPreviewMetricRow(
+    dateWindow: DailyMetricWindow,
+    metricID: String,
+    metricName: String,
+    valueKey: String,
+    value: Double,
+    confidence: Double
+  ) -> [String: Any] {
+    var row = recoveryPreviewBaseRow(
+      dateWindow: dateWindow,
+      metricID: metricID,
+      metricName: metricName,
+      sourceKind: "device_sensor",
+      confidence: confidence,
+      blocker: nil
+    )
+    row[valueKey] = value
+    return row
+  }
+
+  static func recoveryPreviewUnavailableRow(
+    dateWindow: DailyMetricWindow,
+    metricID: String,
+    metricName: String,
+    blocker: String
+  ) -> [String: Any] {
+    recoveryPreviewBaseRow(
+      dateWindow: dateWindow,
+      metricID: metricID,
+      metricName: metricName,
+      sourceKind: "unavailable",
+      confidence: 0,
+      blocker: blocker
+    )
+  }
+
+  static func recoveryPreviewBaseRow(
+    dateWindow: DailyMetricWindow,
+    metricID: String,
+    metricName: String,
+    sourceKind: String,
+    confidence: Double,
+    blocker: String?
+  ) -> [String: Any] {
+    let metricToken = metricIDToken(metricID)
+    let inputs: [String: Any] = [
+      "metric_id": metricID,
+      "metric_name": metricName,
+      "blocker_reasons": blocker.map { [$0] } ?? [],
+    ]
+    let provenance: [String: Any] = [
+      "algorithm": sourceKind == "device_sensor" ? "open_vitals.preview.recovery_sensor.device_sensor.v0" : "open_vitals.preview.recovery.unavailable_status.v0",
+      "source_kind": sourceKind,
+      "metric_id": metricID,
+      "metric_name": metricName,
+      "blocker_reasons": blocker.map { [$0] } ?? [],
+    ]
+    let flags = blocker.map { [$0, "source_kind_\(sourceKind)"] } ?? ["source_kind_\(sourceKind)"]
+    return [
+      "daily_metric_id": "preview-\(metricToken)-\(dateWindow.dateKey)",
+      "date_key": dateWindow.dateKey,
+      "timezone": dateWindow.timezone,
+      "start_time_unix_ms": dateWindow.startTimeUnixMS,
+      "end_time_unix_ms": dateWindow.endTimeUnixMS,
+      "source_kind": sourceKind,
+      "confidence": confidence,
+      "inputs_json": jsonString(inputs),
+      "quality_flags_json": jsonString(flags),
+      "provenance_json": jsonString(provenance),
+    ]
   }
 }

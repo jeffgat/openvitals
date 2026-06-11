@@ -33,7 +33,7 @@ struct OpenVitalsMessage: Identifiable {
   let body: String
 }
 
-struct OpenVitalsNotificationEvent {
+struct OpenVitalsNotificationEvent: Sendable {
   let deviceID: UUID
   let serviceUUID: String
   let characteristicUUID: String

@@ -4,7 +4,7 @@ struct AppShellView: View {
   @EnvironmentObject private var model: OpenVitalsAppModel
   @EnvironmentObject private var router: AppRouter
   @StateObject private var healthStore = HealthDataStore()
-  @State private var homeHealthPath: [HealthRoute] = []
+  @StateObject private var moreStore = MoreDataStore()
   @State private var homeSelectedDate = Date()
 
   var body: some View {
@@ -17,6 +17,7 @@ struct AppShellView: View {
         .tag(tab)
       }
     }
+    .tint(OpenVitalsTheme.accent)
   }
 
   private var tabSelection: Binding<OpenVitalsAppTab> {
@@ -35,7 +36,7 @@ struct AppShellView: View {
   @ViewBuilder
   private func tabNavigationStack(for tab: OpenVitalsAppTab) -> some View {
     if tab == .home {
-      NavigationStack(path: $homeHealthPath) {
+      NavigationStack(path: $router.healthPath) {
         tabContent(for: tab)
           .navigationDestination(for: HealthRoute.self) { route in
             HealthRouteDestinationView(route: route, store: healthStore, selectedDate: $homeSelectedDate)
@@ -69,13 +70,15 @@ struct AppShellView: View {
       HealthView(store: healthStore)
     case .coach:
       CoachView(healthStore: healthStore)
+    case .debug:
+      MoreDebugView(healthStore: healthStore, store: moreStore)
     case .more:
-      MoreView(healthStore: healthStore)
+      MoreView(healthStore: healthStore, store: moreStore)
     }
   }
 
   private func openHomeHealthRoute(_ route: HealthRoute) {
-    homeHealthPath = [route]
+    router.openHealth(route)
   }
 }
 
@@ -83,14 +86,16 @@ enum OpenVitalsAppTab: String, CaseIterable, Identifiable {
   case home
   case health
   case coach
+  case debug
   case more
 
   var id: String { rawValue }
 
   static let bottomTabs: [OpenVitalsAppTab] = [
     .home,
-    .health,
+    // .health,
     // .coach,
+    .debug,
     .more,
   ]
 
@@ -99,6 +104,7 @@ enum OpenVitalsAppTab: String, CaseIterable, Identifiable {
     case .home: "Home"
     case .health: "Health"
     case .coach: "Coach"
+    case .debug: "Debug"
     case .more: "More"
     }
   }
@@ -108,6 +114,7 @@ enum OpenVitalsAppTab: String, CaseIterable, Identifiable {
     case .home: "house"
     case .health: "heart.text.square"
     case .coach: "sparkles"
+    case .debug: "terminal"
     case .more: "ellipsis.circle"
     }
   }

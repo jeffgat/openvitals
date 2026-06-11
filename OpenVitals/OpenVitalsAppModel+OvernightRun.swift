@@ -363,7 +363,7 @@ extension OpenVitalsAppModel {
     }
     let workItem = DispatchWorkItem { [weak self] in
       Task { @MainActor in
-        self?.refreshOvernightPowerState(reason: "heartbeat", record: true)
+        _ = self?.refreshOvernightPowerState(reason: "heartbeat", record: true)
         self?.refreshOvernightWatchdogState(reason: "heartbeat")
         self?.writeOvernightGuardStatus(reason: "heartbeat")
         self?.scheduleOvernightGuardHeartbeat()

@@ -24,6 +24,7 @@ final class OpenVitalsAppModel: ObservableObject {
   @Published var healthPacketCaptureTargetSummary = "No health packet capture"
   @Published var healthPacketCaptureLastPacketSummary = "No packets captured"
   @Published var healthPacketCaptureFamilyRows: [HealthPacketCaptureFamily] = []
+  @Published var dailyMetricSyncStatus = "No daily metric sync"
   @Published var respiratoryPacketWatchActive = false
   @Published var respiratoryPacketWatchStatus = "Not watching K18 respiratory history"
   @Published var overnightGuardActive = false
@@ -58,6 +59,9 @@ final class OpenVitalsAppModel: ObservableObject {
   let activityLocationTracker = ActivityLocationTracker()
   let rust = OpenVitalsRustBridge()
   let notificationFrameParser = NotificationFrameParser()
+  let notificationFrameReassembler = NotificationFrameReassembler(
+    maximumBufferedFrameBytes: OpenVitalsAppModel.maximumBufferedFrameBytes
+  )
   let notificationIngestQueue = DispatchQueue(label: "com.open_vitals.swift.notification-ingest", qos: .utility)
   let notificationIngestStateLock = NSLock()
   let notificationParseQueue = DispatchQueue(label: "com.open_vitals.swift.notification-parse", qos: .utility)
@@ -83,7 +87,7 @@ final class OpenVitalsAppModel: ObservableObject {
     maxBatchRows: OpenVitalsAppModel.captureFrameWriteBatchMaxRows
   )
   let captureFrameEnqueueAggregator = CaptureFrameEnqueueAggregator(
-    publishInterval: OpenVitalsAppModel.packetUIStatePublishInterval
+    publishInterval: OpenVitalsAppModel.captureFrameEnqueuePublishInterval
   )
   let overnightSQLiteMirror = OvernightSQLiteMirrorQueue(databasePath: HealthDataStore.defaultDatabasePath())
   let passiveActivityDetectionPipeline = PassiveActivityDetectionPipeline()
@@ -171,7 +175,6 @@ final class OpenVitalsAppModel: ObservableObject {
   var lastWhoopEventStatusUpdatedAt = Date.distantPast
   var activityTimelineRefreshGeneration = 0
   var skippedNotificationDiagnostics = SkippedNotificationDiagnostics()
-  var frameReassemblyBuffers: [String: Data] = [:]
   let autoStartHealthPacketCaptureOnReady: Bool = {
     let processInfo = ProcessInfo.processInfo
     return processInfo.arguments.contains("--open-vitals-start-health-packet-capture")
@@ -284,13 +287,19 @@ final class OpenVitalsAppModel: ObservableObject {
   static let heartRateHourlyRangePublishInterval: TimeInterval = 1
   static let packetUIStatePublishInterval: TimeInterval = 0.2
   static let restingHeartRateFrameWriteInterval: TimeInterval = 0.1
+  static let passiveActivityFrameWriteInterval: TimeInterval = 2
+  static let captureFrameEnqueuePublishInterval: TimeInterval = 1
   static let captureFrameWriteQueueMaxRows = 2048
   static let captureFrameWriteBatchMaxRows = 128
+  static let dailyMetricSyncCaptureSource = "home.daily_scores.sync"
   static let passiveActivityCaptureDuration: TimeInterval = 12 * 60 * 60
   static let movementPacketStatusInterval: TimeInterval = 1
   static let movementPacketLogInterval: TimeInterval = 5
   static let whoopDataSignalLogInterval: TimeInterval = 10
   static let pipelinePerformanceLogInterval: TimeInterval = 5
+  static let pipelinePerformanceLogMinElapsedMS = 50.0
+  static let pipelinePerformanceLogMinQueueDepth = 16
+  static let pipelinePerformanceLogMinHighWatermark = 32
   static let whoopEventStatusInterval: TimeInterval = 1
   static let whoopDataSignalStatusInterval: TimeInterval = 1
   static let whoopDataSignalPipelineMaxSamples = 256

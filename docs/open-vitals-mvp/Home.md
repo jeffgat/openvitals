@@ -4,6 +4,8 @@ Source map: Flutter `TodayView`, Flutter `OpenVitalsShell` Overview tab, Swift `
 
 MVP rule: Home is the daily command center. It should show today's live state first, use real connected-device and local metric data when present, and fall back to empty, stale, or unavailable states where no Swift data bridge exists yet.
 
+Current product cut 2026-06-10: Home keeps the Sleep, Recovery, and Strain top scores; a trimmed Health Monitor with Respiratory Rate, Resting HR, and Resting HRV; and Data & Algorithms cards for Packet Inputs and Algorithms. Stress & Energy, Cardio Load, Oxygen Saturation, Timeline, and the full Health landing are intentionally cut from the active surface for now. See `docs/cut-for-later.md`.
+
 ## Parent View Contract
 
 - [ ] Create a dedicated `HomeView.swift` or split `HomeDashboardView` out of `AppShellView.swift`.
@@ -19,6 +21,7 @@ MVP rule: Home is the daily command center. It should show today's live state fi
 - [ ] Show selected date with previous/next day controls.
 - [ ] Add date picker route/sheet equivalent to Flutter `TodayView._pickDate`.
 - [ ] Show busy/sync indicator when device or metric refresh is running.
+- [x] Keep Home score sync in a packet import session so historical packets can be persisted before score refresh.
 - [ ] Add device toolbar button with connected/disconnected color state.
 - [ ] Tapping the device button opens `DeviceView`.
 - [ ] Define one shared relative-time formatter for `lastSyncAt`, battery, HR, and metric refreshes.
@@ -39,6 +42,7 @@ MVP rule: Home is the daily command center. It should show today's live state fi
 - [ ] Add Sleep score card/gauge from Flutter `todaySleepScoreSummary()`.
 - [ ] Add Recovery score card/gauge from Flutter `todayRecoveryScoreSummary()`.
 - [ ] Add Strain score card/gauge from Flutter `todayStrainScoreSummary()`.
+- [x] Add a single Home Sync button for Sleep, Recovery, and Strain that runs band historical sync before packet input and score refresh.
 - [ ] Preserve strain denominator semantics: Flutter normalizes strain from a 21-point scale to percent for some visuals.
 - [ ] Show HRV summary from Flutter `todayHrvScoreSummary()` where it improves the daily snapshot.
 - [ ] Parse score values into numeric + status + provenance fields instead of displaying only raw summary strings.
@@ -54,10 +58,11 @@ MVP rule: Home is the daily command center. It should show today's live state fi
 - [ ] Show score next action from `packetDerivedScoreNextActionSummary()`.
 - [ ] Provide a clear route into Coach for the day's recommendation.
 - [ ] Provide a clear route into Capture when the next action needs fresh data.
-- [ ] Provide missing-data copy when readiness is missing or pending.
+- [x] Provide missing-data copy when readiness is missing or pending.
 
 ## Stress And Energy
 
+- [ ] Cut from active Home on 2026-06-10; retain partial implementation for later.
 - [ ] Show Stress summary from `todayStressScoreSummary()`.
 - [ ] Link Stress card to Health > Stress detail.
 - [ ] Add Energy Bank card based on Flutter `V2EnergyBankPage`.
@@ -67,16 +72,19 @@ MVP rule: Home is the daily command center. It should show today's live state fi
 
 ## Health Monitor Preview
 
-- [ ] Show Latest HR from `latestHeartRateSummary()` or BLE live HR.
-- [ ] Show HRV from `todayHrvScoreSummary()` / `hrvFeatureSummary()`.
-- [ ] Show Recovery from `todayRecoveryScoreSummary()`.
-- [ ] Show Stress from `todayStressScoreSummary()`.
-- [ ] Show Sleep from `todaySleepScoreSummary()`.
+- [ ] Show Respiratory Rate, Resting HR, and Resting HRV only.
+- [ ] Keep Oxygen Saturation hidden until packet proof is ready.
 - [ ] Link card to Health > Health Monitor.
 - [ ] Include preview/stale state if any child metric is missing.
 
+## Alarm
+
+- [x] Add a Home alarm card below Health Monitor for current alarm state, wake time, edit alarm sheet, and disable action using the existing BLE alarm command path.
+- [ ] Persist the user's selected wake target separately from the latest connected-device alarm event.
+
 ## Daily Timeline
 
+- [ ] Cut from active Home on 2026-06-10; retain partial implementation for later.
 - [ ] Add primary sleep row: start/end, duration, score/status.
 - [ ] Add activity/strain row: activity summary, strain, calories/energy where available.
 - [ ] Add recovery row: score, HRV, resting HR where available.
@@ -86,6 +94,7 @@ MVP rule: Home is the daily command center. It should show today's live state fi
 
 ## Tools Grid
 
+- [ ] Replace this scope with the active Data & Algorithms cards for Packet Inputs and Algorithms.
 - [ ] Add Sleep Coach shortcut to Coach/Sleep planning.
 - [ ] Add Activity shortcut to Capture or activity entry flow.
 - [ ] Add Journal shortcut to Coach/Journal prompt.

@@ -2,8 +2,9 @@ use open_vitals_core::{
     capture_import::{CapturedFrameBatchOptions, CapturedFrameInput, import_captured_frame_batch},
     protocol::{DeviceType, PACKET_TYPE_REALTIME_RAW_DATA, build_v5_payload_frame},
     step_motion_estimator::{
-        OPENVITALS_STEPS_RAW_MOTION_ESTIMATE_V0_ID, OPENVITALS_STEPS_RAW_MOTION_ESTIMATE_V0_VERSION,
-        RawMotionStepEstimateOptions, run_raw_motion_step_estimate_for_store,
+        OPENVITALS_STEPS_RAW_MOTION_ESTIMATE_V0_ID,
+        OPENVITALS_STEPS_RAW_MOTION_ESTIMATE_V0_VERSION, RawMotionStepEstimateOptions,
+        run_raw_motion_step_estimate_for_store,
     },
     store::OpenVitalsStore,
 };
@@ -45,8 +46,14 @@ fn raw_motion_step_estimator_matches_counted_steps_without_writing_metrics() {
     .unwrap();
 
     assert!(report.pass, "{:?}", report.issues);
-    assert_eq!(report.schema, "open_vitals.raw-motion-step-estimate-report.v1");
-    assert_eq!(report.algorithm_id, OPENVITALS_STEPS_RAW_MOTION_ESTIMATE_V0_ID);
+    assert_eq!(
+        report.schema,
+        "open_vitals.raw-motion-step-estimate-report.v1"
+    );
+    assert_eq!(
+        report.algorithm_id,
+        OPENVITALS_STEPS_RAW_MOTION_ESTIMATE_V0_ID
+    );
     assert_eq!(
         report.algorithm_version,
         OPENVITALS_STEPS_RAW_MOTION_ESTIMATE_V0_VERSION

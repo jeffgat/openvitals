@@ -1,13 +1,124 @@
 import Foundation
 import UIKit
 
-struct NotificationFrameParseResult {
+struct NotificationFrame: Sendable {
+  let hex: String
+}
+
+struct NotificationIngestResult: Sendable {
+  let event: OpenVitalsNotificationEvent
+  let frames: [NotificationFrame]
+  let bufferedBytes: Int
+  let expectedBytes: Int?
+  let droppedBytes: Int
+  let usedBufferedData: Bool
+}
+
+struct FrameReassemblyResult: Sendable {
+  let frames: [Data]
+  let bufferedBytes: Int
+  let expectedBytes: Int?
+  let droppedBytes: Int
+  let usedBufferedData: Bool
+}
+
+final class NotificationFrameReassembler: @unchecked Sendable {
+  private let maximumBufferedFrameBytes: Int
+  private let stateLock = NSLock()
+  private var frameReassemblyBuffers: [String: Data] = [:]
+
+  init(maximumBufferedFrameBytes: Int) {
+    self.maximumBufferedFrameBytes = maximumBufferedFrameBytes
+  }
+
+  func notificationIngestResult(for event: OpenVitalsNotificationEvent) -> NotificationIngestResult {
+    let reassembly = openVitalsFrames(in: event.value, event: event)
+    return NotificationIngestResult(
+      event: event,
+      frames: reassembly.frames.map { NotificationFrame(hex: $0.hexString) },
+      bufferedBytes: reassembly.bufferedBytes,
+      expectedBytes: reassembly.expectedBytes,
+      droppedBytes: reassembly.droppedBytes,
+      usedBufferedData: reassembly.usedBufferedData
+    )
+  }
+
+  private func openVitalsFrames(in data: Data, event: OpenVitalsNotificationEvent) -> FrameReassemblyResult {
+    stateLock.lock()
+    defer { stateLock.unlock() }
+
+    let key = frameReassemblyKey(for: event)
+    let hadBufferedData = frameReassemblyBuffers[key]?.isEmpty == false
+    var bytes = Array(frameReassemblyBuffers[key] ?? Data())
+    bytes.append(contentsOf: data)
+    var frames: [Data] = []
+    var droppedBytes = 0
+    var expectedBytes: Int?
+    let headerLength = event.rustDeviceType == "GEN4" ? 4 : 8
+
+    while let startIndex = bytes.firstIndex(of: 0xaa) {
+      if startIndex > 0 {
+        droppedBytes += startIndex
+        bytes.removeFirst(startIndex)
+      }
+      guard bytes.count >= headerLength else {
+        break
+      }
+
+      let declaredLength: Int
+      if event.rustDeviceType == "GEN4" {
+        declaredLength = Int(bytes[1]) | Int(bytes[2]) << 8
+      } else {
+        declaredLength = Int(bytes[2]) | Int(bytes[3]) << 8
+      }
+      guard declaredLength >= 4,
+            declaredLength + headerLength <= maximumBufferedFrameBytes else {
+        droppedBytes += 1
+        bytes.removeFirst()
+        continue
+      }
+
+      let expectedLength = declaredLength + headerLength
+      guard bytes.count >= expectedLength else {
+        expectedBytes = expectedLength
+        break
+      }
+      frames.append(Data(bytes[0..<expectedLength]))
+      bytes.removeFirst(expectedLength)
+    }
+
+    if frames.isEmpty, bytes.count > maximumBufferedFrameBytes {
+      droppedBytes += bytes.count
+      bytes.removeAll(keepingCapacity: true)
+    }
+
+    if bytes.isEmpty {
+      frameReassemblyBuffers.removeValue(forKey: key)
+    } else {
+      frameReassemblyBuffers[key] = Data(bytes)
+    }
+
+    return FrameReassemblyResult(
+      frames: frames,
+      bufferedBytes: bytes.count,
+      expectedBytes: expectedBytes,
+      droppedBytes: droppedBytes,
+      usedBufferedData: hadBufferedData
+    )
+  }
+
+  private func frameReassemblyKey(for event: OpenVitalsNotificationEvent) -> String {
+    "\(event.deviceID.uuidString)|\(event.serviceUUID)|\(event.characteristicUUID)|\(event.rustDeviceType)"
+  }
+}
+
+struct NotificationFrameParseResult: @unchecked Sendable {
   let parsed: [String: Any]?
   let compact: NotificationFrameCompactSummary?
   let errorDescription: String?
 }
 
-struct NotificationFrameBatchTiming {
+struct NotificationFrameBatchTiming: Sendable {
   let totalMicroseconds: Int
   let parseMicroseconds: Int
   let compactSummaryMicroseconds: Int
@@ -43,8 +154,8 @@ struct NotificationFrameBatchTiming {
   }
 }
 
-struct NotificationFrameCompactSummary {
-  struct Movement {
+struct NotificationFrameCompactSummary: Sendable {
+  struct Movement: Sendable {
     let axisCount: Int
     let parsedSampleCount: Int
     let rawPeakRange: Double
@@ -126,7 +237,7 @@ struct NotificationFrameCompactSummary {
   }
 }
 
-struct NotificationFrameInterpretation {
+struct NotificationFrameInterpretation: @unchecked Sendable {
   let parseErrorDescription: String?
   let summary: String?
   let packetType: Int?
@@ -137,13 +248,13 @@ struct NotificationFrameInterpretation {
   let dataSignal: WhoopDataSignalSample?
 }
 
-struct ParsedNotificationFrameResult {
+struct ParsedNotificationFrameResult: @unchecked Sendable {
   let interpretation: NotificationFrameInterpretation
   let event: OpenVitalsNotificationEvent
   let bridgeTiming: OpenVitalsRustBridgeTiming?
 }
 
-struct ParsedNotificationFrameDispatch {
+struct ParsedNotificationFrameDispatch: @unchecked Sendable {
   let mainResults: [ParsedNotificationFrameResult]
   let totalFrameCount: Int
   let offMainDataSignalCount: Int
@@ -153,7 +264,7 @@ struct ParsedNotificationFrameDispatch {
   let batchTiming: NotificationFrameBatchTiming?
 }
 
-struct NotificationParseContext {
+struct NotificationParseContext: @unchecked Sendable {
   let deviceType: String
   let healthCaptureActive: Bool
   let overnightGuardActive: Bool

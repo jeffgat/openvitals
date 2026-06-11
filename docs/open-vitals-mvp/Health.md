@@ -4,12 +4,14 @@ Source map: Flutter `MetricsView`, Flutter V2 metric pages, Flutter `health_moni
 
 MVP rule: Health owns metric detail, trend, algorithm, and provenance surfaces. Home can preview metrics, but Health is where users inspect why a number exists.
 
+Current product cut 2026-06-10: the Health tab/landing is removed from the active bottom tab bar. Existing Health route views remain in code and are reached from Home where needed. Packet Inputs and Algorithms are now surfaced on Home; Calibration, Stress, Cardio Load, Energy Bank, Oxygen Saturation, and broader Health landing shortcuts are retained for possible later reintroduction. See `docs/cut-for-later.md`.
+
 Swift evidence 2026-06-01: `HealthView.swift`, `AppRouter.swift`, `xcodebuildmcp build_sim` and `build_run_sim` passed with no warnings/errors. Simulator screenshots cover Health landing and every child route in `docs/open-vitals-mvp/evidence/health-2026-06-01/`.
 
 ## Parent View Contract
 
 - [x] Create a dedicated `HealthView.swift` or split `PlaceholderSectionListView(title: "Health")` out of `AppShellView.swift`.
-- [x] Keep this tab behind the Swift `Health` tab item.
+- [x] Cut this tab from the active bottom tab bar on 2026-06-10; keep route views available from Home.
 - [x] Define child routes: Health Monitor, Sleep, Recovery, Strain, Stress, Cardio Load, Energy Bank, Packet Inputs, Algorithms, Reference Comparisons, Calibration.
 - [x] Define a typed `HealthMetricSnapshot` model shared by cards, trend rows, and detail sheets.
 - [x] Remove static runtime fixture values; show unavailable states until live/local/bridge data exists.
@@ -18,12 +20,14 @@ Swift evidence 2026-06-01: `HealthView.swift`, `AppRouter.swift`, `xcodebuildmcp
 
 ## Health Landing
 
+- [ ] Cut from active navigation on 2026-06-10; keep implementation for possible later reintroduction.
 - [x] Show Health Monitor as the first card.
 - [x] Show metric cards for Sleep, Recovery, Strain, Stress, Cardio Load, Energy Bank.
 - [x] Show latest status for each: value, unit, status, freshness, provenance.
 - [x] Show Packet Inputs readiness summary.
 - [x] Show Algorithms/Calibration status summary.
 - [x] Group cards by "Today", "Vitals", "Training", and "Algorithms".
+- [x] Cache the landing snapshot groups after refresh so packet-backed Stress/Energy summaries are not rebuilt on every SwiftUI body pass.
 
 ## Packet-Derived Inputs
 
@@ -34,6 +38,7 @@ Swift evidence 2026-06-01: `HealthView.swift`, `AppRouter.swift`, `xcodebuildmcp
 - [x] Add Motion provenance from `motionFeatureProvenanceSummary()`.
 - [x] Add HRV row from `hrvFeatureSummary()`.
 - [x] Add HRV provenance from `hrvFeatureProvenanceSummary()`.
+- [x] Keep HRV/Recovery unavailable until packet-derived beat intervals are validated; readiness copy should describe missing beat-interval evidence rather than implying one packet family is authoritative.
 - [x] Add Resting HR row from `restingHeartRateFeatureSummary()`.
 - [x] Add Resting HR provenance from `restingHeartRateFeatureProvenanceSummary()`.
 - [x] Add Window row from `windowFeatureSummary()`.
@@ -56,6 +61,7 @@ Swift evidence 2026-06-01: `HealthView.swift`, `AppRouter.swift`, `xcodebuildmcp
 - [x] Add Sleep architecture row from `sleepV1ArchitectureCalibrationSummary()`.
 - [x] Add Sleep change row from `sleepV1WhyChangedSummary()`.
 - [x] Add Sleep component breakdown rows from `sleepV1ComponentBreakdownRows()`.
+- [x] Use `open_vitals.sleep.v0` for packet-derived sleep scoring until the sleep v1 release gate has validated architecture/stage semantics.
 - [x] Add Recovery score row from `recoveryFeatureScoreSummary()`.
 - [x] Add Recovery vitals row from `recoveryProvidedVitalsSummary()`.
 - [x] Add editable recovery vitals inputs: respiratory rate, respiratory baseline, skin temp delta.
@@ -63,6 +69,7 @@ Swift evidence 2026-06-01: `HealthView.swift`, `AppRouter.swift`, `xcodebuildmcp
 - [x] Add Stress score row from `stressFeatureScoreSummary()`.
 - [x] Add provenance for sleep, recovery, strain, and stress via `packetScoreProvenanceSummary(family)`.
 - [x] Add Next Action row from `packetDerivedScoreNextActionSummary()`.
+- [x] Persist Sleep, Recovery, and Strain score runs to local SQLite and reload the latest reports on launch.
 
 ## Health Monitor
 
@@ -70,7 +77,7 @@ Swift evidence 2026-06-01: `HealthView.swift`, `AppRouter.swift`, `xcodebuildmcp
 - [x] Include Respiratory Rate: value, rpm, normal range, trend sheet.
 - [x] Include Resting HR: value, bpm, normal range, trend sheet.
 - [x] Include Resting HRV: value, ms, status, trend sheet.
-- [x] Include Oxygen Saturation: value, percent, status, trend sheet.
+- [ ] Cut Oxygen Saturation from the active Health Monitor surface until packet proof is ready.
 - [x] Include Wrist Temperature: value, C, status, trend sheet.
 - [x] Include Sleep: duration/value, status, trend sheet.
 - [x] Add Cardio Load card route.

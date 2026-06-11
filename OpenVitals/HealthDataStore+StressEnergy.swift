@@ -132,6 +132,10 @@ extension HealthDataStore {
     allowLiveFallbacks: Bool = true
   ) -> EnergyBankAlgorithmSummary {
     let stress = stressAlgorithmSummary(for: date, calendar: calendar, allowLiveFallbacks: allowLiveFallbacks)
+    return energyBankAlgorithmSummary(from: stress)
+  }
+
+  func energyBankAlgorithmSummary(from stress: StressAlgorithmSummary) -> EnergyBankAlgorithmSummary {
     guard stress.hasData else {
       return emptyEnergyBankSummary(
         status: "No stress data",
@@ -209,6 +213,10 @@ extension HealthDataStore {
 
   func stressSnapshot(base snapshot: HealthMetricSnapshot, allowLiveFallbacks: Bool = true) -> HealthMetricSnapshot {
     let summary = stressAlgorithmSummary(allowLiveFallbacks: allowLiveFallbacks)
+    return stressSnapshot(base: snapshot, summary: summary)
+  }
+
+  func stressSnapshot(base snapshot: HealthMetricSnapshot, summary: StressAlgorithmSummary) -> HealthMetricSnapshot {
     guard let score = summary.score,
           let scoreText = Self.numberText(score, fractionDigits: 0) else {
       return replacingHealthMonitorSnapshot(
@@ -237,6 +245,10 @@ extension HealthDataStore {
 
   func energyBankSnapshot(base snapshot: HealthMetricSnapshot, allowLiveFallbacks: Bool = true) -> HealthMetricSnapshot {
     let summary = energyBankAlgorithmSummary(allowLiveFallbacks: allowLiveFallbacks)
+    return energyBankSnapshot(base: snapshot, summary: summary)
+  }
+
+  func energyBankSnapshot(base snapshot: HealthMetricSnapshot, summary: EnergyBankAlgorithmSummary) -> HealthMetricSnapshot {
     guard let percent = summary.percent,
           let percentText = Self.numberText(percent, fractionDigits: 0) else {
       return replacingHealthMonitorSnapshot(

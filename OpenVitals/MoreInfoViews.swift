@@ -60,16 +60,16 @@ private struct MoreAppearanceOptionRow: View {
     Button(action: action) {
       HStack(alignment: .top, spacing: 12) {
         Image(systemName: preference.systemImage)
-          .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+          .foregroundStyle(selected ? OpenVitalsTheme.accent : OpenVitalsTheme.textSecondary)
           .frame(width: 24, height: 24)
 
         VStack(alignment: .leading, spacing: 4) {
           Text(preference.title)
             .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.primary)
+            .foregroundStyle(OpenVitalsTheme.textPrimary)
           Text(preference.detail)
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(OpenVitalsTheme.textSecondary)
             .lineLimit(2)
         }
 
@@ -77,7 +77,7 @@ private struct MoreAppearanceOptionRow: View {
 
         if selected {
           Image(systemName: "checkmark.circle.fill")
-            .foregroundStyle(Color.accentColor)
+            .foregroundStyle(OpenVitalsTheme.accent)
             .imageScale(.medium)
         }
       }
@@ -215,6 +215,7 @@ struct MoreInfoRow: View {
   let value: String
   let systemImage: String
   let status: MoreStatusKind
+  var statusTitle: String? = nil
 
   var body: some View {
     HStack(alignment: .top, spacing: 12) {
@@ -226,12 +227,13 @@ struct MoreInfoRow: View {
         HStack(alignment: .firstTextBaseline) {
           Text(title)
             .font(.subheadline.weight(.semibold))
+            .foregroundStyle(OpenVitalsTheme.textPrimary)
           Spacer(minLength: 8)
-          MoreStatusBadge(status: status)
+          MoreStatusBadge(status: status, titleOverride: statusTitle)
         }
         Text(value.isEmpty ? "Unavailable" : value)
           .font(.caption)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(OpenVitalsTheme.textSecondary)
           .lineLimit(3)
           .textSelection(.enabled)
       }
@@ -259,13 +261,13 @@ struct MoreActionRow: View {
           HStack(alignment: .firstTextBaseline) {
             Text(title)
               .font(.subheadline.weight(.semibold))
-              .foregroundStyle(.primary)
+              .foregroundStyle(OpenVitalsTheme.textPrimary)
             Spacer(minLength: 8)
             MoreStatusBadge(status: status)
           }
           Text(detail)
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(OpenVitalsTheme.textSecondary)
             .lineLimit(2)
         }
       }
@@ -289,12 +291,13 @@ struct MoreCommandGroupRow: View {
         HStack {
           Text(group.title)
             .font(.subheadline.weight(.semibold))
+            .foregroundStyle(OpenVitalsTheme.textPrimary)
           Spacer(minLength: 8)
           MoreStatusBadge(status: group.status)
         }
         Text(group.commands.joined(separator: ", "))
           .font(.caption)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(OpenVitalsTheme.textSecondary)
           .lineLimit(2)
       }
     }

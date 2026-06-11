@@ -7,7 +7,7 @@ enum OpenVitalsRustBridgeError: Error {
   case methodFailed(String)
 }
 
-struct OpenVitalsRustBridgeTiming {
+struct OpenVitalsRustBridgeTiming: Sendable {
   let method: String
   let methodElapsedMicroseconds: Int
   let requestEncodeMicroseconds: Int
@@ -20,8 +20,38 @@ struct OpenVitalsRustBridgeTiming {
 }
 
 final class OpenVitalsRustBridge {
+  private static let utilityQueue = DispatchQueue(label: "com.open_vitals.swift.rust-bridge.utility", qos: .utility)
+  private static let userInitiatedQueue = DispatchQueue(label: "com.open_vitals.swift.rust-bridge.user-initiated", qos: .userInitiated)
+
   private var counter = 0
   private(set) var lastTiming: OpenVitalsRustBridgeTiming?
+
+  static func performInBackground<T>(
+    qos: DispatchQoS.QoSClass = .utility,
+    _ work: @escaping () throws -> T,
+    completion: @escaping (Result<T, Error>) -> Void
+  ) {
+    queue(for: qos).async {
+      let result: Result<T, Error>
+      do {
+        result = .success(try work())
+      } catch {
+        result = .failure(error)
+      }
+      DispatchQueue.main.async {
+        completion(result)
+      }
+    }
+  }
+
+  private static func queue(for qos: DispatchQoS.QoSClass) -> DispatchQueue {
+    switch qos {
+    case .userInteractive, .userInitiated:
+      return userInitiatedQueue
+    default:
+      return utilityQueue
+    }
+  }
 
   func request(method: String, args: [String: Any] = [:]) throws -> [String: Any] {
     try requestValue(method: method, args: args) as? [String: Any] ?? [:]

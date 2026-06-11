@@ -65,6 +65,15 @@ final class MoreDataStore: ObservableObject {
   @Published var localExportInProgress = false
   @Published var localExportURL: URL?
   @Published var localExportManifestURL: URL?
+  @Published var supabaseProjectURL: String
+  @Published var supabaseAnonKey: String
+  @Published var supabaseBucket: String
+  @Published var supabaseDeviceAlias: String
+  @Published var supabaseUploadStatus = "Not configured"
+  @Published var supabaseUploadInProgress = false
+  @Published var supabaseLastBundlePath = MoreDataStore.supabaseNoBundleUploadText
+  @Published var supabaseLastManifestPath = MoreDataStore.supabaseNoManifestUploadText
+  @Published var supabaseLastDatabaseRow = MoreDataStore.supabaseNoDatabaseRowText
 
   @Published var algorithmPreferenceStatus = "Local selection only"
 
@@ -88,10 +97,22 @@ final class MoreDataStore: ObservableObject {
 
   @Published var supportBundlePath: String
   @Published var logExportStatus = "Logs remain in the app event stream"
-  @Published var deletionStatus = "Deletion bridge not wired"
+  @Published var deletionStatus = "No local data wipe run"
 
   let bridge = OpenVitalsRustBridge()
   let outputDirectory: String
+  let defaults = UserDefaults.standard
+  static let supabaseProjectURLDefaultsKey = "open_vitals.debug_upload.supabase_project_url"
+  static let supabaseAnonKeyDefaultsKey = "open_vitals.debug_upload.supabase_anon_key"
+  static let supabaseBucketDefaultsKey = "open_vitals.debug_upload.supabase_bucket"
+  static let supabaseDeviceAliasDefaultsKey = "open_vitals.debug_upload.device_alias"
+  static let defaultSupabaseProjectURL = "https://gpvltilwupglfaiosdcq.supabase.co"
+  static let defaultSupabaseAnonKey = "sb_publishable_MxhFj8kE4GVqERetpPU2tA_G3wOYtFY"
+  static let defaultSupabaseBucket = "openvitals-debug"
+  static let defaultSupabaseDeviceAlias = "dev-device"
+  static let supabaseNoBundleUploadText = "Not uploaded yet"
+  static let supabaseNoManifestUploadText = "Not uploaded yet"
+  static let supabaseNoDatabaseRowText = "Not inserted yet"
 
   struct RawExportArtifactValidationResult {
     let bundleValidation: String
@@ -116,6 +137,22 @@ final class MoreDataStore: ObservableObject {
     self.databasePath = databasePath ?? appDirectory.appendingPathComponent("open_vitals.sqlite").path
     outputDirectory = documentsDirectory.appendingPathComponent("Exports", isDirectory: true).path
     supportBundlePath = documentsDirectory.appendingPathComponent("Support", isDirectory: true).path
+    supabaseProjectURL = Self.supabaseDefaultedValue(
+      UserDefaults.standard.string(forKey: Self.supabaseProjectURLDefaultsKey),
+      fallback: Self.defaultSupabaseProjectURL
+    )
+    supabaseAnonKey = Self.supabaseDefaultedValue(
+      UserDefaults.standard.string(forKey: Self.supabaseAnonKeyDefaultsKey),
+      fallback: Self.defaultSupabaseAnonKey
+    )
+    supabaseBucket = Self.supabaseDefaultedValue(
+      UserDefaults.standard.string(forKey: Self.supabaseBucketDefaultsKey),
+      fallback: Self.defaultSupabaseBucket
+    )
+    supabaseDeviceAlias = Self.supabaseDefaultedValue(
+      UserDefaults.standard.string(forKey: Self.supabaseDeviceAliasDefaultsKey),
+      fallback: Self.defaultSupabaseDeviceAlias
+    )
 
     let now = Date()
     let start = Self.fullExportStart
@@ -124,6 +161,9 @@ final class MoreDataStore: ObservableObject {
     healthBackfillEnd = end
     rawExportStart = start
     rawExportEnd = end
+    if supabaseUploadIsConfigured {
+      supabaseUploadStatus = "Ready to upload debug bundle"
+    }
   }
 
   func routeStatus(ble: OpenVitalsBLEClient, model: OpenVitalsAppModel) -> MoreRouteStatus {
@@ -131,18 +171,31 @@ final class MoreDataStore: ObservableObject {
       profile: OnboardingProfileSnapshot().hasRequiredDetails ? .ready : .pending,
       device: ble.connectionState == "ready" ? .ready : .pending,
       connectionLab: model.helloSummary.hasPrefix("GET_HELLO") ? .ready : .pending,
-      capture: captureSessionID == nil ? .pending : .ready,
+      capture: captureSessionID == nil ? .notRun : .listening,
       localStore: databaseExists ? .ready : .unavailable,
       healthSync: healthSyncBackfillWindowIssueSummary() == nil ? .pending : .blocked,
-      rawExport: rawExportWindowIssueSummary() == nil ? (databaseExists ? .pending : .unavailable) : .blocked,
+      rawExport: rawExportRouteStatus,
       algorithms: .ready,
       debug: coreVersionStatus.hasPrefix("Rust core") ? .ready : .pending,
       appearance: .ready,
       privacy: privacyLintStatus == "Not linted" ? .pending : .ready,
       support: .pending,
       about: .ready,
-      developer: .pending
+      developer: .ready
     )
+  }
+
+  private var rawExportRouteStatus: MoreStatusKind {
+    if rawExportWindowIssueSummary() != nil {
+      return .blocked
+    }
+    guard databaseExists else {
+      return .unavailable
+    }
+    if rawExportInProgress || localExportInProgress || supabaseUploadInProgress {
+      return .inProgress
+    }
+    return rawBundlePath == "No bundle" ? .notRun : .ready
   }
 
   func refreshBridgeStatus(model: OpenVitalsAppModel) {
@@ -150,14 +203,21 @@ final class MoreDataStore: ObservableObject {
     guard schemaVersion == "Unknown" || coreVersionStatus == "Rust bridge not checked" else {
       return
     }
-    do {
-      let value = try bridge.request(method: "core.version")
-      let version = value["core_version"] as? String ?? "unknown"
-      let schema = value["storage_schema_version"].map(Self.stringValue) ?? "unknown"
-      coreVersionStatus = "Rust core \(version)"
-      schemaVersion = schema
-    } catch {
-      coreVersionStatus = "Rust bridge unavailable"
+    OpenVitalsRustBridge.performInBackground(qos: .utility, {
+      try OpenVitalsRustBridge().request(method: "core.version")
+    }) { [weak self] result in
+      guard let self else {
+        return
+      }
+      switch result {
+      case .success(let value):
+        let version = value["core_version"] as? String ?? "unknown"
+        let schema = value["storage_schema_version"].map(Self.stringValue) ?? "unknown"
+        coreVersionStatus = "Rust core \(version)"
+        schemaVersion = schema
+      case .failure:
+        coreVersionStatus = "Rust bridge unavailable"
+      }
     }
   }
 
@@ -173,8 +233,9 @@ final class MoreDataStore: ObservableObject {
   func refreshRecentCaptureSessions() {
     let nowMs = Self.unixMilliseconds(Date())
     let thirtyDaysMs: Int64 = 30 * 24 * 60 * 60 * 1_000
-    do {
-      let value = try bridge.request(
+    let databasePath = databasePath
+    OpenVitalsRustBridge.performInBackground(qos: .utility, {
+      try OpenVitalsRustBridge().request(
         method: "capture.list_sessions",
         args: [
           "database_path": databasePath,
@@ -182,10 +243,17 @@ final class MoreDataStore: ObservableObject {
           "end_unix_ms": nowMs,
         ]
       )
-      recentCaptureSessions = Self.captureSessionSummaries(from: value)
-    } catch {
+    }) { [weak self] result in
+      guard let self else {
+        return
+      }
+      switch result {
+      case .success(let value):
+        recentCaptureSessions = Self.captureSessionSummaries(from: value)
+      case .failure:
       if recentCaptureSessions.isEmpty {
         recentCaptureSessions = ["No stored capture sessions"]
+      }
       }
     }
   }
@@ -215,8 +283,7 @@ final class MoreDataStore: ObservableObject {
 
     let sessionID = "swift-capture-\(UUID().uuidString)"
     let now = Date()
-    do {
-      var args: [String: Any] = [
+    var args: [String: Any] = [
         "database_path": databasePath,
         "session_id": sessionID,
         "source": "ios_swift_more",
@@ -227,21 +294,30 @@ final class MoreDataStore: ObservableObject {
           "connection_state": ble.connectionState,
         ],
       ]
-      if let activeDeviceID = ble.activeDeviceIdentifier?.uuidString {
-        args["active_device_id"] = activeDeviceID
-      }
+    if let activeDeviceID = ble.activeDeviceIdentifier?.uuidString {
+      args["active_device_id"] = activeDeviceID
+    }
 
-      let value = try bridge.request(
+    captureStatus = "Starting capture..."
+    OpenVitalsRustBridge.performInBackground(qos: .userInitiated, {
+      try OpenVitalsRustBridge().request(
         method: "capture.start_session",
         args: args
       )
+    }) { [weak self] result in
+      guard let self else {
+        return
+      }
+      switch result {
+      case .success(let value):
       captureSessionID = sessionID
       captureSessionStartedAt = now
       captureFrameCount = 0
       captureStatus = "Started \(Self.shortBridgeSummary(value))"
       refreshRecentCaptureSessions()
-    } catch {
+      case .failure(let error):
       captureStatus = "Start failed: \(Self.errorSummary(error))"
+      }
     }
   }
 
@@ -251,23 +327,33 @@ final class MoreDataStore: ObservableObject {
       return
     }
 
-    do {
-      let value = try bridge.request(
+    let frameCount = captureFrameCount
+    let databasePath = databasePath
+    captureStatus = "Finishing capture..."
+    OpenVitalsRustBridge.performInBackground(qos: .userInitiated, {
+      try OpenVitalsRustBridge().request(
         method: "capture.finish_session",
         args: [
           "database_path": databasePath,
           "session_id": sessionID,
           "ended_at_unix_ms": Self.unixMilliseconds(Date()),
-          "frame_count": captureFrameCount,
+          "frame_count": frameCount,
         ]
       )
+    }) { [weak self] result in
+      guard let self else {
+        return
+      }
+      switch result {
+      case .success(let value):
       captureStatus = "Finished \(Self.shortBridgeSummary(value))"
       captureSessionID = nil
       captureSessionStartedAt = nil
       captureFrameCount = 0
       refreshRecentCaptureSessions()
-    } catch {
+      case .failure(let error):
       captureStatus = "Finish failed: \(Self.errorSummary(error))"
+      }
     }
   }
 
@@ -307,24 +393,136 @@ final class MoreDataStore: ObservableObject {
       return
     }
 
-    do {
-      let value = try bridge.request(
+    storageStatus = "Checking local store..."
+    storageNextAction = "Running Rust storage checks"
+    let databasePath = databasePath
+    OpenVitalsRustBridge.performInBackground(qos: .userInitiated, {
+      try OpenVitalsRustBridge().request(
         method: "storage.check",
         args: [
           "database_path": databasePath,
           "self_test": true,
         ]
       )
+    }) { [weak self] result in
+      guard let self else {
+        return
+      }
+      switch result {
+      case .success(let value):
       storageStatus = Self.passSummary(value, fallback: Self.shortBridgeSummary(value))
       storageNextAction = Self.nextActionSummary(value, fallback: "Review any failed checks before exporting")
       if let schema = value["schema_version"].map(Self.stringValue) {
         schemaVersion = schema
       }
       existingOpenVitalsRecordsStatus = Self.recordCountSummary(value)
-    } catch {
+      case .failure(let error):
       storageStatus = "Check failed: \(Self.errorSummary(error))"
       storageNextAction = "Inspect the local database path and rerun Check"
+      }
     }
+  }
+
+  var canWipeLocalAppData: Bool {
+    !rawExportInProgress && !localExportInProgress && !supabaseUploadInProgress
+  }
+
+  func wipeLocalAppData() {
+    guard canWipeLocalAppData else {
+      deletionStatus = "Wipe blocked while export is running"
+      return
+    }
+
+    deletionStatus = "Wiping local app data..."
+    HeartRateSeriesStore.shared.removeAllPersistedSamples()
+    HRVSeriesStore.shared.removeAllPersistedSamples()
+    OnboardingProfilePersistence.deletePersistedState()
+
+    let defaultsRemoved = Self.removeOpenVitalsDefaultsPreservingRememberedDevice()
+    let appDirectory = URL(fileURLWithPath: databasePath).deletingLastPathComponent()
+    let documentsDirectory = URL(fileURLWithPath: outputDirectory).deletingLastPathComponent()
+    let removedPaths = Self.removeLocalDataDirectories([appDirectory, documentsDirectory])
+    resetStateAfterLocalDataWipe()
+    deletionStatus = "Wiped local app data | removed \(removedPaths) folders | cleared \(defaultsRemoved) defaults | remembered BLE device kept"
+  }
+
+  private func resetStateAfterLocalDataWipe() {
+    storageStatus = "Not checked"
+    storageNextAction = "Run Check after OpenVitals has created the local database"
+    schemaVersion = "Unknown"
+    captureSessionID = nil
+    captureSessionStartedAt = nil
+    captureFrameCount = 0
+    captureStatus = "No capture session"
+    liveCaptureStatus = "Connect a device to mirror notifications into capture"
+    recentCaptureSessions = []
+    existingOpenVitalsRecordsStatus = "No local database checked"
+    importedSleepHistoryStatus = "No imported sleep history loaded"
+    healthSyncReports = ["No dry run yet"]
+    rawExportStatus = "No export yet"
+    rawBundlePath = "No bundle"
+    rawZipPath = "No zip"
+    rawZipURL = nil
+    rawRowCounts = "No rows"
+    rawValidationManifestStatus = "No validation manifest"
+    rawValidationManifestURL = nil
+    rawValidationReviewStatus = "No validation review"
+    rawValidationReviewURL = nil
+    rawValidationRunbookStatus = "No validation runbook"
+    rawValidationRunbookURL = nil
+    rawBundleValidation = "Not validated"
+    rawZipValidation = "Not validated"
+    privacyLintStatus = "Not linted"
+    sanitizedPrivacyStatus = "No sanitized copy"
+    localExportStatus = "No local export"
+    localExportURL = nil
+    localExportManifestURL = nil
+    supabaseUploadStatus = supabaseUploadIsConfigured ? "Ready to upload debug bundle" : "Not configured"
+    supabaseUploadInProgress = false
+    supabaseLastBundlePath = Self.supabaseNoBundleUploadText
+    supabaseLastManifestPath = Self.supabaseNoManifestUploadText
+    supabaseLastDatabaseRow = Self.supabaseNoDatabaseRowText
+    debugWebSocketStatus = "Not started"
+    debugNextAction = "Start a local debug session"
+    debugSessionID = "swift-more-\(UUID().uuidString)"
+  }
+
+  private static func removeLocalDataDirectories(_ directories: [URL]) -> Int {
+    var removed = 0
+    let fileManager = FileManager.default
+    for directory in directories {
+      guard fileManager.fileExists(atPath: directory.path) else {
+        continue
+      }
+      do {
+        try fileManager.removeItem(at: directory)
+        removed += 1
+      } catch {
+        NSLog("OpenVitals local data wipe failed for \(directory.path): \(String(describing: error))")
+      }
+    }
+    return removed
+  }
+
+  private static func removeOpenVitalsDefaultsPreservingRememberedDevice() -> Int {
+    let defaults = UserDefaults.standard
+    let preservedKeys: Set<String> = [
+      OpenVitalsBLEClient.DefaultsKey.rememberedDeviceID,
+      OpenVitalsBLEClient.DefaultsKey.rememberedDeviceName,
+      OpenVitalsBLEClient.DefaultsKey.rememberedDeviceValidated,
+      OpenVitalsBLEClient.LegacyDefaultsKey.rememberedDeviceID,
+      OpenVitalsBLEClient.LegacyDefaultsKey.rememberedDeviceName,
+      OpenVitalsBLEClient.LegacyDefaultsKey.rememberedDeviceValidated,
+    ]
+    let keys = defaults.dictionaryRepresentation().keys.filter { key in
+      !preservedKeys.contains(key)
+        && (key.hasPrefix("open_vitals.") || key.hasPrefix("openVitals.") || key.hasPrefix("goose.swift."))
+    }
+    for key in keys {
+      defaults.removeObject(forKey: key)
+    }
+    defaults.synchronize()
+    return keys.count
   }
 
   func healthSyncBackfillWindowSummary() -> String {

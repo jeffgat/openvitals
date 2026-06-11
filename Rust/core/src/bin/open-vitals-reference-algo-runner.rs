@@ -275,7 +275,10 @@ fn run_reference_algorithm(
 fn run_typed<I, O>(
     input_path: &std::path::Path,
     run: impl FnOnce(I) -> AlgorithmRunResult<O>,
-    record: impl FnOnce(&str, &AlgorithmRunResult<O>) -> open_vitals_core::OpenVitalsResult<AlgorithmRunRecord>,
+    record: impl FnOnce(
+        &str,
+        &AlgorithmRunResult<O>,
+    ) -> open_vitals_core::OpenVitalsResult<AlgorithmRunRecord>,
 ) -> open_vitals_core::OpenVitalsResult<ReferenceRun>
 where
     I: DeserializeOwned,
@@ -283,8 +286,8 @@ where
 {
     let input_raw =
         fs::read_to_string(input_path).map_err(|source| OpenVitalsError::io(input_path, source))?;
-    let input: I =
-        serde_json::from_str(&input_raw).map_err(|source| OpenVitalsError::json(input_path, source))?;
+    let input: I = serde_json::from_str(&input_raw)
+        .map_err(|source| OpenVitalsError::json(input_path, source))?;
     let result = run(input);
     let record = record("__reference_pending_run_id__", &result)?;
     Ok(ReferenceRun {
@@ -298,7 +301,9 @@ where
             .as_ref()
             .map(serde_json::to_value)
             .transpose()
-            .map_err(|error| OpenVitalsError::message(format!("cannot serialize output: {error}")))?,
+            .map_err(|error| {
+                OpenVitalsError::message(format!("cannot serialize output: {error}"))
+            })?,
         quality_flags: result.quality_flags,
         errors: result.errors,
         provenance: result.provenance,
@@ -317,7 +322,8 @@ fn run_external_reference_algorithm(
     executable: &Path,
     external_args: &[String],
 ) -> open_vitals_core::OpenVitalsResult<ReferenceRun> {
-    let input_bytes = fs::read(input_path).map_err(|source| OpenVitalsError::io(input_path, source))?;
+    let input_bytes =
+        fs::read(input_path).map_err(|source| OpenVitalsError::io(input_path, source))?;
     let input_sha256 = sha256_hex(&input_bytes);
     let mut command = Command::new(executable);
     command
@@ -634,7 +640,9 @@ fn values(args: &[String], name: &str) -> open_vitals_core::OpenVitalsResult<Vec
     while let Some(arg) = iter.next() {
         if arg == name {
             let Some(value) = iter.next() else {
-                return Err(OpenVitalsError::message(format!("missing value for {name}")));
+                return Err(OpenVitalsError::message(format!(
+                    "missing value for {name}"
+                )));
             };
             values.push(value.clone());
         }
@@ -659,7 +667,10 @@ fn require_non_empty(field: &str, value: &str) -> open_vitals_core::OpenVitalsRe
     Ok(())
 }
 
-fn require_object(field: &str, value: &serde_json::Value) -> open_vitals_core::OpenVitalsResult<()> {
+fn require_object(
+    field: &str,
+    value: &serde_json::Value,
+) -> open_vitals_core::OpenVitalsResult<()> {
     if !value.is_object() {
         return Err(OpenVitalsError::message(format!(
             "external reference {field} must be a JSON object"

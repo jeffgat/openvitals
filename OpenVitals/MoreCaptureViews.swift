@@ -17,9 +17,9 @@ struct MoreCommandGroup: Identifiable {
   static let defaults = [
     MoreCommandGroup(id: "identity", title: "Identity", status: .ready, commands: ["GET_HELLO", "GET_DEVICE_INFO"]),
     MoreCommandGroup(id: "battery", title: "Battery", status: .ready, commands: ["READ_BATTERY"]),
-    MoreCommandGroup(id: "historical_sync", title: "Historical Sync", status: .pending, commands: ["GET_DATA_RANGE", "SEND_HISTORICAL_DATA"]),
+    MoreCommandGroup(id: "historical_sync", title: "Historical Sync", status: .notRun, commands: ["GET_DATA_RANGE", "SEND_HISTORICAL_DATA"]),
     MoreCommandGroup(id: "haptics", title: "Haptics", status: .blocked, commands: ["SET_ALARM"]),
-    MoreCommandGroup(id: "sensors", title: "Sensors", status: .pending, commands: ["READ_SENSORS"]),
+    MoreCommandGroup(id: "sensors", title: "Sensors", status: .notRun, commands: ["READ_SENSORS"]),
     MoreCommandGroup(id: "config", title: "Config", status: .blocked, commands: ["WRITE_CONFIG"]),
     MoreCommandGroup(id: "firmware", title: "Firmware", status: .blocked, commands: ["FIRMWARE_UPDATE"]),
     MoreCommandGroup(id: "reboot", title: "Reboot", status: .blocked, commands: ["REBOOT"]),
@@ -46,7 +46,7 @@ struct MoreCommandGroup: Identifiable {
       let commands = grouped[key, default: []].compactMap { row in
         (row["command"] as? String) ?? (row["name"] as? String)
       }
-      let status: MoreStatusKind = key == "identity" || key == "battery" ? .ready : .pending
+      let status: MoreStatusKind = key == "identity" || key == "battery" ? .ready : .notRun
       return MoreCommandGroup(id: key, title: key.replacingOccurrences(of: "_", with: " ").capitalized, status: status, commands: commands.isEmpty ? ["Definitions loaded"] : commands)
     }
     return rows.isEmpty ? defaults : rows

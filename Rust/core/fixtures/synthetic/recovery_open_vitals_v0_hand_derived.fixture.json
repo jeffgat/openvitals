@@ -10,11 +10,11 @@
   "schema": "open_vitals.recovery-input.v1",
   "consent": "synthetic-no-user-data",
   "sensitivity": "public-test-fixture",
-  "notes": "Neutral HRV/RHR, perfect respiratory/temp, sleep 80, and prior strain readiness 70 produce weighted recovery 77.5.",
+  "notes": "Neutral HRV/RHR, normal respiratory/temp anomaly inputs, sleep 80, and prior strain readiness 70 produce weighted recovery 77.6.",
   "expected": {
     "algorithm_id": "open_vitals.recovery.v0",
     "version": "0.1.0",
-    "score_0_to_100": 77.5,
-    "component_count": 6
+    "score_0_to_100": 77.6,
+    "component_count": 5
   }
 }

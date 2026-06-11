@@ -12,7 +12,7 @@ final class AppRouter: ObservableObject {
   @Published var coachScrollToBottomRequestID = 0
 
   func openHealth(_ route: HealthRoute?) {
-    selectedTab = .health
+    selectedTab = .home
     if let route {
       healthPath = [route]
     } else {

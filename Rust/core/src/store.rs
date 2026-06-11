@@ -1065,6 +1065,10 @@ impl OpenVitalsStore {
                 ON activity_metrics(activity_session_id);
             CREATE INDEX IF NOT EXISTS idx_activity_metrics_by_name
                 ON activity_metrics(metric_name);
+            CREATE INDEX IF NOT EXISTS idx_activity_metrics_by_window
+                ON activity_metrics(start_time_unix_ms, end_time_unix_ms);
+            CREATE INDEX IF NOT EXISTS idx_activity_metrics_by_session_window
+                ON activity_metrics(activity_session_id, start_time_unix_ms, end_time_unix_ms);
 
             CREATE TABLE IF NOT EXISTS daily_activity_metrics (
                 daily_metric_id TEXT PRIMARY KEY,
@@ -1491,7 +1495,10 @@ impl OpenVitalsStore {
         })
     }
 
-    pub fn overnight_mirror_counts(&self, session_id: &str) -> OpenVitalsResult<OvernightMirrorCounts> {
+    pub fn overnight_mirror_counts(
+        &self,
+        session_id: &str,
+    ) -> OpenVitalsResult<OvernightMirrorCounts> {
         validate_required("session_id", session_id)?;
         self.ensure_overnight_mirror_tables()?;
         let session_exists: bool = self.conn.query_row(
@@ -2042,8 +2049,9 @@ impl OpenVitalsStore {
             "#,
             params![session_id, ended_at_unix_ms, frame_count],
         )?;
-        self.capture_session(session_id)?
-            .ok_or_else(|| OpenVitalsError::message(format!("capture session {session_id} not found")))
+        self.capture_session(session_id)?.ok_or_else(|| {
+            OpenVitalsError::message(format!("capture session {session_id} not found"))
+        })
     }
 
     pub fn capture_session(&self, session_id: &str) -> OpenVitalsResult<Option<CaptureSessionRow>> {
@@ -2109,7 +2117,10 @@ impl OpenVitalsStore {
             .map_err(OpenVitalsError::from)
     }
 
-    pub fn insert_activity_session(&self, input: ActivitySessionInput<'_>) -> OpenVitalsResult<bool> {
+    pub fn insert_activity_session(
+        &self,
+        input: ActivitySessionInput<'_>,
+    ) -> OpenVitalsResult<bool> {
         validate_activity_session_input(self, &input)?;
 
         if let Some(existing) = self.activity_session(input.session_id)? {
@@ -2173,7 +2184,10 @@ impl OpenVitalsStore {
         Ok(true)
     }
 
-    pub fn update_activity_session(&self, input: ActivitySessionInput<'_>) -> OpenVitalsResult<bool> {
+    pub fn update_activity_session(
+        &self,
+        input: ActivitySessionInput<'_>,
+    ) -> OpenVitalsResult<bool> {
         validate_activity_session_input(self, &input)?;
         let Some(existing) = self.activity_session(input.session_id)? else {
             return Err(OpenVitalsError::message(format!(
@@ -2246,7 +2260,10 @@ impl OpenVitalsStore {
         Ok(changed > 0)
     }
 
-    pub fn activity_session(&self, session_id: &str) -> OpenVitalsResult<Option<ActivitySessionRow>> {
+    pub fn activity_session(
+        &self,
+        session_id: &str,
+    ) -> OpenVitalsResult<Option<ActivitySessionRow>> {
         validate_required("session_id", session_id)?;
         self.conn
             .query_row(
@@ -3504,7 +3521,10 @@ impl OpenVitalsStore {
             .map_err(OpenVitalsError::from)
     }
 
-    pub fn insert_metric_provenance(&self, input: MetricProvenanceInput<'_>) -> OpenVitalsResult<bool> {
+    pub fn insert_metric_provenance(
+        &self,
+        input: MetricProvenanceInput<'_>,
+    ) -> OpenVitalsResult<bool> {
         validate_metric_provenance_input(self, &input)?;
         if let Some(existing) = self.metric_provenance(input.provenance_id)? {
             let same = existing.metric_scope == input.metric_scope
@@ -3553,7 +3573,10 @@ impl OpenVitalsStore {
         Ok(changed > 0)
     }
 
-    pub fn upsert_metric_provenance(&self, input: MetricProvenanceInput<'_>) -> OpenVitalsResult<bool> {
+    pub fn upsert_metric_provenance(
+        &self,
+        input: MetricProvenanceInput<'_>,
+    ) -> OpenVitalsResult<bool> {
         validate_metric_provenance_input(self, &input)?;
         let changed = self.conn.execute(
             r#"
@@ -3927,7 +3950,10 @@ impl OpenVitalsStore {
             .map_err(OpenVitalsError::from)
     }
 
-    pub fn insert_activity_interval(&self, input: ActivityIntervalInput<'_>) -> OpenVitalsResult<bool> {
+    pub fn insert_activity_interval(
+        &self,
+        input: ActivityIntervalInput<'_>,
+    ) -> OpenVitalsResult<bool> {
         validate_activity_interval_input(self, &input)?;
         if self.activity_session(input.activity_session_id)?.is_none() {
             return Err(OpenVitalsError::message(format!(
@@ -3981,7 +4007,10 @@ impl OpenVitalsStore {
         Ok(true)
     }
 
-    pub fn activity_interval(&self, interval_id: &str) -> OpenVitalsResult<Option<ActivityIntervalRow>> {
+    pub fn activity_interval(
+        &self,
+        interval_id: &str,
+    ) -> OpenVitalsResult<Option<ActivityIntervalRow>> {
         validate_required("interval_id", interval_id)?;
         self.conn
             .query_row(
@@ -4530,7 +4559,10 @@ impl OpenVitalsStore {
             .map_err(OpenVitalsError::from)
     }
 
-    pub fn activity_labels_by_type(&self, label_type: &str) -> OpenVitalsResult<Vec<ActivityLabelRow>> {
+    pub fn activity_labels_by_type(
+        &self,
+        label_type: &str,
+    ) -> OpenVitalsResult<Vec<ActivityLabelRow>> {
         validate_required("label_type", label_type)?;
         validate_activity_label_type(label_type)?;
         let mut statement = self.conn.prepare(
@@ -4588,7 +4620,11 @@ impl OpenVitalsStore {
             .map_err(OpenVitalsError::from)
     }
 
-    pub fn raw_evidence_between(&self, start: &str, end: &str) -> OpenVitalsResult<Vec<RawEvidenceRow>> {
+    pub fn raw_evidence_between(
+        &self,
+        start: &str,
+        end: &str,
+    ) -> OpenVitalsResult<Vec<RawEvidenceRow>> {
         validate_required("start", start)?;
         validate_required("end", end)?;
 
@@ -5035,7 +5071,10 @@ impl OpenVitalsStore {
         Ok(changed > 0)
     }
 
-    fn insert_metric_rows_for_algorithm_run(&self, run: &AlgorithmRunRecord) -> OpenVitalsResult<()> {
+    fn insert_metric_rows_for_algorithm_run(
+        &self,
+        run: &AlgorithmRunRecord,
+    ) -> OpenVitalsResult<()> {
         let definition = self
             .algorithm_definition(&run.algorithm_id, &run.version)?
             .ok_or_else(|| {
@@ -5397,7 +5436,10 @@ impl OpenVitalsStore {
             .map_err(OpenVitalsError::from)
     }
 
-    pub fn insert_calibration_label(&self, input: CalibrationLabelInput<'_>) -> OpenVitalsResult<bool> {
+    pub fn insert_calibration_label(
+        &self,
+        input: CalibrationLabelInput<'_>,
+    ) -> OpenVitalsResult<bool> {
         validate_required("label_id", input.label_id)?;
         validate_required("metric_family", input.metric_family)?;
         validate_required("label_source", input.label_source)?;
@@ -5418,7 +5460,9 @@ impl OpenVitalsStore {
                 OpenVitalsError::message(format!("provenance_json must be valid JSON: {error}"))
             })?;
         if parsed_provenance == serde_json::json!({}) {
-            return Err(OpenVitalsError::message("provenance_json must not be empty"));
+            return Err(OpenVitalsError::message(
+                "provenance_json must not be empty",
+            ));
         }
 
         if let Some(existing) = self.calibration_label(input.label_id)? {
@@ -5465,7 +5509,10 @@ impl OpenVitalsStore {
         Ok(true)
     }
 
-    pub fn calibration_label(&self, label_id: &str) -> OpenVitalsResult<Option<CalibrationLabelRow>> {
+    pub fn calibration_label(
+        &self,
+        label_id: &str,
+    ) -> OpenVitalsResult<Option<CalibrationLabelRow>> {
         validate_required("label_id", label_id)?;
         self.conn
             .query_row(
@@ -5879,7 +5926,10 @@ impl OpenVitalsStore {
         Ok(changed > 0)
     }
 
-    pub fn debug_events_for_session(&self, session_id: &str) -> OpenVitalsResult<Vec<DebugEventRow>> {
+    pub fn debug_events_for_session(
+        &self,
+        session_id: &str,
+    ) -> OpenVitalsResult<Vec<DebugEventRow>> {
         validate_required("session_id", session_id)?;
         let mut statement = self.conn.prepare(
             r#"
@@ -6338,8 +6388,10 @@ fn validate_json(name: &str, value: &str) -> OpenVitalsResult<()> {
 }
 
 fn validate_command_report_json(record: &CommandValidationRecord) -> OpenVitalsResult<()> {
-    let parsed = serde_json::from_str::<serde_json::Value>(&record.report_json)
-        .map_err(|error| OpenVitalsError::message(format!("report_json must be valid JSON: {error}")))?;
+    let parsed =
+        serde_json::from_str::<serde_json::Value>(&record.report_json).map_err(|error| {
+            OpenVitalsError::message(format!("report_json must be valid JSON: {error}"))
+        })?;
     let Some(report_command) = parsed.get("command").and_then(serde_json::Value::as_str) else {
         return Err(OpenVitalsError::message("report_json must contain command"));
     };
@@ -6351,7 +6403,9 @@ fn validate_command_report_json(record: &CommandValidationRecord) -> OpenVitalsR
     }
 
     let Some(report_risk_gate) = parsed.get("risk_gate").and_then(serde_json::Value::as_str) else {
-        return Err(OpenVitalsError::message("report_json must contain risk_gate"));
+        return Err(OpenVitalsError::message(
+            "report_json must contain risk_gate",
+        ));
     };
     if report_risk_gate != record.risk_gate {
         return Err(OpenVitalsError::message(format!(
@@ -6381,7 +6435,9 @@ fn validate_json_object(name: &str, value: &str) -> OpenVitalsResult<()> {
     let parsed = serde_json::from_str::<serde_json::Value>(value)
         .map_err(|error| OpenVitalsError::message(format!("{name} must be valid JSON: {error}")))?;
     if !parsed.is_object() {
-        return Err(OpenVitalsError::message(format!("{name} must be a JSON object")));
+        return Err(OpenVitalsError::message(format!(
+            "{name} must be a JSON object"
+        )));
     }
     Ok(())
 }
@@ -6585,7 +6641,9 @@ fn validate_external_sleep_stage_summary_key(stage: &str) -> OpenVitalsResult<()
 
 fn validate_non_negative(name: &str, value: i64) -> OpenVitalsResult<()> {
     if value < 0 {
-        Err(OpenVitalsError::message(format!("{name} must be non-negative")))
+        Err(OpenVitalsError::message(format!(
+            "{name} must be non-negative"
+        )))
     } else {
         Ok(())
     }
@@ -6723,7 +6781,10 @@ fn validate_confidence(name: &str, confidence: f64) -> OpenVitalsResult<()> {
     Ok(())
 }
 
-fn validate_unavailable_metric_confidence(source_kind: &str, confidence: f64) -> OpenVitalsResult<()> {
+fn validate_unavailable_metric_confidence(
+    source_kind: &str,
+    confidence: f64,
+) -> OpenVitalsResult<()> {
     if source_kind == "unavailable" && confidence != 0.0 {
         return Err(OpenVitalsError::message(
             "unavailable formatted metrics must have confidence 0.0",
@@ -6793,7 +6854,9 @@ fn validate_activity_metric_input(
     Ok(())
 }
 
-fn validate_daily_activity_metric_input(input: &DailyActivityMetricInput<'_>) -> OpenVitalsResult<()> {
+fn validate_daily_activity_metric_input(
+    input: &DailyActivityMetricInput<'_>,
+) -> OpenVitalsResult<()> {
     validate_required("daily_metric_id", input.daily_metric_id)?;
     validate_required("date_key", input.date_key)?;
     validate_required("timezone", input.timezone)?;
@@ -6829,7 +6892,9 @@ fn validate_daily_activity_metric_input(input: &DailyActivityMetricInput<'_>) ->
     Ok(())
 }
 
-fn validate_hourly_activity_metric_input(input: &HourlyActivityMetricInput<'_>) -> OpenVitalsResult<()> {
+fn validate_hourly_activity_metric_input(
+    input: &HourlyActivityMetricInput<'_>,
+) -> OpenVitalsResult<()> {
     validate_required("hourly_metric_id", input.hourly_metric_id)?;
     validate_required("date_key", input.date_key)?;
     validate_required("timezone", input.timezone)?;
@@ -6865,7 +6930,9 @@ fn validate_hourly_activity_metric_input(input: &HourlyActivityMetricInput<'_>) 
     Ok(())
 }
 
-fn validate_daily_recovery_metric_input(input: &DailyRecoveryMetricInput<'_>) -> OpenVitalsResult<()> {
+fn validate_daily_recovery_metric_input(
+    input: &DailyRecoveryMetricInput<'_>,
+) -> OpenVitalsResult<()> {
     validate_required("daily_metric_id", input.daily_metric_id)?;
     validate_required("date_key", input.date_key)?;
     validate_required("timezone", input.timezone)?;
@@ -7026,7 +7093,9 @@ fn validate_metric_provenance_target(
     Ok(())
 }
 
-fn validate_metric_debug_feature_input(input: &MetricDebugFeatureInput<'_>) -> OpenVitalsResult<()> {
+fn validate_metric_debug_feature_input(
+    input: &MetricDebugFeatureInput<'_>,
+) -> OpenVitalsResult<()> {
     validate_required("feature_id", input.feature_id)?;
     validate_required("metric_family", input.metric_family)?;
     validate_required("feature_name", input.feature_name)?;
@@ -7102,7 +7171,9 @@ fn validate_activity_label_input(
     Ok(())
 }
 
-fn validate_external_sleep_session_input(input: &ExternalSleepSessionInput<'_>) -> OpenVitalsResult<()> {
+fn validate_external_sleep_session_input(
+    input: &ExternalSleepSessionInput<'_>,
+) -> OpenVitalsResult<()> {
     validate_required("sleep_id", input.sleep_id)?;
     validate_required("source", input.source)?;
     validate_required("platform", input.platform)?;
@@ -7148,7 +7219,9 @@ fn validate_external_sleep_stage_input(
     Ok(())
 }
 
-fn validate_sleep_correction_label_input(input: &SleepCorrectionLabelInput<'_>) -> OpenVitalsResult<()> {
+fn validate_sleep_correction_label_input(
+    input: &SleepCorrectionLabelInput<'_>,
+) -> OpenVitalsResult<()> {
     validate_required("label_id", input.label_id)?;
     validate_optional_required("sleep_id", input.sleep_id)?;
     validate_required("label_type", input.label_type)?;

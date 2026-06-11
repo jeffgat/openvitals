@@ -504,9 +504,21 @@ pub fn built_in_default_algorithm_preferences() -> Vec<AlgorithmPreferenceRecord
     vec![
         default_algorithm_preference("hrv", OPENVITALS_HRV_V0_ID, OPENVITALS_HRV_V0_VERSION),
         default_algorithm_preference("sleep", OPENVITALS_SLEEP_V0_ID, OPENVITALS_SLEEP_V0_VERSION),
-        default_algorithm_preference("strain", OPENVITALS_STRAIN_V0_ID, OPENVITALS_STRAIN_V0_VERSION),
-        default_algorithm_preference("recovery", OPENVITALS_RECOVERY_V0_ID, OPENVITALS_RECOVERY_V0_VERSION),
-        default_algorithm_preference("stress", OPENVITALS_STRESS_V0_ID, OPENVITALS_STRESS_V0_VERSION),
+        default_algorithm_preference(
+            "strain",
+            OPENVITALS_STRAIN_V0_ID,
+            OPENVITALS_STRAIN_V0_VERSION,
+        ),
+        default_algorithm_preference(
+            "recovery",
+            OPENVITALS_RECOVERY_V0_ID,
+            OPENVITALS_RECOVERY_V0_VERSION,
+        ),
+        default_algorithm_preference(
+            "stress",
+            OPENVITALS_STRESS_V0_ID,
+            OPENVITALS_STRESS_V0_VERSION,
+        ),
     ]
 }
 
@@ -634,13 +646,13 @@ fn sleep_v1_definition() -> AlgorithmDefinitionRecord {
             "sleep_window_confidence_policy": "status_motion_hr_coverage_and_duration_sanity",
             "sleep_architecture_confidence_policy": "duration_weighted_stage_confidence_and_selected_stage_probability",
             "weights_planned": {
-                "sleep_need_fulfillment": 0.25,
-                "continuity": 0.20,
-                "schedule_regularity": 0.15,
-                "sleep_architecture": 0.15,
-                "cardiovascular_recovery": 0.15,
-                "context_adjustment": 0.05,
-                "data_confidence": 0.05
+                "sleep_need_fulfillment": 0.35,
+                "continuity": 0.30,
+                "schedule_regularity": 0.20,
+                "sleep_architecture": 0.05,
+                "cardiovascular_recovery": 0.07,
+                "context_adjustment": 0.03,
+                "data_confidence": 0.00
             }
         })
         .to_string(),
@@ -675,8 +687,12 @@ fn strain_definition() -> AlgorithmDefinitionRecord {
         .to_string(),
         params_json: json!({
             "zone_weights": [1.0, 2.0, 3.0, 4.0, 5.0],
-            "zone_load_score_divisor": 20.0,
-            "weights": {"zone_load": 0.70, "average_hr_reserve": 0.30}
+            "zone_load_curve": {
+                "kind": "saturating_log",
+                "scale": 150.0,
+                "reference_load": 600.0
+            },
+            "weights": {"zone_load": 0.85, "average_hr_reserve": 0.15}
         })
         .to_string(),
         quality_gates_json: json!([
@@ -716,15 +732,15 @@ fn recovery_definition() -> AlgorithmDefinitionRecord {
             "weights": {
                 "hrv": 0.35,
                 "rhr": 0.20,
-                "respiratory": 0.10,
-                "temperature": 0.10,
-                "sleep": 0.15,
+                "physiological_anomaly": 0.15,
+                "sleep": 0.20,
                 "prior_strain": 0.10
             },
-            "baseline_neutral_score": 70.0,
-            "rhr_points_per_bpm_below_baseline": 5.0,
-            "respiratory_penalty_per_rpm": 20.0,
-            "temperature_penalty_per_c": 50.0
+            "baseline_neutral_score": 72.0,
+            "hrv_policy": "log_rmssd_ratio_vs_personal_baseline",
+            "rhr_points_per_bpm_below_baseline": 4.0,
+            "respiratory_penalty_per_rpm": 15.0,
+            "temperature_penalty_per_c": 35.0
         })
         .to_string(),
         quality_gates_json: json!([
@@ -1308,7 +1324,7 @@ fn sleep_v1_output_provenance(
     ];
     json!({
         "input_ids": input.sleep.input_ids,
-        "score_policy": "weighted_sleep_v1_components_with_fragmentation_guardrails",
+        "score_policy": "research_weighted_sleep_v1_components_with_confidence_metadata_and_fragmentation_guardrails",
         "status_policy": "rust_sleep_model_status_report",
         "previous_night_comparison": {
             "policy": "latest_usable_prior_night_before_scored_sleep",
@@ -1524,7 +1540,8 @@ pub fn evaluate_sleep_model_status(input: &SleepModelStatusInput) -> SleepModelS
                 .to_string(),
         );
     } else if input.trusted_open_vitals_sleep_nights < 7 {
-        let nights_until_open_vitals_training = 7u32.saturating_sub(input.trusted_open_vitals_sleep_nights);
+        let nights_until_open_vitals_training =
+            7u32.saturating_sub(input.trusted_open_vitals_sleep_nights);
         next_actions.push(format!(
             "Collect {nights_until_open_vitals_training} more OpenVitals packet-derived sleep night{} before training.",
             plural_suffix(nights_until_open_vitals_training)
@@ -1584,21 +1601,21 @@ pub fn open_vitals_strain_v0(input: &StrainInput) -> AlgorithmRunResult<StrainSc
             .zip([1.0, 2.0, 3.0, 4.0, 5.0])
             .map(|(minutes, weight)| minutes * weight)
             .sum::<f64>();
-        let zone_score_0_to_21 = clamp_0_to(21.0, zone_load / 20.0);
+        let zone_score_0_to_21 = strain_zone_load_score_0_to_21(zone_load);
         let hr_reserve_fraction = clamp_fraction(
             (input.average_hr_bpm - input.resting_hr_bpm)
                 / (input.max_hr_bpm - input.resting_hr_bpm),
         );
         let zone_score_0_to_100 = zone_score_0_to_21 / 21.0 * 100.0;
-        let avg_hr_score_0_to_100 = hr_reserve_fraction * 100.0;
+        let avg_hr_score_0_to_100 = hr_reserve_fraction.powf(1.15) * 100.0;
 
         let components = vec![
             score_component(
                 "zone_load",
                 zone_load,
-                "weighted_zone_minutes",
+                "weighted_zone_minutes_saturating_log",
                 zone_score_0_to_100,
-                0.70,
+                0.85,
                 21.0,
             ),
             score_component(
@@ -1606,7 +1623,7 @@ pub fn open_vitals_strain_v0(input: &StrainInput) -> AlgorithmRunResult<StrainSc
                 hr_reserve_fraction,
                 "fraction",
                 avg_hr_score_0_to_100,
-                0.30,
+                0.15,
                 21.0,
             ),
         ];
@@ -1634,11 +1651,24 @@ pub fn open_vitals_strain_v0(input: &StrainInput) -> AlgorithmRunResult<StrainSc
         errors,
         provenance: json!({
             "input_ids": input.input_ids,
-            "score_policy": "weighted_zone_load_and_average_hr_reserve",
+            "score_policy": "nonlinear_trimp_like_zone_load_with_average_hr_reserve",
             "zone_weights": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "zone_load_curve": {
+                "kind": "saturating_log",
+                "scale": 150.0,
+                "reference_load": 600.0
+            },
             "expected_values_policy": "hand-derived-tests-and-versioned-open-vitals-output"
         }),
     }
+}
+
+fn strain_zone_load_score_0_to_21(zone_load: f64) -> f64 {
+    const LOAD_SCALE: f64 = 150.0;
+    const REFERENCE_LOAD: f64 = 600.0;
+    let normalized =
+        (1.0 + zone_load.max(0.0) / LOAD_SCALE).ln() / (1.0 + REFERENCE_LOAD / LOAD_SCALE).ln();
+    clamp_0_to(21.0, normalized * 21.0)
 }
 
 pub fn open_vitals_recovery_v0(input: &RecoveryInput) -> AlgorithmRunResult<RecoveryScoreOutput> {
@@ -1688,16 +1718,26 @@ pub fn open_vitals_recovery_v0(input: &RecoveryInput) -> AlgorithmRunResult<Reco
     if input.prior_strain_0_to_21 > 14.0 {
         quality_flags.push("high_prior_strain".to_string());
     }
+    if (input.respiratory_rate_rpm - input.respiratory_rate_baseline_rpm).abs() >= 2.0 {
+        quality_flags.push("respiratory_rate_anomaly".to_string());
+    }
+    if input.skin_temp_delta_c.abs() >= 0.5 {
+        quality_flags.push("skin_temperature_anomaly".to_string());
+    }
 
     let output = if errors.is_empty() {
-        let hrv_score =
-            clamp_0_100(70.0 + (input.hrv_rmssd_ms / input.hrv_baseline_rmssd_ms - 1.0) * 100.0);
-        let rhr_score =
-            clamp_0_100(70.0 + (input.resting_hr_baseline_bpm - input.resting_hr_bpm) * 5.0);
-        let respiratory_score = clamp_0_100(
-            100.0 - (input.respiratory_rate_rpm - input.respiratory_rate_baseline_rpm).abs() * 20.0,
+        let hrv_score = clamp_0_100(
+            72.0 + (input.hrv_rmssd_ms.max(1.0).ln() - input.hrv_baseline_rmssd_ms.max(1.0).ln())
+                / 0.25
+                * 28.0,
         );
-        let temperature_score = clamp_0_100(100.0 - input.skin_temp_delta_c.abs() * 50.0);
+        let rhr_score =
+            clamp_0_100(72.0 + (input.resting_hr_baseline_bpm - input.resting_hr_bpm) * 4.0);
+        let respiratory_penalty =
+            (input.respiratory_rate_rpm - input.respiratory_rate_baseline_rpm).abs() * 15.0;
+        let temperature_penalty = input.skin_temp_delta_c.abs() * 35.0;
+        let physiological_anomaly_score =
+            clamp_0_100(100.0 - respiratory_penalty - temperature_penalty);
         let strain_readiness_score = clamp_0_100(100.0 - input.prior_strain_0_to_21 / 21.0 * 60.0);
 
         let components = vec![
@@ -1711,19 +1751,11 @@ pub fn open_vitals_recovery_v0(input: &RecoveryInput) -> AlgorithmRunResult<Reco
             ),
             score_component("rhr", input.resting_hr_bpm, "bpm", rhr_score, 0.20, 100.0),
             score_component(
-                "respiratory",
+                "physiological_anomaly",
                 input.respiratory_rate_rpm,
-                "breaths_per_minute",
-                respiratory_score,
-                0.10,
-                100.0,
-            ),
-            score_component(
-                "temperature",
-                input.skin_temp_delta_c,
-                "celsius_delta",
-                temperature_score,
-                0.10,
+                "respiratory_rpm_and_skin_temp_c_delta",
+                physiological_anomaly_score,
+                0.15,
                 100.0,
             ),
             score_component(
@@ -1731,7 +1763,7 @@ pub fn open_vitals_recovery_v0(input: &RecoveryInput) -> AlgorithmRunResult<Reco
                 input.sleep_score_0_to_100,
                 "score_0_to_100",
                 input.sleep_score_0_to_100,
-                0.15,
+                0.20,
                 100.0,
             ),
             score_component(
@@ -1765,7 +1797,7 @@ pub fn open_vitals_recovery_v0(input: &RecoveryInput) -> AlgorithmRunResult<Reco
         errors,
         provenance: json!({
             "input_ids": input.input_ids,
-            "score_policy": "weighted_interpretable_recovery_components",
+            "score_policy": "research_weighted_recovery_with_personal_baselines_and_anomaly_penalties",
             "official_labels_policy": "not_used_unless_explicit_calibration_label",
             "expected_values_policy": "hand-derived-tests-and-versioned-open-vitals-output"
         }),
@@ -2247,7 +2279,8 @@ fn sleep_model_status_report(
         excluded_sleep_nights: input.excluded_sleep_nights,
         calibration_label_count: input.calibration_label_count,
         nights_until_baseline,
-        nights_until_open_vitals_training: 7u32.saturating_sub(input.trusted_open_vitals_sleep_nights),
+        nights_until_open_vitals_training: 7u32
+            .saturating_sub(input.trusted_open_vitals_sleep_nights),
         nights_until_training,
         can_show_provisional_score,
         can_show_final_score,
@@ -2455,10 +2488,11 @@ fn sleep_v1_components(
         input.sleep.wake_after_sleep_onset_minutes,
         input.sleep.wake_episode_count,
     );
-    let schedule_score = sleep_schedule_score(
+    let schedule_score = sleep_schedule_regularity_score(
         input.bedtime_deviation_minutes,
         input.wake_time_deviation_minutes,
         input.sleep.midpoint_deviation_minutes,
+        baseline,
     );
     let architecture_score =
         sleep_architecture_score(stage_minutes, input.sleep.sleep_duration_minutes, baseline);
@@ -2475,7 +2509,7 @@ fn sleep_v1_components(
             input.sleep.sleep_duration_minutes,
             "minutes",
             sleep_need_score,
-            0.25,
+            0.35,
             100.0,
         ),
         score_component(
@@ -2483,7 +2517,7 @@ fn sleep_v1_components(
             input.sleep.wake_after_sleep_onset_minutes,
             "minutes_waso",
             continuity_score,
-            0.20,
+            0.30,
             100.0,
         ),
         score_component(
@@ -2491,7 +2525,7 @@ fn sleep_v1_components(
             input.sleep.midpoint_deviation_minutes,
             "minutes_deviation",
             schedule_score,
-            0.15,
+            0.20,
             100.0,
         ),
         score_component(
@@ -2499,7 +2533,7 @@ fn sleep_v1_components(
             v0_output.restorative_sleep_minutes,
             "minutes_restorative",
             architecture_score,
-            0.15,
+            0.05,
             100.0,
         ),
         score_component(
@@ -2507,7 +2541,7 @@ fn sleep_v1_components(
             input.sleep.heart_rate_dip_percent.unwrap_or(0.0),
             "hr_dip_percent",
             cardiovascular_score,
-            0.15,
+            0.07,
             100.0,
         ),
         score_component(
@@ -2515,7 +2549,7 @@ fn sleep_v1_components(
             input.prior_day_strain.unwrap_or(0.0),
             "strain_0_to_21",
             context_score,
-            0.05,
+            0.03,
             100.0,
         ),
         score_component(
@@ -2523,7 +2557,7 @@ fn sleep_v1_components(
             data_coverage_fraction.unwrap_or(0.65),
             "fraction",
             data_confidence_score,
-            0.05,
+            0.00,
             100.0,
         ),
     ]
@@ -2585,7 +2619,7 @@ fn sleep_v1_component_provenance(
                 "midpoint_deviation_minutes": input.sleep.midpoint_deviation_minutes,
             },
             "baseline": baseline_policy.clone(),
-            "policy": "weighted_bedtime_wake_time_midpoint_deviation",
+            "policy": "weighted_current_timing_and_personal_sleep_regularity",
         }),
     );
     provenance.insert(
@@ -2680,6 +2714,28 @@ fn sleep_schedule_score(
         + wake_time_deviation_minutes * 0.35
         + midpoint_deviation_minutes * 0.30;
     clamp_0_100(100.0 - average_deviation / 120.0 * 100.0)
+}
+
+fn sleep_schedule_regularity_score(
+    bedtime_deviation_minutes: f64,
+    wake_time_deviation_minutes: f64,
+    midpoint_deviation_minutes: f64,
+    baseline: Option<&SleepBaseline>,
+) -> f64 {
+    let current_timing_score = sleep_schedule_score(
+        bedtime_deviation_minutes,
+        wake_time_deviation_minutes,
+        midpoint_deviation_minutes,
+    );
+    let Some(window) = baseline.and_then(preferred_sleep_baseline_window) else {
+        return current_timing_score;
+    };
+    let historical_variability_minutes = window.average_bedtime_deviation_minutes * 0.40
+        + window.average_wake_time_deviation_minutes * 0.40
+        + window.average_midpoint_deviation_minutes * 0.20;
+    let personal_regularity_score =
+        clamp_0_100(100.0 - historical_variability_minutes / 90.0 * 100.0);
+    current_timing_score * 0.65 + personal_regularity_score * 0.35
 }
 
 fn sleep_architecture_score(

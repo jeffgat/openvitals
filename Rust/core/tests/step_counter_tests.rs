@@ -615,7 +615,10 @@ fn step_counter_daily_rollup_writes_device_counter_activity_metric() {
     .unwrap();
 
     assert!(report.pass, "{:?}", report.issues);
-    assert_eq!(report.schema, "open_vitals.step-counter-daily-rollup-report.v1");
+    assert_eq!(
+        report.schema,
+        "open_vitals.step-counter-daily-rollup-report.v1"
+    );
     assert_eq!(report.sample_count, 3);
     assert_eq!(report.cadence_sample_count, 3);
     assert_eq!(report.activity_state_sample_count, 3);
@@ -766,7 +769,10 @@ fn step_counter_hourly_rollup_writes_device_counter_activity_metric() {
     .unwrap();
 
     assert!(report.pass, "{:?}", report.issues);
-    assert_eq!(report.schema, "open_vitals.step-counter-hourly-rollup-report.v1");
+    assert_eq!(
+        report.schema,
+        "open_vitals.step-counter-hourly-rollup-report.v1"
+    );
     assert_eq!(report.sample_count, 3);
     assert_eq!(report.steps, Some(105));
     assert_eq!(report.average_cadence_spm, Some(94.0));

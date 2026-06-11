@@ -1044,7 +1044,9 @@ fn load_capture_sqlite_frame_rows(path: &Path) -> OpenVitalsResult<Vec<CaptureSq
             ORDER BY records.line_no, decode_index
             "#,
         )
-        .map_err(|error| OpenVitalsError::message(format!("cannot query capture sqlite: {error}")))?;
+        .map_err(|error| {
+            OpenVitalsError::message(format!("cannot query capture sqlite: {error}"))
+        })?;
     let rows = statement
         .query_map([], |row| {
             Ok(CaptureSqliteFrameRow {
@@ -1055,7 +1057,9 @@ fn load_capture_sqlite_frame_rows(path: &Path) -> OpenVitalsResult<Vec<CaptureSq
                 value_hex: row.get(4)?,
             })
         })
-        .map_err(|error| OpenVitalsError::message(format!("cannot scan capture sqlite: {error}")))?;
+        .map_err(|error| {
+            OpenVitalsError::message(format!("cannot scan capture sqlite: {error}"))
+        })?;
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(OpenVitalsError::from)
@@ -1068,7 +1072,9 @@ fn capture_sqlite_table_exists(connection: &Connection, table: &str) -> OpenVita
             params![table],
             |row| row.get(0),
         )
-        .map_err(|error| OpenVitalsError::message(format!("cannot inspect capture sqlite: {error}")))?;
+        .map_err(|error| {
+            OpenVitalsError::message(format!("cannot inspect capture sqlite: {error}"))
+        })?;
     Ok(count > 0)
 }
 

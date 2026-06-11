@@ -13,7 +13,8 @@ use crate::{
 };
 
 pub const STEP_PACKET_DISCOVERY_REPORT_SCHEMA: &str = "open_vitals.step-packet-discovery-report.v1";
-pub const STEP_CAPTURE_VALIDATION_REPORT_SCHEMA: &str = "open_vitals.step-capture-validation-report.v1";
+pub const STEP_CAPTURE_VALIDATION_REPORT_SCHEMA: &str =
+    "open_vitals.step-capture-validation-report.v1";
 
 #[derive(Debug, Clone, Copy)]
 pub struct StepPacketDiscoveryOptions {

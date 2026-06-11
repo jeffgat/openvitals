@@ -3,20 +3,22 @@ import SwiftUI
 struct MoreDebugView: View {
   @EnvironmentObject private var model: OpenVitalsAppModel
   @EnvironmentObject private var packetMonitor: PacketMonitorModel
+  @ObservedObject var healthStore: HealthDataStore
   @ObservedObject var store: MoreDataStore
   @AppStorage(OnboardingStorage.onboardingComplete) private var onboardingComplete = false
   @AppStorage(OnboardingStorage.onboardingRedoRequested) private var onboardingRedoRequested = false
   @State private var showDestructiveConfirmation = false
+  @State private var showLocalDataWipeConfirmation = false
 
   var body: some View {
     List {
       Section("Rust And Parser") {
-        MoreInfoRow(title: "Rust Bridge/Core", value: store.coreVersionStatus, systemImage: "shippingbox", status: store.coreVersionStatus.hasPrefix("Rust core") ? .ready : .pending)
-        MoreInfoRow(title: "Frame Parse", value: store.frameParseStatus, systemImage: "curlybraces.square", status: store.frameParseStatus.hasPrefix("Parsed") ? .ready : .pending)
-        MoreInfoRow(title: "CRC", value: store.frameCRCStatus, systemImage: "checkmark.seal", status: .pending)
-        MoreInfoRow(title: "Payload", value: store.framePayloadStatus, systemImage: "doc.text.magnifyingglass", status: .pending)
-        MoreInfoRow(title: "Warnings", value: store.frameWarningsStatus, systemImage: "exclamationmark.triangle", status: store.frameWarningsStatus == "No warnings" ? .ready : .stale)
-        MoreInfoRow(title: "Timeline", value: store.frameTimelineStatus, systemImage: "timeline.selection", status: .pending)
+        MoreInfoRow(title: "Rust Bridge/Core", value: store.coreVersionStatus, systemImage: "shippingbox", status: rustBridgeStatus)
+        MoreInfoRow(title: "Frame Parse", value: store.frameParseStatus, systemImage: "curlybraces.square", status: parserProbeStatus(store.frameParseStatus))
+        MoreInfoRow(title: "CRC", value: store.frameCRCStatus, systemImage: "checkmark.seal", status: parserProbeStatus(store.frameCRCStatus))
+        MoreInfoRow(title: "Payload", value: store.framePayloadStatus, systemImage: "doc.text.magnifyingglass", status: parserProbeStatus(store.framePayloadStatus))
+        MoreInfoRow(title: "Warnings", value: store.frameWarningsStatus, systemImage: "exclamationmark.triangle", status: parserWarningStatus(store.frameWarningsStatus))
+        MoreInfoRow(title: "Timeline", value: store.frameTimelineStatus, systemImage: "timeline.selection", status: parserProbeStatus(store.frameTimelineStatus))
         Button {
           store.runFrameParseProbe()
         } label: {
@@ -25,8 +27,8 @@ struct MoreDebugView: View {
       }
 
       Section("Debug Session") {
-        MoreInfoRow(title: "WebSocket", value: store.debugWebSocketStatus, systemImage: "network", status: store.debugWebSocketStatus.contains("started") ? .ready : .pending)
-        MoreInfoRow(title: "Next Action", value: store.debugNextAction, systemImage: "arrow.forward.circle", status: .pending)
+        MoreInfoRow(title: "WebSocket", value: store.debugWebSocketStatus, systemImage: "network", status: debugSessionStatus(store.debugWebSocketStatus))
+        MoreInfoRow(title: "Next Action", value: store.debugNextAction, systemImage: "arrow.forward.circle", status: debugSessionStatus(store.debugNextAction))
         Button {
           store.startDebugSession()
         } label: {
@@ -56,25 +58,25 @@ struct MoreDebugView: View {
           title: "Targets",
           value: model.healthPacketCaptureTargetSummary,
           systemImage: "scope",
-          status: model.healthPacketCaptureFamilyRows.isEmpty ? .pending : .ready
+          status: model.healthPacketCaptureFamilyRows.isEmpty ? healthPacketCaptureStatus : .ready
         )
         MoreInfoRow(
           title: "Last Packet",
           value: model.healthPacketCaptureLastPacketSummary,
           systemImage: "waveform.path.ecg.rectangle",
-          status: model.healthPacketCaptureLastPacketSummary == "No packets captured" ? .pending : .ready
+          status: model.healthPacketCaptureLastPacketSummary == "No packets captured" ? waitingOrNotRunForCapture : .ready
         )
         MoreInfoRow(
           title: "Live Data",
           value: packetMonitor.liveDeviceDataSummary,
           systemImage: "dot.radiowaves.left.and.right",
-          status: packetMonitor.recentDeviceSignalPoints.isEmpty ? .pending : .ready
+          status: packetMonitor.recentDeviceSignalPoints.isEmpty ? .waiting : .ready
         )
         MoreInfoRow(
           title: "Historical",
           value: "\(model.ble.historicalSyncStatus) | packets \(model.ble.historicalPacketCount)",
           systemImage: "arrow.triangle.2.circlepath",
-          status: model.ble.isHistoricalSyncing ? .pending : (model.ble.lastHistoricalSyncCompletedAt == nil ? .pending : .ready)
+          status: historicalSyncStatusKind
         )
         MoreInfoRow(
           title: "RR Watch",
@@ -83,37 +85,17 @@ struct MoreDebugView: View {
           status: self.respiratoryPacketWatchStatus
         )
         MoreActionRow(
-          title: model.healthPacketCaptureSessionID == nil ? "Start Walk Capture" : "Stop Capture",
-          detail: model.healthPacketCaptureSessionID == nil ? "Starts a 30 minute movement, HR, GPS, and activity candidate capture" : model.healthPacketCaptureTargetSummary,
-          systemImage: model.healthPacketCaptureSessionID == nil ? "figure.walk.circle" : "stop.circle",
+          title: model.healthPacketCaptureSessionID == nil ? "Start Capture" : "Stop Capture",
+          detail: model.healthPacketCaptureSessionID == nil ? "Collects movement, HR, optical/RR candidates, pulse, recovery sensor history, and metadata" : model.healthPacketCaptureTargetSummary,
+          systemImage: model.healthPacketCaptureSessionID == nil ? "record.circle" : "stop.circle",
           status: self.healthPacketCaptureActionStatus,
           disabled: model.healthPacketCaptureSessionID == nil && model.ble.connectionState != "ready"
         ) {
           if model.healthPacketCaptureSessionID == nil {
-            model.startHealthPacketCapture()
+            model.startDiagnosticPacketCapture()
           } else {
             model.stopHealthPacketCapture()
           }
-        }
-        MoreActionRow(
-          title: "Start Physiology Capture",
-          detail: "Full-rate K10/K11/R17/R21/K25/K26 streams into the capture DB",
-          systemImage: "waveform.path.ecg.rectangle",
-          status: self.healthPacketCaptureActionStatus,
-          disabled: model.healthPacketCaptureSessionID != nil || model.ble.connectionState != "ready"
-        ) {
-          model.startPhysiologyPacketCapture()
-        }
-        MoreActionRow(
-          title: "Start Temperature Capture",
-          detail: "Event 17 plus K18/K24 history",
-          systemImage: "thermometer.medium",
-          status: self.temperatureCaptureActionStatus,
-          disabled: model.healthPacketCaptureSessionID != nil
-            || model.ble.connectionState != "ready"
-            || (!model.ble.canSyncHistorical && !model.ble.isHistoricalSyncing)
-        ) {
-          model.startTemperaturePacketCapture()
         }
         MoreActionRow(
           title: model.respiratoryPacketWatchActive ? "Stop RR Packet Watch" : "Watch K18 RR Packets",
@@ -133,7 +115,7 @@ struct MoreDebugView: View {
             title: "Families",
             value: "No decoded packet families in this capture yet",
             systemImage: "list.bullet.rectangle",
-            status: .pending
+            status: waitingOrNotRunForCapture
           )
         } else {
           ForEach(model.healthPacketCaptureFamilyRows.prefix(10)) { family in
@@ -158,7 +140,7 @@ struct MoreDebugView: View {
           title: "Last Packet",
           value: packetMonitor.movementPacketStatus,
           systemImage: "waveform.path.ecg",
-          status: packetMonitor.movementPacketStatus == "No movement packets" ? .pending : .ready
+          status: packetMonitor.movementPacketStatus == "No movement packets" ? .waiting : .ready
         )
         MoreInfoRow(
           title: "Detector",
@@ -182,67 +164,67 @@ struct MoreDebugView: View {
           title: "Latest Event",
           value: packetMonitor.latestWhoopEventStatus,
           systemImage: "waveform.path",
-          status: packetMonitor.latestWhoopEventStatus == "No device events" ? .pending : .ready
+          status: packetMonitor.latestWhoopEventStatus == "No device events" ? .waiting : .ready
         )
         MoreInfoRow(
           title: "Skin Temp Candidate",
           value: packetMonitor.latestSkinTemperatureCandidateStatus,
           systemImage: "thermometer",
-          status: packetMonitor.latestSkinTemperatureCandidateStatus == "No skin temperature events" ? .pending : .stale
+          status: packetMonitor.latestSkinTemperatureCandidateStatus == "No skin temperature events" ? .waiting : .stale
         )
         MoreInfoRow(
           title: "Latest Data Packet",
           value: packetMonitor.latestWhoopDataPacketStatus,
           systemImage: "waveform.path.ecg.rectangle",
-          status: packetMonitor.latestWhoopDataPacketStatus == "No device data packets" ? .pending : .ready
+          status: packetMonitor.latestWhoopDataPacketStatus == "No device data packets" ? .waiting : .ready
         )
         MoreInfoRow(
           title: "Capture",
           value: "\(model.ble.physiologyCaptureStatus) | \(model.ble.lastPhysiologyCommandSummary)",
           systemImage: "dot.radiowaves.left.and.right",
-          status: model.ble.physiologyCaptureStatus == "Not started" ? .pending : .stale
+          status: physiologyCaptureStatusKind
         )
         MoreInfoRow(
           title: "High Frequency Sync",
           value: "\(model.ble.highFrequencyHistorySyncDisplaySummary) | \(model.ble.lastHighFrequencyHistorySyncResponse)",
           systemImage: "bolt.horizontal",
-          status: model.ble.highFrequencyHistorySyncActive ? .ready : .pending
+          status: model.ble.highFrequencyHistorySyncActive ? .ready : .notRun
         )
         MoreInfoRow(
           title: "History Temp",
           value: packetMonitor.latestHistoryTemperatureCandidateStatus,
           systemImage: "thermometer.medium",
-          status: packetMonitor.latestHistoryTemperatureCandidateStatus == "No history temperature packets" ? .pending : .stale
+          status: packetMonitor.latestHistoryTemperatureCandidateStatus == "No history temperature packets" ? .waiting : .stale
         )
         MoreInfoRow(
           title: "History RR",
           value: packetMonitor.latestRespiratoryRateCandidateStatus,
           systemImage: "lungs",
-          status: packetMonitor.latestRespiratoryRateCandidateStatus == "No respiratory rate candidates" ? .pending : .stale
+          status: packetMonitor.latestRespiratoryRateCandidateStatus == "No respiratory rate candidates" ? .waiting : .stale
         )
         MoreInfoRow(
           title: "Pulse Info",
           value: packetMonitor.latestPulseInformationPacketStatus,
           systemImage: "lungs",
-          status: packetMonitor.latestPulseInformationPacketStatus == "No pulse information packets" ? .pending : .stale
+          status: packetMonitor.latestPulseInformationPacketStatus == "No pulse information packets" ? .waiting : .stale
         )
         MoreInfoRow(
           title: "Optical",
           value: packetMonitor.latestOpticalPacketStatus,
           systemImage: "waveform",
-          status: packetMonitor.latestOpticalPacketStatus == "No optical packets" ? .pending : .stale
+          status: packetMonitor.latestOpticalPacketStatus == "No optical packets" ? .waiting : .stale
         )
         MoreInfoRow(
           title: "Raw/Research K20",
           value: packetMonitor.latestRawResearchPacketStatus,
           systemImage: "waveform.path.ecg",
-          status: packetMonitor.latestRawResearchPacketStatus == "No raw/research packets" ? .pending : .ready
+          status: packetMonitor.latestRawResearchPacketStatus == "No raw/research packets" ? .waiting : .ready
         )
         MoreInfoRow(
           title: "Realtime Status K2",
           value: packetMonitor.latestRealtimeStatusPacketStatus,
           systemImage: "dot.radiowaves.left.and.right",
-          status: packetMonitor.latestRealtimeStatusPacketStatus == "No realtime status packets" ? .pending : .ready
+          status: packetMonitor.latestRealtimeStatusPacketStatus == "No realtime status packets" ? .waiting : .ready
         )
         if !packetMonitor.recentDeviceSignalPoints.isEmpty {
           ForEach(packetMonitor.recentDeviceSignalPoints.prefix(8)) { point in
@@ -258,7 +240,7 @@ struct MoreDebugView: View {
           title: "Start Movement + HR Capture",
           detail: "Requests live HR plus K10/K11 movement streams",
           systemImage: "play.circle",
-          status: model.ble.connectionState == "ready" ? .pending : .blocked,
+          status: model.ble.connectionState == "ready" ? .notRun : .blocked,
           disabled: model.ble.connectionState != "ready"
         ) {
           model.startMovementHeartRateCapture()
@@ -267,7 +249,7 @@ struct MoreDebugView: View {
           title: "Stop Movement + HR Capture",
           detail: "Turns live HR plus K10/K11 streams off",
           systemImage: "stop.circle",
-          status: model.ble.connectionState == "ready" ? .pending : .blocked,
+          status: model.ble.connectionState == "ready" ? .notRun : .blocked,
           disabled: model.ble.connectionState != "ready"
         ) {
           model.stopMovementHeartRateCapture()
@@ -276,7 +258,7 @@ struct MoreDebugView: View {
           title: model.ble.highFrequencyHistorySyncActive ? "Exit High Frequency Sync" : "Enter High Frequency Sync",
           detail: "Band smart-alarm history-sync mode: 180s interval for 2h",
           systemImage: "bolt.horizontal",
-          status: model.ble.canWriteHighFrequencyHistorySync ? .pending : .blocked,
+          status: model.ble.canWriteHighFrequencyHistorySync ? .notRun : .blocked,
           disabled: !model.ble.canWriteHighFrequencyHistorySync
         ) {
           if model.ble.highFrequencyHistorySyncActive {
@@ -304,7 +286,7 @@ struct MoreDebugView: View {
           title: "Remote Calls",
           value: "openvitals://debug-command/<id>?payload=<hex>",
           systemImage: "link",
-          status: .pending
+          status: .ready
         )
         ForEach(model.ble.debugResearchCommands) { command in
           if command.canSendFromButton {
@@ -331,7 +313,7 @@ struct MoreDebugView: View {
             title: "Responses",
             value: "No debug command responses yet",
             systemImage: "list.bullet.rectangle",
-            status: .pending
+            status: .waiting
           )
         } else {
           ForEach(Array(model.ble.debugCommandResponses.prefix(12))) { response in
@@ -346,10 +328,10 @@ struct MoreDebugView: View {
       }
 
       Section("Diagnostics") {
-        MoreInfoRow(title: "UI Coverage", value: store.uiCoverageStatus, systemImage: "rectangle.3.group", status: .pending)
-        MoreInfoRow(title: "Deferred Surfaces", value: store.deferredSurfaceStatus, systemImage: "rectangle.badge.plus", status: .pending)
-        MoreInfoRow(title: "Property Suite", value: store.propertySuiteStatus, systemImage: "checklist", status: .pending)
-        MoreInfoRow(title: "Perf Budget", value: store.perfBudgetStatus, systemImage: "speedometer", status: .pending)
+        MoreInfoRow(title: "UI Coverage", value: store.uiCoverageStatus, systemImage: "rectangle.3.group", status: diagnosticStatus(store.uiCoverageStatus))
+        MoreInfoRow(title: "Deferred Surfaces", value: store.deferredSurfaceStatus, systemImage: "rectangle.badge.plus", status: diagnosticStatus(store.deferredSurfaceStatus))
+        MoreInfoRow(title: "Property Suite", value: store.propertySuiteStatus, systemImage: "checklist", status: diagnosticStatus(store.propertySuiteStatus))
+        MoreInfoRow(title: "Perf Budget", value: store.perfBudgetStatus, systemImage: "speedometer", status: diagnosticStatus(store.perfBudgetStatus))
         Button {
           store.runUICoverageAudit()
         } label: {
@@ -369,8 +351,8 @@ struct MoreDebugView: View {
 
       Section("Command Evidence") {
         MoreInfoRow(title: "Evidence Import", value: store.commandEvidenceImportStatus, systemImage: "doc.text.magnifyingglass", status: .unavailable)
-        MoreInfoRow(title: "Gate Sweep", value: store.commandGateSweepStatus, systemImage: "checkmark.shield", status: .pending)
-        MoreInfoRow(title: "Capture Plan", value: store.commandCapturePlanStatus, systemImage: "scope", status: store.validationStatusKind(store.commandCapturePlanStatus))
+        MoreInfoRow(title: "Gate Sweep", value: store.commandGateSweepStatus, systemImage: "checkmark.shield", status: diagnosticStatus(store.commandGateSweepStatus))
+        MoreInfoRow(title: "Capture Plan", value: store.commandCapturePlanStatus, systemImage: "scope", status: commandCapturePlanStatus)
         Button {
           store.loadCommandDefinitions()
         } label: {
@@ -396,6 +378,16 @@ struct MoreDebugView: View {
           Label("Destructive Commands Locked", systemImage: "lock.shield")
         }
         MoreInfoRow(title: "Gate", value: store.destructiveGateStatus, systemImage: "lock", status: .blocked)
+        MoreInfoRow(title: "Local Data", value: store.deletionStatus, systemImage: "externaldrive.badge.xmark", status: localDataWipeStatus)
+        MoreActionRow(
+          title: "Wipe Local App Data",
+          detail: localDataWipeDetail,
+          systemImage: "trash",
+          status: localDataWipeActionStatus,
+          disabled: localDataWipeDisabled
+        ) {
+          showLocalDataWipeConfirmation = true
+        }
       }
 
 #if DEBUG
@@ -431,11 +423,178 @@ struct MoreDebugView: View {
     } message: {
       Text("This surface records the gate only. No haptics, firmware, config, or reboot command is sent from this tap.")
     }
+    .alert("Wipe local app data?", isPresented: $showLocalDataWipeConfirmation) {
+      Button("Cancel", role: .cancel) {}
+      Button("Wipe Local Data", role: .destructive) {
+        model.recordUIAction("ui.debug.local_data_wipe")
+        store.wipeLocalAppData()
+        healthStore.resetAfterLocalDataWipe()
+        model.markLocalAppDataWiped()
+      }
+    } message: {
+      Text("Deletes OpenVitals local SQLite data, captures, exports, cached scores, profile, and local app defaults on this device. The remembered BLE device is kept, and no erase command is sent to your wearable.")
+    }
+  }
+
+  private var rustBridgeStatus: MoreStatusKind {
+    if store.coreVersionStatus.hasPrefix("Rust core") {
+      return .ready
+    }
+    if store.coreVersionStatus.localizedCaseInsensitiveContains("unavailable") {
+      return .blocked
+    }
+    return .waiting
+  }
+
+  private var waitingOrNotRunForCapture: MoreStatusKind {
+    model.healthPacketCaptureSessionID == nil ? .notRun : .waiting
+  }
+
+  private var historicalSyncStatusKind: MoreStatusKind {
+    if model.ble.isHistoricalSyncing {
+      return .inProgress
+    }
+    if model.ble.historicalSyncStatus == "failed" {
+      return .stale
+    }
+    if model.ble.lastHistoricalSyncCompletedAt == nil {
+      return .notRun
+    }
+    return .ready
+  }
+
+  private var physiologyCaptureStatusKind: MoreStatusKind {
+    let normalized = model.ble.physiologyCaptureStatus.lowercased()
+    if normalized == "not started" {
+      return .notRun
+    }
+    if normalized.contains("failed") || normalized.contains("blocked") {
+      return .blocked
+    }
+    return .listening
+  }
+
+  private var commandCapturePlanStatus: MoreStatusKind {
+    let status = diagnosticStatus(store.commandCapturePlanStatus)
+    if status != .waiting {
+      return status
+    }
+    let validationStatus = store.validationStatusKind(store.commandCapturePlanStatus)
+    return validationStatus == .pending ? .waiting : validationStatus
+  }
+
+  private var localDataWipeDisabled: Bool {
+    !store.canWipeLocalAppData
+      || model.healthPacketCaptureSessionID != nil
+      || model.overnightGuardActive
+  }
+
+  private var localDataWipeDetail: String {
+    if model.healthPacketCaptureSessionID != nil {
+      return "Stop health packet capture before wiping local app data"
+    }
+    if model.overnightGuardActive {
+      return "Stop Overnight Guard before wiping local app data"
+    }
+    if !store.canWipeLocalAppData {
+      return "Wait for export work to finish before wiping local app data"
+    }
+    return "Deletes local evidence and cached health data; remembered BLE device is kept"
+  }
+
+  private var localDataWipeStatus: MoreStatusKind {
+    if store.deletionStatus.localizedCaseInsensitiveContains("wiped") {
+      return .ready
+    }
+    if store.deletionStatus.localizedCaseInsensitiveContains("blocked") {
+      return .blocked
+    }
+    return .notRun
+  }
+
+  private var localDataWipeActionStatus: MoreStatusKind {
+    localDataWipeDisabled ? .blocked : .notRun
+  }
+
+  private func parserProbeStatus(_ status: String) -> MoreStatusKind {
+    let normalized = status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    if normalized.contains("parsing") {
+      return .inProgress
+    }
+    if normalized.contains("failed") {
+      return .blocked
+    }
+    if normalized.contains("pending") || normalized.contains("not run") || normalized.contains("not checked") {
+      return .notRun
+    }
+    if normalized.contains("waits") || normalized.contains("waiting") {
+      return .waiting
+    }
+    return .ready
+  }
+
+  private func parserWarningStatus(_ status: String) -> MoreStatusKind {
+    let normalized = status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    if normalized == "no warnings" {
+      return .ready
+    }
+    if normalized.contains("pending") || normalized.contains("not run") {
+      return .notRun
+    }
+    if normalized.contains("failed") {
+      return .blocked
+    }
+    return .stale
+  }
+
+  private func debugSessionStatus(_ status: String) -> MoreStatusKind {
+    let normalized = status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    if normalized.contains("starting") || normalized.contains("creating") || normalized.contains("refreshing") {
+      return .inProgress
+    }
+    if normalized.contains("failed") || normalized.contains("check database") {
+      return .blocked
+    }
+    if normalized.contains("started") {
+      return .ready
+    }
+    if normalized.contains("not started") || normalized.contains("start a local") {
+      return .notRun
+    }
+    return .waiting
+  }
+
+  private func diagnosticStatus(_ status: String) -> MoreStatusKind {
+    let normalized = status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    if normalized.contains("running")
+      || normalized.contains("loading")
+      || normalized.contains("generating")
+      || normalized.contains("refreshing")
+    {
+      return .inProgress
+    }
+    if normalized.hasPrefix("no ") || normalized.contains("unknown") {
+      return .notRun
+    }
+    if normalized.contains("failed") || normalized.contains("blocked") || normalized.contains("unavailable") {
+      return .blocked
+    }
+    if normalized.contains("passed")
+      || normalized.contains("within budget")
+      || normalized.contains("loaded")
+      || normalized.contains("definitions loaded")
+    {
+      return .ready
+    }
+    if normalized.contains("deferred") {
+      return .stale
+    }
+    return .waiting
   }
 
   private var movementPacketTestStatus: MoreStatusKind {
     if model.movementPacketValidationIsRunning {
-      return .pending
+      return .listening
     }
     if model.movementPacketValidationStatus.hasPrefix("Passed") {
       return .ready
@@ -443,19 +602,19 @@ struct MoreDebugView: View {
     if model.movementPacketValidationStatus.hasPrefix("Failed") || model.movementPacketValidationStatus.hasPrefix("Connect device") {
       return .blocked
     }
-    return .pending
+    return .notRun
   }
 
   private var activityDetectorStatus: MoreStatusKind {
     if model.activityDetectionStatus.contains("Candidate") || model.activityDetectionStatus.contains("Movement") {
       return .ready
     }
-    return packetMonitor.movementPacketStatus == "No movement packets" ? .pending : .ready
+    return packetMonitor.movementPacketStatus == "No movement packets" ? .waiting : .ready
   }
 
   private var healthPacketCaptureStatus: MoreStatusKind {
     if model.healthPacketCaptureSessionID != nil {
-      return .pending
+      return .listening
     }
     if model.healthPacketCaptureStatus.hasPrefix("Stopped") {
       return .ready
@@ -463,14 +622,14 @@ struct MoreDebugView: View {
     if model.healthPacketCaptureStatus.contains("failed") || model.healthPacketCaptureStatus.hasPrefix("Connect device") {
       return .blocked
     }
-    return .pending
+    return .notRun
   }
 
   private var healthPacketCaptureActionStatus: MoreStatusKind {
     if model.healthPacketCaptureSessionID != nil {
-      return .pending
+      return .listening
     }
-    return model.ble.connectionState == "ready" ? .pending : .blocked
+    return model.ble.connectionState == "ready" ? .notRun : .blocked
   }
 
   private var temperatureCaptureActionStatus: MoreStatusKind {
@@ -480,12 +639,12 @@ struct MoreDebugView: View {
     if model.ble.connectionState != "ready" {
       return .blocked
     }
-    return model.ble.canSyncHistorical || model.ble.isHistoricalSyncing ? .pending : .stale
+    return model.ble.isHistoricalSyncing ? .inProgress : (model.ble.canSyncHistorical ? .notRun : .stale)
   }
 
   private var respiratoryPacketWatchStatus: MoreStatusKind {
     if model.respiratoryPacketWatchActive {
-      return .pending
+      return .listening
     }
     if model.respiratoryPacketWatchStatus.hasPrefix("Found K18") {
       return .ready
@@ -496,27 +655,32 @@ struct MoreDebugView: View {
     if model.respiratoryPacketWatchStatus.hasPrefix("Timed out") {
       return .stale
     }
-    return model.ble.connectionState == "ready" ? .pending : .blocked
+    return model.ble.connectionState == "ready" ? .notRun : .blocked
   }
 
   private var debugCommandStatusKind: MoreStatusKind {
+    if model.ble.debugCommandStatus.hasPrefix("No debug command") {
+      return .notRun
+    }
     if model.ble.debugCommandStatus.contains("SUCCESS") || model.ble.debugCommandStatus.contains("ok:") {
       return .ready
     }
-    if model.ble.debugCommandStatus.contains("blocked")
-        || model.ble.debugCommandStatus.contains("Unknown")
+    if model.ble.debugCommandStatus.contains("blocked") {
+      return .blocked
+    }
+    if model.ble.debugCommandStatus.contains("Unknown")
         || model.ble.debugCommandStatus.contains("failed")
         || model.ble.debugCommandStatus.contains("timeout") {
       return .stale
     }
-    return model.ble.connectionState == "ready" ? .pending : .blocked
+    return model.ble.connectionState == "ready" ? .notRun : .blocked
   }
 
   private func debugCommandActionStatus(_ command: OpenVitalsDebugCommandDefinition) -> MoreStatusKind {
     if model.ble.connectionState != "ready" {
       return .blocked
     }
-    return command.risk == "read" ? .pending : .stale
+    return command.risk == "read" ? .notRun : .stale
   }
 
   private func debugCommandDetail(_ command: OpenVitalsDebugCommandDefinition) -> String {
@@ -553,7 +717,7 @@ struct MoreDebugView: View {
     case .target:
       return .ready
     case .expected:
-      return .pending
+      return .waiting
     case .unresolved:
       return .stale
     case .unknown:
@@ -582,7 +746,7 @@ struct MoreDebugView: View {
       return "figure.walk.motion"
     case "K2":
       return "dot.radiowaves.left.and.right"
-    case "K20", "K11":
+    case "K16", "K20", "K11":
       return "waveform.path.ecg"
     case "Optical":
       return "waveform.path.ecg"

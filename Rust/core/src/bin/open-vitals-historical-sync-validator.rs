@@ -35,8 +35,10 @@ fn run() -> open_vitals_core::OpenVitalsResult<()> {
     };
     let json = fs::read_to_string(&evidence_path)
         .map_err(|source| OpenVitalsError::io(&evidence_path, source))?;
-    let input = serde_json::from_str::<HistoricalSyncPhysicalValidationInput>(&json)
-        .map_err(|error| OpenVitalsError::message(format!("invalid physical evidence JSON: {error}")))?;
+    let input =
+        serde_json::from_str::<HistoricalSyncPhysicalValidationInput>(&json).map_err(|error| {
+            OpenVitalsError::message(format!("invalid physical evidence JSON: {error}"))
+        })?;
     let report = validate_historical_sync_physical_evidence(&input);
     write_json_report(&report, output.as_deref())?;
     if report.pass {

@@ -753,13 +753,13 @@
       "schema": "open_vitals.recovery-input.v1",
       "consent": "synthetic-no-user-data",
       "sensitivity": "public-test-fixture",
-      "notes": "Neutral HRV/RHR, perfect respiratory/temp, sleep 80, and prior strain readiness 70 produce weighted recovery 77.5.",
+      "notes": "Neutral HRV/RHR, normal respiratory/temp anomaly inputs, sleep 80, and prior strain readiness 70 produce weighted recovery 77.6.",
       "checksum_sha256": "114edeaaf7110422eefb904def79bca2db81d6f6852832579a9614261b288443",
       "byte_len": 406,
       "expected": {
         "algorithm_id": "open_vitals.recovery.v0",
-        "component_count": 6,
-        "score_0_to_100": 77.5,
+        "component_count": 5,
+        "score_0_to_100": 77.6,
         "version": "0.1.0"
       }
     },
@@ -825,13 +825,13 @@
       "schema": "open_vitals.strain-input.v1",
       "consent": "synthetic-no-user-data",
       "sensitivity": "public-test-fixture",
-      "notes": "Zone load is 140, HR reserve fraction is 0.5, weighted output is 8.05 on a 0-21 scale.",
+      "notes": "Zone load is 140, HR reserve fraction is 0.5, nonlinear weighted output is 8.73104974192709 on a 0-21 scale.",
       "checksum_sha256": "f534e9a00b6f5b52f9a2dad007f11fdff2550a87319091e94db5389a4647c05b",
       "byte_len": 276,
       "expected": {
         "algorithm_id": "open_vitals.strain.v0",
         "average_hr_reserve_fraction": 0.5,
-        "score_0_to_21": 8.05,
+        "score_0_to_21": 8.73104974192709,
         "version": "0.1.0",
         "zone_load": 140.0
       }

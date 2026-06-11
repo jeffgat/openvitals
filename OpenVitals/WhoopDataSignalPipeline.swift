@@ -1,6 +1,6 @@
 import Foundation
 
-final class WhoopDataSignalPipeline {
+final class WhoopDataSignalPipeline: @unchecked Sendable {
   var onStatus: ((String) -> Void)?
 
   private let queue = DispatchQueue(label: "com.open_vitals.swift.whoop-data-signal", qos: .utility)
@@ -144,6 +144,18 @@ final class WhoopDataSignalPipeline {
       )
       if shouldLog(sample, reason: "raw_research_k20.captured") {
         ble.record(source: "whoop.data", title: "raw_research_k20.captured", body: sample.logSummary)
+      }
+    }
+
+    if sample.isRawEcgPacket {
+      recordDeviceSignalPoint(
+        family: "K16",
+        value: "\(sample.bodyByteCount) bytes",
+        detail: sample.rawDiagnosticDetail,
+        capturedAt: sample.capturedAt
+      )
+      if shouldLog(sample, reason: "raw_ecg_k16.captured") {
+        ble.record(source: "whoop.data", title: "raw_ecg_k16.captured", body: sample.logSummary)
       }
     }
 

@@ -104,6 +104,11 @@ extension OpenVitalsBLEClient: CBPeripheralDelegate {
         capturedAt: capturedAt
       )
       fanOutNotification(event)
+      if shouldCoalesceHistoricalDataNotification(value, characteristic: characteristic) {
+        enqueueCoalescedHistoricalDataPackets(value, capturedAt: capturedAt)
+        publishNotificationSyncTimestampIfNeeded(capturedAt)
+        return
+      }
       guard shouldDispatchNotificationSideEffectsToMain(value, characteristic: characteristic) else {
         recordSkippedNotificationSideEffect(value, characteristic: characteristic, capturedAt: capturedAt)
         publishNotificationSyncTimestampIfNeeded(capturedAt)
@@ -152,6 +157,75 @@ extension OpenVitalsBLEClient: CBPeripheralDelegate {
       || characteristic.properties.contains(.indicate)
   }
 
+  func shouldCoalesceHistoricalDataNotification(_ value: Data, characteristic: CBCharacteristic) -> Bool {
+    guard notificationCharacteristicIDs.contains(characteristic.uuid) else {
+      return false
+    }
+
+    var containsHistoricalData = false
+    for frame in Self.v5Frames(in: value) {
+      guard let payload = Self.v5Payload(in: frame),
+            let packetType = payload.first else {
+        continue
+      }
+      switch packetType {
+      case V5PacketType.historicalData, V5PacketType.historicalIMUDataStream:
+        containsHistoricalData = true
+      case V5PacketType.commandResponse,
+           V5PacketType.puffinCommandResponse,
+           V5PacketType.event,
+           V5PacketType.metadata,
+           V5PacketType.puffinMetadata:
+        return false
+      default:
+        continue
+      }
+    }
+    return containsHistoricalData
+  }
+
+  func enqueueCoalescedHistoricalDataPackets(_ value: Data, capturedAt: Date) {
+    let packetCount = Self.historicalDataPacketCount(in: value)
+    guard packetCount > 0 else {
+      return
+    }
+
+    let runID = historicalSyncRunID
+    var workItemToSchedule: DispatchWorkItem?
+    historicalDataPacketFlushLock.lock()
+    pendingHistoricalDataPacketCount += packetCount
+    if historicalDataPacketFlushWorkItem == nil {
+      let workItem = DispatchWorkItem { [weak self] in
+        self?.flushCoalescedHistoricalDataPackets(
+          reason: "historical_data_batch",
+          runID: runID,
+          at: capturedAt
+        )
+      }
+      historicalDataPacketFlushWorkItem = workItem
+      workItemToSchedule = workItem
+    }
+    historicalDataPacketFlushLock.unlock()
+
+    if let workItemToSchedule {
+      DispatchQueue.main.asyncAfter(
+        deadline: .now() + Self.historicalDataPacketFlushInterval,
+        execute: workItemToSchedule
+      )
+    }
+  }
+
+  static func historicalDataPacketCount(in value: Data) -> Int {
+    v5Frames(in: value).reduce(0) { count, frame in
+      guard let payload = v5Payload(in: frame),
+            let packetType = payload.first,
+            packetType == V5PacketType.historicalData || packetType == V5PacketType.historicalIMUDataStream else {
+        return count
+      }
+      return count + 1
+    }
+  }
+
   func shouldDispatchNotificationSideEffectsToMain(_ value: Data, characteristic: CBCharacteristic) -> Bool {
     guard notificationCharacteristicIDs.contains(characteristic.uuid) else {
       return false
@@ -165,6 +239,8 @@ extension OpenVitalsBLEClient: CBPeripheralDelegate {
       switch packetType {
       case V5PacketType.commandResponse,
            V5PacketType.puffinCommandResponse,
+           V5PacketType.historicalData,
+           V5PacketType.historicalIMUDataStream,
            V5PacketType.event,
            V5PacketType.metadata,
            V5PacketType.puffinMetadata:

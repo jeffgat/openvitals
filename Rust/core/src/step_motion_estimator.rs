@@ -12,15 +12,17 @@ use crate::{
     protocol::{
         DataPacketBodySummary, I16SeriesSummary, ParsedPayload, decode_hex_with_whitespace,
     },
-    store::{DailyActivityMetricInput, DecodedFrameRow, OpenVitalsStore, MetricProvenanceInput},
+    store::{DailyActivityMetricInput, DecodedFrameRow, MetricProvenanceInput, OpenVitalsStore},
     validation_labels::{
         OFFICIAL_WHOOP_LABEL_POLICY, official_label_policy_issue_action,
         official_label_policy_issues,
     },
 };
 
-pub const RAW_MOTION_STEP_ESTIMATE_REPORT_SCHEMA: &str = "open_vitals.raw-motion-step-estimate-report.v1";
-pub const OPENVITALS_STEPS_RAW_MOTION_ESTIMATE_V0_ID: &str = "open_vitals.steps.raw_motion_estimate.v0";
+pub const RAW_MOTION_STEP_ESTIMATE_REPORT_SCHEMA: &str =
+    "open_vitals.raw-motion-step-estimate-report.v1";
+pub const OPENVITALS_STEPS_RAW_MOTION_ESTIMATE_V0_ID: &str =
+    "open_vitals.steps.raw_motion_estimate.v0";
 pub const OPENVITALS_STEPS_RAW_MOTION_ESTIMATE_V0_VERSION: &str = "0.1.0";
 
 #[derive(Debug, Clone)]
@@ -371,13 +373,17 @@ fn persist_validated_raw_motion_step_metric(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| OpenVitalsError::message("date_key is required when write_metric is true"))?;
+        .ok_or_else(|| {
+            OpenVitalsError::message("date_key is required when write_metric is true")
+        })?;
     let timezone = options
         .timezone
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| OpenVitalsError::message("timezone is required when write_metric is true"))?;
+        .ok_or_else(|| {
+            OpenVitalsError::message("timezone is required when write_metric is true")
+        })?;
     let start_time_unix_ms = report.start_time_unix_ms.ok_or_else(|| {
         OpenVitalsError::message("start must be an RFC3339 UTC timestamp when write_metric is true")
     })?;
@@ -758,7 +764,9 @@ fn validate_options(options: &RawMotionStepEstimateOptions) -> OpenVitalsResult<
         ));
     }
     if options.tolerance_steps < 0 {
-        return Err(OpenVitalsError::message("tolerance_steps must be non-negative"));
+        return Err(OpenVitalsError::message(
+            "tolerance_steps must be non-negative",
+        ));
     }
     if options.write_metric {
         if options

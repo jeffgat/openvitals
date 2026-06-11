@@ -16,8 +16,8 @@ use open_vitals_core::{
         AlgorithmPreferenceRecord, CURRENT_SCHEMA_VERSION, CalibrationLabelInput,
         CaptureSessionInput, CommandValidationRecord, DailyActivityMetricInput,
         DailyRecoveryMetricInput, DebugCommandRow, DebugEventRow, DebugSessionRow,
-        DecodedFrameInput, ExternalSleepSessionInput, ExternalSleepStageInput, OpenVitalsStore,
-        HourlyActivityMetricInput, MetricDebugFeatureInput, MetricProvenanceInput,
+        DecodedFrameInput, ExternalSleepSessionInput, ExternalSleepStageInput,
+        HourlyActivityMetricInput, MetricDebugFeatureInput, MetricProvenanceInput, OpenVitalsStore,
         RawEvidenceInput, StepCounterSampleInput,
     },
 };

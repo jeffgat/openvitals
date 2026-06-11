@@ -14,12 +14,13 @@ fn main() {
 
 fn run() -> open_vitals_core::OpenVitalsResult<()> {
     let args = args();
-    let input =
-        path_value(&args, "--input")?.ok_or_else(|| OpenVitalsError::message("--input is required"))?;
+    let input = path_value(&args, "--input")?
+        .ok_or_else(|| OpenVitalsError::message("--input is required"))?;
     let output_dir = path_value(&args, "--output")?
         .ok_or_else(|| OpenVitalsError::message("--output is required"))?;
     let report_output = path_value(&args, "--report")?;
-    let salt = value(&args, "--salt")?.unwrap_or_else(|| "open-vitals-capture-sanitize-v1".to_string());
+    let salt =
+        value(&args, "--salt")?.unwrap_or_else(|| "open-vitals-capture-sanitize-v1".to_string());
 
     let report = sanitize_capture_path(CaptureSanitizeOptions {
         input_path: &input,

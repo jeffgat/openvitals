@@ -4,15 +4,15 @@ use open_vitals_core::{
     OpenVitalsError,
     algorithm_compare::{
         AlgorithmComparisonReport, compare_hrv_open_vitals_to_reference,
-        compare_sleep_open_vitals_to_external_reference_report, compare_sleep_open_vitals_to_reference,
-        compare_sleep_v1_open_vitals_to_reference, compare_strain_open_vitals_to_reference,
-        compare_stress_open_vitals_to_reference,
+        compare_sleep_open_vitals_to_external_reference_report,
+        compare_sleep_open_vitals_to_reference, compare_sleep_v1_open_vitals_to_reference,
+        compare_strain_open_vitals_to_reference, compare_stress_open_vitals_to_reference,
     },
     metrics::{
-        AlgorithmRunResult, OPENVITALS_HRV_V0_ID, OPENVITALS_SLEEP_V1_ID, HrvInput, RecoveryInput,
+        AlgorithmRunResult, HrvInput, OPENVITALS_HRV_V0_ID, OPENVITALS_SLEEP_V1_ID, RecoveryInput,
         SleepInput, SleepV1Input, StrainInput, StressInput, algorithm_run_record,
-        built_in_algorithm_definitions, open_vitals_hrv_v0, open_vitals_recovery_v0, open_vitals_sleep_v0,
-        open_vitals_sleep_v1, open_vitals_strain_v0, open_vitals_stress_v0,
+        built_in_algorithm_definitions, open_vitals_hrv_v0, open_vitals_recovery_v0,
+        open_vitals_sleep_v0, open_vitals_sleep_v1, open_vitals_strain_v0, open_vitals_stress_v0,
     },
     report::write_json_report,
     store::{AlgorithmRunRecord, OpenVitalsStore},
@@ -380,13 +380,21 @@ fn run_benchmark_algorithm(
 ) -> open_vitals_core::OpenVitalsResult<BenchmarkRun> {
     match algorithm_id {
         "open_vitals.hrv.v0" => run_typed(input_path, |input: HrvInput| open_vitals_hrv_v0(&input)),
-        "open_vitals.sleep.v0" => run_typed(input_path, |input: SleepInput| open_vitals_sleep_v0(&input)),
-        "open_vitals.sleep.v1" => run_typed(input_path, |input: SleepV1Input| open_vitals_sleep_v1(&input)),
-        "open_vitals.strain.v0" => run_typed(input_path, |input: StrainInput| open_vitals_strain_v0(&input)),
-        "open_vitals.recovery.v0" => {
-            run_typed(input_path, |input: RecoveryInput| open_vitals_recovery_v0(&input))
+        "open_vitals.sleep.v0" => {
+            run_typed(input_path, |input: SleepInput| open_vitals_sleep_v0(&input))
         }
-        "open_vitals.stress.v0" => run_typed(input_path, |input: StressInput| open_vitals_stress_v0(&input)),
+        "open_vitals.sleep.v1" => run_typed(input_path, |input: SleepV1Input| {
+            open_vitals_sleep_v1(&input)
+        }),
+        "open_vitals.strain.v0" => run_typed(input_path, |input: StrainInput| {
+            open_vitals_strain_v0(&input)
+        }),
+        "open_vitals.recovery.v0" => run_typed(input_path, |input: RecoveryInput| {
+            open_vitals_recovery_v0(&input)
+        }),
+        "open_vitals.stress.v0" => run_typed(input_path, |input: StressInput| {
+            open_vitals_stress_v0(&input)
+        }),
         other => Err(OpenVitalsError::message(format!(
             "unsupported algorithm {other}; use metrics.built_in_definitions or --algorithm open_vitals.hrv.v0|open_vitals.sleep.v0|open_vitals.sleep.v1|open_vitals.strain.v0|open_vitals.recovery.v0|open_vitals.stress.v0"
         ))),
@@ -403,10 +411,11 @@ where
 {
     let input_raw =
         fs::read_to_string(input_path).map_err(|source| OpenVitalsError::io(input_path, source))?;
-    let input_value: serde_json::Value =
-        serde_json::from_str(&input_raw).map_err(|source| OpenVitalsError::json(input_path, source))?;
-    let input: I = serde_json::from_value(input_value.clone())
-        .map_err(|error| OpenVitalsError::message(format!("cannot parse benchmark input: {error}")))?;
+    let input_value: serde_json::Value = serde_json::from_str(&input_raw)
+        .map_err(|source| OpenVitalsError::json(input_path, source))?;
+    let input: I = serde_json::from_value(input_value.clone()).map_err(|error| {
+        OpenVitalsError::message(format!("cannot parse benchmark input: {error}"))
+    })?;
     let result = run(input);
     let record = algorithm_run_record("__benchmark_pending_run_id__", &result)?;
     let output = result
@@ -449,7 +458,9 @@ where
     })
 }
 
-fn benchmark_label_args(args: &[String]) -> open_vitals_core::OpenVitalsResult<Option<BenchmarkLabelArgs>> {
+fn benchmark_label_args(
+    args: &[String],
+) -> open_vitals_core::OpenVitalsResult<Option<BenchmarkLabelArgs>> {
     let Some(value_raw) = value(args, "--label-value")? else {
         return Ok(None);
     };
@@ -471,8 +482,9 @@ fn benchmark_label_args(args: &[String]) -> open_vitals_core::OpenVitalsResult<O
             "--label-provenance-json is required when --label-value is provided",
         ));
     };
-    let provenance = serde_json::from_str(&provenance_raw)
-        .map_err(|error| OpenVitalsError::message(format!("invalid label provenance JSON: {error}")))?;
+    let provenance = serde_json::from_str(&provenance_raw).map_err(|error| {
+        OpenVitalsError::message(format!("invalid label provenance JSON: {error}"))
+    })?;
     let max_absolute_error = value(args, "--max-absolute-error")?
         .map(|raw| {
             raw.parse::<f64>().map_err(|error| {
@@ -669,7 +681,10 @@ fn input_path(args: &[String], algorithm_id: &str) -> open_vitals_core::OpenVita
     ))
 }
 
-fn input_path_for_family(args: &[String], family: &str) -> open_vitals_core::OpenVitalsResult<PathBuf> {
+fn input_path_for_family(
+    args: &[String],
+    family: &str,
+) -> open_vitals_core::OpenVitalsResult<PathBuf> {
     if let Some(path) = path_value(args, "--input")? {
         return Ok(path);
     }

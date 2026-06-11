@@ -20,7 +20,7 @@ struct RawBodyDiagnostic {
   }
 
   static func from(packetK: Int, body: Data?) -> RawBodyDiagnostic? {
-    guard packetK == 2 || packetK == 20, let body else {
+    guard packetK == 2 || packetK == 16 || packetK == 20, let body else {
       return nil
     }
 
@@ -428,4 +428,3 @@ struct R21MotionCandidate {
     return nil
   }
 }
-

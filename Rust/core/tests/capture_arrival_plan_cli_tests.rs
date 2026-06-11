@@ -20,7 +20,10 @@ fn capture_arrival_plan_cli_emits_machine_readable_blockers() {
 
     assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["schema"], "open_vitals.capture-arrival-plan-report.v1");
+    assert_eq!(
+        report["schema"],
+        "open_vitals.capture-arrival-plan-report.v1"
+    );
     assert_eq!(report["generated_by"], "open-vitals-capture-arrival-plan");
     assert_eq!(report["pass"], false);
     assert_eq!(report["min_owned_captures"], 1);

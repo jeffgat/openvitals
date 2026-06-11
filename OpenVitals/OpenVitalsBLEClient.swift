@@ -3,7 +3,7 @@ import Foundation
 import OSLog
 
 
-final class OpenVitalsBLEClient: NSObject, ObservableObject {
+final class OpenVitalsBLEClient: NSObject, ObservableObject, @unchecked Sendable {
   @Published var bluetoothState = "not requested"
   @Published var connectionState = "disconnected"
   @Published var isScanning = false
@@ -87,6 +87,8 @@ final class OpenVitalsBLEClient: NSObject, ObservableObject {
   let coreBluetoothQueue = DispatchQueue(label: "com.open_vitals.swift.corebluetooth", qos: .utility)
   let realtimeVitalsQueue = DispatchQueue(label: "com.open_vitals.swift.realtime-vitals", qos: .userInitiated)
   let diagnosticLogQueue = DispatchQueue(label: "com.open_vitals.swift.diagnostic-log", qos: .utility)
+  var pendingDiagnosticLogDataByURL: [URL: Data] = [:]
+  var diagnosticLogFlushWorkItem: DispatchWorkItem?
   let bleUIStateAggregator = BLEUIStateAggregator(publishInterval: OpenVitalsBLEClient.bleUIStatePublishInterval)
   let messageStore = OpenVitalsMessageStore(
     maximumMessages: OpenVitalsBLEClient.maximumDisplayedMessages,
@@ -98,6 +100,8 @@ final class OpenVitalsBLEClient: NSObject, ObservableObject {
   static let displayedMessageFlushInterval: TimeInterval = 0.5
   static let maximumDisplayedMessages = 300
   static let bleUIStatePublishInterval: TimeInterval = 0.2
+  static let diagnosticLogFlushInterval: TimeInterval = 0.75
+  static let diagnosticLogMaxBufferedBytes = 64 * 1024
   static let diagnosticLogProtection: FileProtectionType = .completeUntilFirstUserAuthentication
   static let diagnosticLogSetupWarningLock = NSLock()
   static var diagnosticLogSetupWarnings: [String] = []
@@ -296,6 +300,9 @@ final class OpenVitalsBLEClient: NSObject, ObservableObject {
   var lastHistoricalSyncProgressCallbackStatus = ""
   var lastHistoricalSyncProgressCallbackDetail = ""
   var coalescedHistoricalSyncProgressCallbackCount = 0
+  let historicalDataPacketFlushLock = NSLock()
+  var pendingHistoricalDataPacketCount = 0
+  var historicalDataPacketFlushWorkItem: DispatchWorkItem?
   let requestHistoricalRangeBeforeTransfer = true
   let historicalCommandResponseTimeout: TimeInterval = 7
   let historicalPendingResponseGrace: TimeInterval = 25
@@ -363,6 +370,7 @@ final class OpenVitalsBLEClient: NSObject, ObservableObject {
   static let connectionAttemptTimeout: TimeInterval = 15
   static let historicalPacketCountPublishInterval: TimeInterval = 1
   static let historicalProgressCallbackInterval: TimeInterval = 1
+  static let historicalDataPacketFlushInterval: TimeInterval = 0.25
   static let strapClockAutoSyncThresholdSeconds: TimeInterval = 5
   static let diagnosticLogFormatter: ISO8601DateFormatter = {
     let formatter = ISO8601DateFormatter()
@@ -538,6 +546,9 @@ final class OpenVitalsBLEClient: NSObject, ObservableObject {
       SensorStreamCommandKind(commandNumber: 107, payload: revisionBoolean(true), name: "ENABLE_OPTICAL_DATA_ON"),
       SensorStreamCommandKind(commandNumber: 108, payload: revisionBoolean(true), name: "TOGGLE_OPTICAL_MODE_ON"),
       SensorStreamCommandKind(commandNumber: 153, payload: revisionBoolean(true), name: "TOGGLE_PERSISTENT_R20_ON"),
+      SensorStreamCommandKind(commandNumber: 124, payload: revisionBoolean(true), name: "TOGGLE_LABRADOR_DATA_GENERATION_ON"),
+      SensorStreamCommandKind(commandNumber: 125, payload: revisionBoolean(true), name: "TOGGLE_LABRADOR_RAW_SAVE_ON"),
+      SensorStreamCommandKind(commandNumber: 139, payload: revisionBoolean(true), name: "TOGGLE_LABRADOR_FILTERED_ON"),
     ]
 
     static let startMovementHeartRateCapture = [
@@ -546,6 +557,9 @@ final class OpenVitalsBLEClient: NSObject, ObservableObject {
     ]
 
     static let stopPhysiologyCapture = [
+      SensorStreamCommandKind(commandNumber: 139, payload: revisionBoolean(false), name: "TOGGLE_LABRADOR_FILTERED_OFF"),
+      SensorStreamCommandKind(commandNumber: 125, payload: revisionBoolean(false), name: "TOGGLE_LABRADOR_RAW_SAVE_OFF"),
+      SensorStreamCommandKind(commandNumber: 124, payload: revisionBoolean(false), name: "TOGGLE_LABRADOR_DATA_GENERATION_OFF"),
       SensorStreamCommandKind(commandNumber: 153, payload: revisionBoolean(false), name: "TOGGLE_PERSISTENT_R20_OFF"),
       SensorStreamCommandKind(commandNumber: 108, payload: revisionBoolean(false), name: "TOGGLE_OPTICAL_MODE_OFF"),
       SensorStreamCommandKind(commandNumber: 107, payload: revisionBoolean(false), name: "ENABLE_OPTICAL_DATA_OFF"),
@@ -594,6 +608,9 @@ final class OpenVitalsBLEClient: NSObject, ObservableObject {
       106: "TOGGLE_IMU_MODE",
       107: "ENABLE_OPTICAL_DATA",
       108: "TOGGLE_OPTICAL_MODE",
+      124: "TOGGLE_LABRADOR_DATA_GENERATION",
+      125: "TOGGLE_LABRADOR_RAW_SAVE",
+      139: "TOGGLE_LABRADOR_FILTERED",
       153: "TOGGLE_PERSISTENT_R20",
       154: "TOGGLE_PERSISTENT_R21",
     ]

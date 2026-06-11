@@ -190,7 +190,10 @@ fn step_capture_validation_accepts_monotonic_counter_matching_labels() {
     .unwrap();
 
     assert!(report.pass, "{:?}", report.issues);
-    assert_eq!(report.schema, "open_vitals.step-capture-validation-report.v1");
+    assert_eq!(
+        report.schema,
+        "open_vitals.step-capture-validation-report.v1"
+    );
     assert_eq!(report.matching_counter_delta_count, 1);
     assert_eq!(report.counter_deltas[0].delta, 100);
     assert_eq!(report.counter_deltas[0].manual_delta_error, Some(0));
