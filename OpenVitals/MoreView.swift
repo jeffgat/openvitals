@@ -109,6 +109,8 @@ struct MoreView: View {
       MoreHealthSyncView(store: store)
     case .rawExport:
       MoreRawExportView(store: store)
+    case .streamProbePlan:
+      MoreStreamProbePlanView(store: store)
     case .algorithms:
       MoreAlgorithmsView(store: store, healthStore: healthStore) {
         router.openHealth(.algorithms)

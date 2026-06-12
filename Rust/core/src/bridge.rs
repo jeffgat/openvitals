@@ -38,6 +38,9 @@ use crate::{
         import_captured_frame_batch_with_output_options,
     },
     capture_sanitize::{CaptureSanitizeOptions, sanitize_capture_path},
+    command_stream_delta::{
+        CommandStreamPacketDeltaOptions, run_command_stream_packet_delta_for_store,
+    },
     commands::{
         COMMAND_DEFINITIONS, CommandEmulatorLogEvidenceOptions, CommandEvidence,
         CommandLocalFrameCandidate, CommandValidationResult, command_capture_plan_from_results,
@@ -71,18 +74,20 @@ use crate::{
         scaffold_local_health_validation_manifest,
     },
     metric_features::{
-        BeatIntervalCandidateScanOptions, HeartRateFeatureOptions, HrvCaptureValidationOptions,
-        HrvFeatureOptions, MetricFeatureNextAction, MetricWindowFeatureOptions,
+        BeatIntervalCandidateScanOptions, BeatIntervalHrValidationOptions, HeartRateFeatureOptions,
+        HrvCaptureValidationOptions, HrvFeatureOptions, K20OpticalChannelScanOptions,
+        K26BeatFieldScanOptions, MetricFeatureNextAction, MetricWindowFeatureOptions,
         MotionFeatureOptions, OxygenSaturationCaptureValidationOptions,
         RecoveryFeatureScoreOptions, RecoveryProvidedVitalsFeature, RecoverySensorDiscoveryOptions,
         RecoverySensorDiscoveryReport, RespiratoryRateCaptureValidationOptions,
         RestingHeartRateFeatureOptions, SleepFeatureScoreOptions, SleepFeatureScoreReport,
         SleepStageKind, StrainFeatureScoreOptions, StressFeatureScoreOptions,
         TemperatureCaptureValidationOptions, VitalEventFeatureOptions,
-        run_beat_interval_candidate_scan_for_store, run_heart_rate_feature_report_for_store,
-        run_hrv_capture_validation_for_store, run_hrv_feature_report_for_store,
-        run_metric_window_feature_report_for_store, run_motion_feature_report_for_store,
-        run_oxygen_saturation_capture_validation_for_store,
+        run_beat_interval_candidate_scan_for_store, run_beat_interval_hr_validation_for_store,
+        run_heart_rate_feature_report_for_store, run_hrv_capture_validation_for_store,
+        run_hrv_feature_report_for_store, run_k20_optical_channel_scan_for_store,
+        run_k26_beat_field_scan_for_store, run_metric_window_feature_report_for_store,
+        run_motion_feature_report_for_store, run_oxygen_saturation_capture_validation_for_store,
         run_recovery_feature_score_report_for_store,
         run_recovery_sensor_discovery_report_for_store,
         run_respiratory_rate_capture_validation_for_store,
@@ -155,7 +160,7 @@ use crate::{
         CommandValidationRecord, DecodedFrameRow, ExternalSleepSessionInput,
         ExternalSleepSessionRow, ExternalSleepStageInput, ExternalSleepStageRow, OpenVitalsStore,
         OvernightHistoricalRangePollInput, OvernightRawNotificationInput,
-        OvernightSyncSessionInput, SleepCorrectionLabelInput,
+        OvernightSyncSessionInput, RrReferenceSampleInput, SleepCorrectionLabelInput,
     },
     timeline::{
         observability_timeline_from_rows, packet_timeline_between,
@@ -899,6 +904,77 @@ struct BeatIntervalCandidateScanArgs {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct BeatIntervalHrValidationArgs {
+    database_path: String,
+    #[serde(default = "default_correlation_start")]
+    start: String,
+    #[serde(default = "default_correlation_end")]
+    end: String,
+    #[serde(default)]
+    min_owned_captures: Option<usize>,
+    #[serde(default)]
+    sample_rate_hz: Option<f64>,
+    #[serde(default)]
+    peak_threshold_i16: Option<f64>,
+    #[serde(default)]
+    min_peak_spacing_samples: Option<usize>,
+    #[serde(default)]
+    max_hr_match_lag_seconds: Option<f64>,
+    #[serde(default)]
+    hr_tolerance_bpm: Option<f64>,
+    #[serde(default)]
+    min_matching_frames: Option<usize>,
+    #[serde(default)]
+    max_frame_summaries: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct K26BeatFieldScanArgs {
+    database_path: String,
+    #[serde(default = "default_correlation_start")]
+    start: String,
+    #[serde(default = "default_correlation_end")]
+    end: String,
+    #[serde(default)]
+    min_owned_captures: Option<usize>,
+    #[serde(default)]
+    max_hr_match_lag_seconds: Option<f64>,
+    #[serde(default)]
+    hr_tolerance_bpm: Option<f64>,
+    #[serde(default)]
+    min_matching_frames: Option<usize>,
+    #[serde(default)]
+    max_ranked_candidates: Option<usize>,
+    #[serde(default)]
+    max_frame_summaries: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct K20OpticalChannelScanArgs {
+    database_path: String,
+    #[serde(default = "default_correlation_start")]
+    start: String,
+    #[serde(default = "default_correlation_end")]
+    end: String,
+    #[serde(default)]
+    min_owned_captures: Option<usize>,
+    #[serde(default)]
+    sample_rate_hz: Option<f64>,
+    #[serde(default)]
+    min_peak_spacing_samples: Option<usize>,
+    #[serde(default)]
+    max_hr_match_lag_seconds: Option<f64>,
+    #[serde(default)]
+    hr_tolerance_bpm: Option<f64>,
+    #[serde(default)]
+    min_matching_segments: Option<usize>,
+    #[serde(default)]
+    max_ranked_channels: Option<usize>,
+    #[serde(default)]
+    max_segment_summaries: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct RecoverySensorDiscoveryArgs {
     database_path: String,
     #[serde(default = "default_correlation_start")]
@@ -1420,6 +1496,43 @@ struct CaptureListSessionsArgs {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct RrReferenceInsertSamplesArgs {
+    database_path: String,
+    samples: Vec<RrReferenceSampleArgs>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RrReferenceSampleArgs {
+    sample_id: String,
+    session_id: String,
+    captured_at: String,
+    device_name: String,
+    device_id: String,
+    #[serde(default)]
+    heart_rate_bpm: Option<f64>,
+    rr_interval_ms: f64,
+    notification_sequence: i64,
+    rr_index: i64,
+    #[serde(default)]
+    contact_detected: Option<bool>,
+    #[serde(default)]
+    energy_expended_j: Option<i64>,
+    #[serde(default = "empty_json_object")]
+    provenance: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RrReferenceSummaryArgs {
+    database_path: String,
+    #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default)]
+    start: Option<String>,
+    #[serde(default)]
+    end: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct ActivitySessionUpsertArgs {
     database_path: String,
     session_id: String,
@@ -1859,6 +1972,21 @@ struct CommandCapturePlanArgs {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct CommandStreamPacketDeltaArgs {
+    database_path: String,
+    start: String,
+    end: String,
+    #[serde(default)]
+    baseline_start: Option<String>,
+    #[serde(default)]
+    baseline_end: Option<String>,
+    #[serde(default)]
+    capture_session_ids: Vec<String>,
+    #[serde(default)]
+    expected_packet_families: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct ImportCommandValidationRecordsArgs {
     database_path: String,
     records: Vec<ImportedCommandValidationRecord>,
@@ -2179,6 +2307,20 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
                 .map(|value| bridge_ok(&request.request_id, value))
                 .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error))
         }
+        "metrics.beat_interval_hr_validation" => {
+            request_args::<BeatIntervalHrValidationArgs>(&request)
+                .and_then(beat_interval_hr_validation_bridge)
+                .map(|value| bridge_ok(&request.request_id, value))
+                .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error))
+        }
+        "metrics.k26_beat_field_scan" => request_args::<K26BeatFieldScanArgs>(&request)
+            .and_then(k26_beat_field_scan_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "metrics.k20_optical_channel_scan" => request_args::<K20OpticalChannelScanArgs>(&request)
+            .and_then(k20_optical_channel_scan_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "metrics.hrv_capture_validation" => request_args::<HrvCaptureValidationArgs>(&request)
             .and_then(hrv_capture_validation_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
@@ -2388,6 +2530,14 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
             .and_then(capture_list_sessions_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "reference_rr.insert_samples" => request_args::<RrReferenceInsertSamplesArgs>(&request)
+            .and_then(rr_reference_insert_samples_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "reference_rr.summary" => request_args::<RrReferenceSummaryArgs>(&request)
+            .and_then(rr_reference_summary_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "activity.create_session" => request_args::<ActivitySessionUpsertArgs>(&request)
             .and_then(activity_create_session_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
@@ -2525,6 +2675,12 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
             .and_then(command_capture_plan_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "commands.stream_probe_packet_delta" => {
+            request_args::<CommandStreamPacketDeltaArgs>(&request)
+                .and_then(command_stream_packet_delta_bridge)
+                .map(|value| bridge_ok(&request.request_id, value))
+                .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error))
+        }
         "commands.list_validation_records" => {
             request_args::<ListCommandValidationRecordsArgs>(&request)
                 .and_then(command_list_validation_records_bridge)
@@ -4729,6 +4885,89 @@ fn beat_interval_candidate_scan_bridge(
     })
 }
 
+fn beat_interval_hr_validation_bridge(
+    args: BeatIntervalHrValidationArgs,
+) -> OpenVitalsResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let report = run_beat_interval_hr_validation_for_store(
+        &store,
+        &args.database_path,
+        &args.start,
+        &args.end,
+        BeatIntervalHrValidationOptions {
+            min_owned_captures_per_summary: args
+                .min_owned_captures
+                .unwrap_or(DEFAULT_MIN_OWNED_CAPTURES_PER_SUMMARY),
+            sample_rate_hz: args.sample_rate_hz.unwrap_or(25.0),
+            peak_threshold_i16: args.peak_threshold_i16.unwrap_or(800.0),
+            min_peak_spacing_samples: args.min_peak_spacing_samples.unwrap_or(8),
+            max_hr_match_lag_seconds: args.max_hr_match_lag_seconds.unwrap_or(10.0),
+            hr_tolerance_bpm: args.hr_tolerance_bpm.unwrap_or(8.0),
+            min_matching_frames: args.min_matching_frames.unwrap_or(20),
+            max_frame_summaries: args.max_frame_summaries.unwrap_or(24),
+        },
+    )?;
+    serde_json::to_value(report).map_err(|error| {
+        OpenVitalsError::message(format!(
+            "cannot serialize beat-interval HR validation report: {error}"
+        ))
+    })
+}
+
+fn k26_beat_field_scan_bridge(args: K26BeatFieldScanArgs) -> OpenVitalsResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let report = run_k26_beat_field_scan_for_store(
+        &store,
+        &args.database_path,
+        &args.start,
+        &args.end,
+        K26BeatFieldScanOptions {
+            min_owned_captures_per_summary: args
+                .min_owned_captures
+                .unwrap_or(DEFAULT_MIN_OWNED_CAPTURES_PER_SUMMARY),
+            max_hr_match_lag_seconds: args.max_hr_match_lag_seconds.unwrap_or(10.0),
+            hr_tolerance_bpm: args.hr_tolerance_bpm.unwrap_or(8.0),
+            min_matching_frames: args.min_matching_frames.unwrap_or(20),
+            max_ranked_candidates: args.max_ranked_candidates.unwrap_or(24),
+            max_frame_summaries: args.max_frame_summaries.unwrap_or(24),
+        },
+    )?;
+    serde_json::to_value(report).map_err(|error| {
+        OpenVitalsError::message(format!(
+            "cannot serialize K26 beat field scan report: {error}"
+        ))
+    })
+}
+
+fn k20_optical_channel_scan_bridge(
+    args: K20OpticalChannelScanArgs,
+) -> OpenVitalsResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let report = run_k20_optical_channel_scan_for_store(
+        &store,
+        &args.database_path,
+        &args.start,
+        &args.end,
+        K20OpticalChannelScanOptions {
+            min_owned_captures_per_summary: args
+                .min_owned_captures
+                .unwrap_or(DEFAULT_MIN_OWNED_CAPTURES_PER_SUMMARY),
+            sample_rate_hz: args.sample_rate_hz.unwrap_or(25.0),
+            min_peak_spacing_samples: args.min_peak_spacing_samples.unwrap_or(8),
+            max_hr_match_lag_seconds: args.max_hr_match_lag_seconds.unwrap_or(10.0),
+            hr_tolerance_bpm: args.hr_tolerance_bpm.unwrap_or(8.0),
+            min_matching_segments: args.min_matching_segments.unwrap_or(2),
+            max_ranked_channels: args.max_ranked_channels.unwrap_or(12),
+            max_segment_summaries: args.max_segment_summaries.unwrap_or(12),
+        },
+    )?;
+    serde_json::to_value(report).map_err(|error| {
+        OpenVitalsError::message(format!(
+            "cannot serialize K20 optical channel scan report: {error}"
+        ))
+    })
+}
+
 fn hrv_capture_validation_bridge(
     args: HrvCaptureValidationArgs,
 ) -> OpenVitalsResult<serde_json::Value> {
@@ -6356,13 +6595,87 @@ fn capture_list_sessions_bridge(
 ) -> OpenVitalsResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let sessions = store.capture_sessions_between(args.start_unix_ms, args.end_unix_ms)?;
+    let mut rendered_sessions = Vec::with_capacity(sessions.len());
+    for session in &sessions {
+        let (observed_frame_count, first_observed_at, last_observed_at) =
+            store.capture_session_raw_evidence_summary(&session.session_id)?;
+        let display_frame_count = session.frame_count.max(observed_frame_count);
+        let mut value = serde_json::to_value(session).map_err(|error| {
+            OpenVitalsError::message(format!("cannot serialize capture session: {error}"))
+        })?;
+        if let Some(object) = value.as_object_mut() {
+            object.insert(
+                "observed_frame_count".to_string(),
+                json!(observed_frame_count),
+            );
+            object.insert(
+                "display_frame_count".to_string(),
+                json!(display_frame_count),
+            );
+            object.insert("first_observed_at".to_string(), json!(first_observed_at));
+            object.insert("last_observed_at".to_string(), json!(last_observed_at));
+        }
+        rendered_sessions.push(value);
+    }
     serde_json::to_value(json!({
         "schema": "open_vitals.capture-session-list.v1",
         "session_count": sessions.len(),
-        "sessions": sessions,
+        "sessions": rendered_sessions,
     }))
     .map_err(|error| {
         OpenVitalsError::message(format!("cannot serialize capture session list: {error}"))
+    })
+}
+
+fn rr_reference_insert_samples_bridge(
+    args: RrReferenceInsertSamplesArgs,
+) -> OpenVitalsResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let provenance_json = args
+        .samples
+        .iter()
+        .map(|sample| json_object_string("provenance", &sample.provenance))
+        .collect::<OpenVitalsResult<Vec<_>>>()?;
+    let inputs = args
+        .samples
+        .iter()
+        .zip(provenance_json.iter())
+        .map(|(sample, provenance_json)| RrReferenceSampleInput {
+            sample_id: &sample.sample_id,
+            session_id: &sample.session_id,
+            captured_at: &sample.captured_at,
+            device_name: &sample.device_name,
+            device_id: &sample.device_id,
+            heart_rate_bpm: sample.heart_rate_bpm,
+            rr_interval_ms: sample.rr_interval_ms,
+            notification_sequence: sample.notification_sequence,
+            rr_index: sample.rr_index,
+            contact_detected: sample.contact_detected,
+            energy_expended_j: sample.energy_expended_j,
+            provenance_json,
+        })
+        .collect::<Vec<_>>();
+    let report = store.insert_rr_reference_samples(&inputs)?;
+    serde_json::to_value(report).map_err(|error| {
+        OpenVitalsError::message(format!(
+            "cannot serialize RR reference insert report: {error}"
+        ))
+    })
+}
+
+fn rr_reference_summary_bridge(
+    args: RrReferenceSummaryArgs,
+) -> OpenVitalsResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let report = store.rr_reference_summary(
+        args.session_id.as_deref(),
+        args.start.as_deref(),
+        args.end.as_deref(),
+    )?;
+    serde_json::to_value(report).map_err(|error| {
+        OpenVitalsError::message(format!(
+            "cannot serialize RR reference summary report: {error}"
+        ))
     })
 }
 
@@ -7961,6 +8274,28 @@ fn command_capture_plan_bridge(
     report.pass = report.pass && report.issues.is_empty();
     serde_json::to_value(report).map_err(|error| {
         OpenVitalsError::message(format!("cannot serialize command capture plan: {error}"))
+    })
+}
+
+fn command_stream_packet_delta_bridge(
+    args: CommandStreamPacketDeltaArgs,
+) -> OpenVitalsResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let report = run_command_stream_packet_delta_for_store(
+        &store,
+        CommandStreamPacketDeltaOptions {
+            start: args.start,
+            end: args.end,
+            baseline_start: args.baseline_start,
+            baseline_end: args.baseline_end,
+            capture_session_ids: args.capture_session_ids,
+            expected_packet_families: args.expected_packet_families,
+        },
+    )?;
+    serde_json::to_value(report).map_err(|error| {
+        OpenVitalsError::message(format!(
+            "cannot serialize command stream packet delta: {error}"
+        ))
     })
 }
 

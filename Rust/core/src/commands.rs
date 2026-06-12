@@ -218,6 +218,7 @@ pub struct CommandCapturePlanReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_command_focus: Option<CommandCapturePlanAction>,
     pub actions: Vec<CommandCapturePlanAction>,
+    pub stream_probe_plan: CommandGatedStreamProbePlan,
     pub gates: BTreeMap<String, CommandDirectSendGate>,
     pub issues: Vec<String>,
 }
@@ -239,6 +240,51 @@ pub struct CommandCapturePlanAction {
     pub requirement: String,
     pub action: String,
     pub summary: String,
+}
+
+pub const COMMAND_GATED_STREAM_PROBE_PLAN_SCHEMA: &str =
+    "open_vitals.command-gated-stream-probe-plan.v1";
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CommandGatedStreamProbePlan {
+    pub schema: String,
+    pub objective: String,
+    pub stream_command_count: usize,
+    pub step_count: usize,
+    pub all_stream_gates_ready: bool,
+    pub temporary_stream_gates_ready: bool,
+    pub persistent_stream_gates_ready: bool,
+    pub expected_packet_families: Vec<String>,
+    pub stop_conditions: Vec<String>,
+    pub analysis_reports: Vec<String>,
+    pub steps: Vec<CommandGatedStreamProbeStep>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandGatedStreamProbePhase {
+    BaselineRead,
+    TemporaryStreamToggle,
+    PersistentConfig,
+    Shutdown,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CommandGatedStreamProbeStep {
+    pub sequence: usize,
+    pub command: String,
+    pub command_number: Option<u16>,
+    pub family: String,
+    pub risk_gate: CommandRiskGate,
+    pub phase: CommandGatedStreamProbePhase,
+    pub direct_send_allowed: bool,
+    pub missing_requirements: Vec<String>,
+    pub capture_window_seconds: u32,
+    pub expected_packet_families: Vec<String>,
+    pub expected_outcome: String,
+    pub validation_rule: String,
+    pub operator_action: String,
+    pub safety_notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1941,7 +1987,7 @@ pub fn command_capture_plan_from_results(
     let mut locked_count = 0usize;
     let mut critical_locked_count = 0usize;
 
-    for definition in definitions {
+    for definition in &definitions {
         let result = results_by_command.get(definition.id);
         let gate = direct_send_gate_from_result(definition.id, result);
         let family = definition.family.to_string();
@@ -1967,6 +2013,7 @@ pub fn command_capture_plan_from_results(
         }
         gates.insert(definition.id.to_string(), gate);
     }
+    let stream_probe_plan = command_gated_stream_probe_plan(&definitions, &gates);
 
     for command in results_by_command.keys() {
         if !COMMAND_DEFINITIONS
@@ -2021,8 +2068,359 @@ pub fn command_capture_plan_from_results(
         family_summaries,
         next_command_focus,
         actions,
+        stream_probe_plan,
         gates,
         issues,
+    }
+}
+
+fn command_gated_stream_probe_plan(
+    definitions: &[&CommandDefinition],
+    gates: &BTreeMap<String, CommandDirectSendGate>,
+) -> CommandGatedStreamProbePlan {
+    let mut steps = definitions
+        .iter()
+        .filter_map(|definition| {
+            let gate = gates.get(definition.id)?;
+            command_gated_stream_probe_step(definition, gate)
+        })
+        .collect::<Vec<_>>();
+    steps.sort_by_key(|step| {
+        (
+            command_gated_stream_probe_phase_order(step.phase),
+            command_gated_stream_probe_command_order(&step.command),
+        )
+    });
+    for (index, step) in steps.iter_mut().enumerate() {
+        step.sequence = index + 1;
+    }
+
+    let expected_packet_families = command_gated_stream_expected_packet_families(&steps);
+    let stream_command_count = steps.len();
+    let all_stream_gates_ready = steps.iter().all(|step| step.direct_send_allowed);
+    let temporary_stream_gates_ready = steps
+        .iter()
+        .filter(|step| {
+            matches!(
+                step.phase,
+                CommandGatedStreamProbePhase::TemporaryStreamToggle
+                    | CommandGatedStreamProbePhase::Shutdown
+            )
+        })
+        .all(|step| step.direct_send_allowed);
+    let persistent_stream_gates_ready = steps
+        .iter()
+        .filter(|step| matches!(step.phase, CommandGatedStreamProbePhase::PersistentConfig))
+        .all(|step| step.direct_send_allowed);
+
+    CommandGatedStreamProbePlan {
+        schema: COMMAND_GATED_STREAM_PROBE_PLAN_SCHEMA.to_string(),
+        objective: "Find command-gated packet streams that may expose beat-interval evidence for HRV and recovery metrics.".to_string(),
+        stream_command_count,
+        step_count: stream_command_count,
+        all_stream_gates_ready,
+        temporary_stream_gates_ready,
+        persistent_stream_gates_ready,
+        expected_packet_families,
+        stop_conditions: vec![
+            "Do not send a command while direct_send_allowed is false.".to_string(),
+            "Stop the probe if the command response reports failure or times out.".to_string(),
+            "Stop the current step if the expected packet-family count does not increase during the capture window.".to_string(),
+            "Do not run persistent configuration commands without explicit approval and rollback or restore confirmation.".to_string(),
+            "After a raw-stream probe, run the gated shutdown command before starting another probe when available.".to_string(),
+        ],
+        analysis_reports: vec![
+            "metrics.beat_interval_candidate_scan".to_string(),
+            "metrics.beat_interval_hr_validation".to_string(),
+            "metrics.k26_beat_field_scan".to_string(),
+            "open-vitals-export-validator".to_string(),
+        ],
+        steps,
+    }
+}
+
+fn command_gated_stream_probe_step(
+    definition: &CommandDefinition,
+    gate: &CommandDirectSendGate,
+) -> Option<CommandGatedStreamProbeStep> {
+    let profile = command_gated_stream_probe_profile(definition.id)?;
+    let safety_notes = command_gated_stream_safety_notes(definition, profile.phase);
+    Some(CommandGatedStreamProbeStep {
+        sequence: 0,
+        command: definition.id.to_string(),
+        command_number: definition.command_number,
+        family: definition.family.to_string(),
+        risk_gate: definition.risk_gate,
+        phase: profile.phase,
+        direct_send_allowed: gate.direct_send_allowed,
+        missing_requirements: gate.missing_requirements.clone(),
+        capture_window_seconds: profile.capture_window_seconds,
+        expected_packet_families: profile
+            .expected_packet_families
+            .iter()
+            .map(|family| (*family).to_string())
+            .collect(),
+        expected_outcome: profile.expected_outcome.to_string(),
+        validation_rule: profile.validation_rule.to_string(),
+        operator_action: profile.operator_action.to_string(),
+        safety_notes,
+    })
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CommandGatedStreamProbeProfile {
+    phase: CommandGatedStreamProbePhase,
+    capture_window_seconds: u32,
+    expected_packet_families: &'static [&'static str],
+    expected_outcome: &'static str,
+    validation_rule: &'static str,
+    operator_action: &'static str,
+}
+
+fn command_gated_stream_probe_profile(id: &str) -> Option<CommandGatedStreamProbeProfile> {
+    match id {
+        "get_led_drive" => Some(CommandGatedStreamProbeProfile {
+            phase: CommandGatedStreamProbePhase::BaselineRead,
+            capture_window_seconds: 0,
+            expected_packet_families: &["command_response", "optical_afe_config"],
+            expected_outcome: "Records baseline optical LED drive settings before optical stream probes.",
+            validation_rule: "A command response should be captured and persisted with the active session.",
+            operator_action: "Run before enabling optical stream probes.",
+        }),
+        "get_tia_gain" => Some(CommandGatedStreamProbeProfile {
+            phase: CommandGatedStreamProbePhase::BaselineRead,
+            capture_window_seconds: 0,
+            expected_packet_families: &["command_response", "optical_afe_config"],
+            expected_outcome: "Records baseline optical TIA gain settings before optical stream probes.",
+            validation_rule: "A command response should be captured and persisted with the active session.",
+            operator_action: "Run before enabling optical stream probes.",
+        }),
+        "get_bias_offset" => Some(CommandGatedStreamProbeProfile {
+            phase: CommandGatedStreamProbePhase::BaselineRead,
+            capture_window_seconds: 0,
+            expected_packet_families: &["command_response", "optical_afe_config"],
+            expected_outcome: "Records baseline optical bias offset settings before optical stream probes.",
+            validation_rule: "A command response should be captured and persisted with the active session.",
+            operator_action: "Run before enabling optical stream probes.",
+        }),
+        "get_research_packet" => Some(CommandGatedStreamProbeProfile {
+            phase: CommandGatedStreamProbePhase::BaselineRead,
+            capture_window_seconds: 0,
+            expected_packet_families: &["command_response", "research_packet_config"],
+            expected_outcome: "Records the current research packet configuration before any stream probe.",
+            validation_rule: "A command response should be captured and persisted with the active session.",
+            operator_action: "Run before changing any raw or research stream setting.",
+        }),
+        "toggle_realtime_hr" => Some(CommandGatedStreamProbeProfile {
+            phase: CommandGatedStreamProbePhase::TemporaryStreamToggle,
+            capture_window_seconds: 60,
+            expected_packet_families: &["K18_trusted_heart_rate"],
+            expected_outcome: "Confirms a nearby trusted heart-rate reference stream for validating beat candidates.",
+            validation_rule: "K18 packet count should increase and timestamps should overlap the probe window.",
+            operator_action: "Run during an active capture while the band is on-body and still.",
+        }),
+        "toggle_generic_hr_profile" => Some(CommandGatedStreamProbeProfile {
+            phase: CommandGatedStreamProbePhase::TemporaryStreamToggle,
+            capture_window_seconds: 60,
+            expected_packet_families: &["generic_ble_heart_rate", "K18_trusted_heart_rate"],
+            expected_outcome: "Checks whether the generic heart-rate profile adds another trusted HR reference.",
+            validation_rule: "Generic HR or K18 packet count should increase during the probe window.",
+            operator_action: "Run during an active capture while the band is on-body and still.",
+        }),
+        "send_r10_r11_realtime" => Some(CommandGatedStreamProbeProfile {
+            phase: CommandGatedStreamProbePhase::TemporaryStreamToggle,
+            capture_window_seconds: 90,
+            expected_packet_families: &["K10_raw_stream", "K11_raw_stream"],
+            expected_outcome: "Checks whether realtime raw R10/R11 streams expose beat-adjacent fields.",
+            validation_rule: "K10 or K11 packet count should increase and align to nearby K18 HR.",
+            operator_action: "Run during an active capture, then export the bundle for field correlation.",
+        }),
+        "start_raw_data" => Some(CommandGatedStreamProbeProfile {
+            phase: CommandGatedStreamProbePhase::TemporaryStreamToggle,
+            capture_window_seconds: 120,
+            expected_packet_families: &[
+                "K10_raw_stream",
+                "K11_raw_stream",
+                "K20_raw_or_research_stream",
+                "K26_pulse_information",
+            ],
+            expected_outcome: "Opens the broad raw stream path most likely to reveal hidden beat-interval evidence.",
+            validation_rule: "At least one raw stream packet family should increase during the probe window.",
+            operator_action: "Run during an active capture, stay still for the window, then run the shutdown step if available.",
+        }),
+        "stop_raw_data" => Some(CommandGatedStreamProbeProfile {
+            phase: CommandGatedStreamProbePhase::Shutdown,
+            capture_window_seconds: 30,
+            expected_packet_families: &["raw_stream_packet_counts"],
+            expected_outcome: "Closes the raw stream path after a probe so later captures have a clean boundary.",
+            validation_rule: "Raw stream packet counts should flatten after the command response.",
+            operator_action: "Run after start_raw_data probes before starting another command-gated stream test.",
+        }),
+        "toggle_imu_mode_historical" => Some(CommandGatedStreamProbeProfile {
+            phase: CommandGatedStreamProbePhase::TemporaryStreamToggle,
+            capture_window_seconds: 90,
+            expected_packet_families: &["K21_raw_motion_stream"],
+            expected_outcome: "Checks whether historical IMU mode changes packet timing or unlocks paired raw stream evidence.",
+            validation_rule: "K21 packet count or timing should change during the probe window.",
+            operator_action: "Run during an active capture and compare packet deltas against the baseline window.",
+        }),
+        "toggle_imu_mode" => Some(CommandGatedStreamProbeProfile {
+            phase: CommandGatedStreamProbePhase::TemporaryStreamToggle,
+            capture_window_seconds: 90,
+            expected_packet_families: &["K21_raw_motion_stream"],
+            expected_outcome: "Checks whether realtime IMU mode changes packet timing or unlocks paired raw stream evidence.",
+            validation_rule: "K21 packet count or timing should change during the probe window.",
+            operator_action: "Run during an active capture and compare packet deltas against the baseline window.",
+        }),
+        "enable_optical_data" => Some(CommandGatedStreamProbeProfile {
+            phase: CommandGatedStreamProbePhase::TemporaryStreamToggle,
+            capture_window_seconds: 120,
+            expected_packet_families: &[
+                "K20_raw_or_research_stream",
+                "K26_pulse_information",
+                "K17_R17_optical_or_filtered",
+            ],
+            expected_outcome: "Enables realtime optical packets that may contain beat interval or pulse-timing evidence.",
+            validation_rule: "K20, K26, or K17/R17 packet counts should increase during the probe window.",
+            operator_action: "Run during an active capture while the band is on-body and still.",
+        }),
+        "toggle_optical_mode" => Some(CommandGatedStreamProbeProfile {
+            phase: CommandGatedStreamProbePhase::TemporaryStreamToggle,
+            capture_window_seconds: 120,
+            expected_packet_families: &[
+                "K20_raw_or_research_stream",
+                "K26_pulse_information",
+                "K17_R17_optical_or_filtered",
+            ],
+            expected_outcome: "Tests whether optical mode changes expose a richer optical packet stream.",
+            validation_rule: "K20, K26, or K17/R17 packet counts should increase or change shape during the probe window.",
+            operator_action: "Run during an active capture and compare packet deltas against the prior optical window.",
+        }),
+        "toggle_labrador_data_generation" => Some(CommandGatedStreamProbeProfile {
+            phase: CommandGatedStreamProbePhase::TemporaryStreamToggle,
+            capture_window_seconds: 120,
+            expected_packet_families: &["K16_raw_ecg_labrador", "K17_R17_optical_or_filtered"],
+            expected_outcome: "Tests whether raw ECG/Labrador generation exposes beat-to-beat timing evidence.",
+            validation_rule: "K16 or K17/R17 packet counts should increase during the probe window.",
+            operator_action: "Run during an active capture while still, then export for beat-candidate scanning.",
+        }),
+        "toggle_labrador_raw_save" => Some(CommandGatedStreamProbeProfile {
+            phase: CommandGatedStreamProbePhase::TemporaryStreamToggle,
+            capture_window_seconds: 120,
+            expected_packet_families: &["K16_raw_ecg_labrador", "K17_R17_optical_or_filtered"],
+            expected_outcome: "Tests whether raw Labrador save behavior changes captured beat evidence.",
+            validation_rule: "K16 or K17/R17 packet counts should increase or change payload shape during the probe window.",
+            operator_action: "Run during an active capture and compare packet deltas against the prior Labrador window.",
+        }),
+        "toggle_labrador_filtered" => Some(CommandGatedStreamProbeProfile {
+            phase: CommandGatedStreamProbePhase::TemporaryStreamToggle,
+            capture_window_seconds: 120,
+            expected_packet_families: &["K17_R17_optical_or_filtered", "K16_raw_ecg_labrador"],
+            expected_outcome: "Tests whether filtered Labrador packets contain cleaned beat-timing evidence.",
+            validation_rule: "K17/R17 or K16 packet counts should increase during the probe window.",
+            operator_action: "Run during an active capture while still, then export for beat-candidate scanning.",
+        }),
+        "set_research_packet" => Some(CommandGatedStreamProbeProfile {
+            phase: CommandGatedStreamProbePhase::PersistentConfig,
+            capture_window_seconds: 180,
+            expected_packet_families: &["K20_raw_or_research_stream", "research_packet_config"],
+            expected_outcome: "Changes research packet configuration only after we have official evidence and rollback.",
+            validation_rule: "Research config response should be captured and K20 packet shape should be compared before and after.",
+            operator_action: "Run only with explicit approval, visible confirmation, and a restore plan.",
+        }),
+        "toggle_persistent_r20" => Some(CommandGatedStreamProbeProfile {
+            phase: CommandGatedStreamProbePhase::PersistentConfig,
+            capture_window_seconds: 180,
+            expected_packet_families: &[
+                "K20_raw_or_research_stream",
+                "K26_pulse_information",
+                "K17_R17_optical_or_filtered",
+            ],
+            expected_outcome: "Tests the persistent optical R20 path only after temporary optical probes are insufficient.",
+            validation_rule: "K20, K26, or K17/R17 packet counts and payload shape should be compared before and after.",
+            operator_action: "Run only after temporary optical probes, with explicit approval and rollback or restore acknowledged.",
+        }),
+        "toggle_persistent_r21" => Some(CommandGatedStreamProbeProfile {
+            phase: CommandGatedStreamProbePhase::PersistentConfig,
+            capture_window_seconds: 180,
+            expected_packet_families: &["K21_raw_motion_stream"],
+            expected_outcome: "Tests the persistent IMU R21 path only if temporary IMU probes are insufficient.",
+            validation_rule: "K21 packet counts and timing should be compared before and after.",
+            operator_action: "Run only after temporary IMU probes, with explicit approval and rollback or restore acknowledged.",
+        }),
+        _ => None,
+    }
+}
+
+fn command_gated_stream_safety_notes(
+    definition: &CommandDefinition,
+    phase: CommandGatedStreamProbePhase,
+) -> Vec<String> {
+    let mut notes = vec!["Requires the normal direct-send gate to be ready.".to_string()];
+    match definition.risk_gate {
+        CommandRiskGate::ReadOnly => {
+            notes.push("Read-only probe; expected to capture a command response only.".to_string());
+        }
+        CommandRiskGate::UserVisibleStateChange => {
+            notes.push(
+                "Temporary stream probe; run only from a visible capture session.".to_string(),
+            );
+        }
+        CommandRiskGate::CriticalStateChange => {
+            notes.push("Critical persistent probe; requires explicit approval, confirmation, and rollback or restore acknowledgement.".to_string());
+        }
+    }
+    if matches!(phase, CommandGatedStreamProbePhase::Shutdown) {
+        notes.push(
+            "Use as the cleanup step after raw-stream probes when its gate is ready.".to_string(),
+        );
+    }
+    notes
+}
+
+fn command_gated_stream_expected_packet_families(
+    steps: &[CommandGatedStreamProbeStep],
+) -> Vec<String> {
+    let mut families = BTreeSet::new();
+    for step in steps {
+        for family in &step.expected_packet_families {
+            families.insert(family.clone());
+        }
+    }
+    families.into_iter().collect()
+}
+
+fn command_gated_stream_probe_phase_order(phase: CommandGatedStreamProbePhase) -> u8 {
+    match phase {
+        CommandGatedStreamProbePhase::BaselineRead => 0,
+        CommandGatedStreamProbePhase::TemporaryStreamToggle => 1,
+        CommandGatedStreamProbePhase::PersistentConfig => 2,
+        CommandGatedStreamProbePhase::Shutdown => 3,
+    }
+}
+
+fn command_gated_stream_probe_command_order(command: &str) -> u8 {
+    match command {
+        "get_led_drive" => 0,
+        "get_tia_gain" => 1,
+        "get_bias_offset" => 2,
+        "get_research_packet" => 3,
+        "toggle_realtime_hr" => 10,
+        "toggle_generic_hr_profile" => 11,
+        "send_r10_r11_realtime" => 12,
+        "start_raw_data" => 13,
+        "enable_optical_data" => 14,
+        "toggle_optical_mode" => 15,
+        "toggle_labrador_data_generation" => 16,
+        "toggle_labrador_raw_save" => 17,
+        "toggle_labrador_filtered" => 18,
+        "toggle_imu_mode" => 19,
+        "toggle_imu_mode_historical" => 20,
+        "set_research_packet" => 30,
+        "toggle_persistent_r20" => 31,
+        "toggle_persistent_r21" => 32,
+        "stop_raw_data" => 40,
+        _ => 100,
     }
 }
 

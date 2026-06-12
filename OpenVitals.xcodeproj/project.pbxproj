@@ -147,6 +147,8 @@
 		D10000000000000000000052 /* PacketMonitorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000052 /* PacketMonitorModel.swift */; };
 		D10000000000000000000053 /* OpenVitalsMessageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000053 /* OpenVitalsMessageStore.swift */; };
 		D10000000000000000000054 /* MoreDataStore+SupabaseDebugUpload.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000054 /* MoreDataStore+SupabaseDebugUpload.swift */; };
+		D10000000000000000000055 /* MoreStreamProbeViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000055 /* MoreStreamProbeViews.swift */; };
+		D10000000000000000000056 /* OpenVitalsRRReferenceCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000056 /* OpenVitalsRRReferenceCapture.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -319,6 +321,8 @@
 		D20000000000000000000052 /* PacketMonitorModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketMonitorModel.swift; sourceTree = "<group>"; };
 		D20000000000000000000053 /* OpenVitalsMessageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenVitalsMessageStore.swift; sourceTree = "<group>"; };
 		D20000000000000000000054 /* MoreDataStore+SupabaseDebugUpload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MoreDataStore+SupabaseDebugUpload.swift"; sourceTree = "<group>"; };
+		D20000000000000000000055 /* MoreStreamProbeViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoreStreamProbeViews.swift; sourceTree = "<group>"; };
+		D20000000000000000000056 /* OpenVitalsRRReferenceCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenVitalsRRReferenceCapture.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -413,6 +417,8 @@
 				D20000000000000000000046 /* OpenVitalsLocalDataExporter+FileSystem.swift */,
 				D20000000000000000000005 /* MoreCaptureViews.swift */,
 				D20000000000000000000006 /* MoreRawExportViews.swift */,
+				D20000000000000000000055 /* MoreStreamProbeViews.swift */,
+				D20000000000000000000056 /* OpenVitalsRRReferenceCapture.swift */,
 				D20000000000000000000007 /* MoreDebugViews.swift */,
 				D20000000000000000000008 /* MoreInfoViews.swift */,
 				A20000000000000000000018 /* CoachView.swift */,
@@ -770,6 +776,8 @@
 				D10000000000000000000046 /* OpenVitalsLocalDataExporter+FileSystem.swift in Sources */,
 				D10000000000000000000005 /* MoreCaptureViews.swift in Sources */,
 				D10000000000000000000006 /* MoreRawExportViews.swift in Sources */,
+				D10000000000000000000055 /* MoreStreamProbeViews.swift in Sources */,
+				D10000000000000000000056 /* OpenVitalsRRReferenceCapture.swift in Sources */,
 				D10000000000000000000007 /* MoreDebugViews.swift in Sources */,
 				D10000000000000000000008 /* MoreInfoViews.swift in Sources */,
 				A10000000000000000000025 /* CodexCoachSupport.swift in Sources */,

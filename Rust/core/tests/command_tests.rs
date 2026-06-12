@@ -1,11 +1,11 @@
 use open_vitals_core::commands::{
     COMMAND_DEFINITIONS, CommandDefinition, CommandDirectSendPreflightInput,
-    CommandEmulatorLogEvidenceOptions, CommandEvidence, CommandLocalFrameCandidate,
-    CommandRiskGate, command_capture_plan_from_results, command_evidence_from_emulator_log,
-    command_evidence_from_emulator_log_text, command_evidence_template,
-    command_evidence_with_local_frame_matches, direct_send_gate_from_result,
-    direct_send_preflight_from_gate, load_command_evidence, load_command_local_frame_candidates,
-    validate_commands,
+    CommandEmulatorLogEvidenceOptions, CommandEvidence, CommandGatedStreamProbePhase,
+    CommandLocalFrameCandidate, CommandRiskGate, command_capture_plan_from_results,
+    command_evidence_from_emulator_log, command_evidence_from_emulator_log_text,
+    command_evidence_template, command_evidence_with_local_frame_matches,
+    direct_send_gate_from_result, direct_send_preflight_from_gate, load_command_evidence,
+    load_command_local_frame_candidates, validate_commands,
 };
 use open_vitals_core::protocol::{
     COMMAND_GET_HELLO, DeviceType, PACKET_TYPE_COMMAND_RESPONSE, ParsedPayload,
@@ -453,6 +453,110 @@ fn command_capture_plan_summarizes_emulator_evidence_promotion_work() {
     assert!(plan.family_summaries.iter().any(|family| {
         family.family == "sensor_stream" && family.ready_count == 1 && family.locked_count == 0
     }));
+}
+
+#[test]
+fn command_capture_plan_orders_command_gated_stream_probe_steps() {
+    let evidence = COMMAND_DEFINITIONS
+        .iter()
+        .filter(|definition| {
+            matches!(
+                definition.id,
+                "get_led_drive"
+                    | "enable_optical_data"
+                    | "toggle_labrador_filtered"
+                    | "stop_raw_data"
+            )
+        })
+        .map(ready_command_evidence_for_definition)
+        .collect::<Vec<_>>();
+    let report = validate_commands(&evidence);
+    let requested = [
+        "toggle_persistent_r20",
+        "stop_raw_data",
+        "toggle_labrador_filtered",
+        "get_led_drive",
+        "enable_optical_data",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect::<Vec<_>>();
+
+    let plan = command_capture_plan_from_results(&report.commands, &requested);
+    let stream_plan = &plan.stream_probe_plan;
+    let commands = stream_plan
+        .steps
+        .iter()
+        .map(|step| step.command.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        commands,
+        vec![
+            "get_led_drive",
+            "enable_optical_data",
+            "toggle_labrador_filtered",
+            "toggle_persistent_r20",
+            "stop_raw_data",
+        ]
+    );
+    assert_eq!(stream_plan.step_count, 5);
+    assert!(!stream_plan.all_stream_gates_ready);
+    assert!(stream_plan.temporary_stream_gates_ready);
+    assert!(!stream_plan.persistent_stream_gates_ready);
+    assert!(
+        stream_plan
+            .expected_packet_families
+            .contains(&"K20_raw_or_research_stream".to_string())
+    );
+    assert!(
+        stream_plan
+            .expected_packet_families
+            .contains(&"K17_R17_optical_or_filtered".to_string())
+    );
+    assert!(
+        stream_plan
+            .analysis_reports
+            .contains(&"metrics.beat_interval_candidate_scan".to_string())
+    );
+
+    let baseline = &stream_plan.steps[0];
+    assert_eq!(baseline.phase, CommandGatedStreamProbePhase::BaselineRead);
+    assert!(baseline.direct_send_allowed);
+    assert_eq!(baseline.capture_window_seconds, 0);
+
+    let optical = stream_plan
+        .steps
+        .iter()
+        .find(|step| step.command == "enable_optical_data")
+        .unwrap();
+    assert_eq!(
+        optical.phase,
+        CommandGatedStreamProbePhase::TemporaryStreamToggle
+    );
+    assert!(optical.direct_send_allowed);
+    assert!(
+        optical
+            .expected_packet_families
+            .contains(&"K26_pulse_information".to_string())
+    );
+
+    let persistent = stream_plan
+        .steps
+        .iter()
+        .find(|step| step.command == "toggle_persistent_r20")
+        .unwrap();
+    assert_eq!(
+        persistent.phase,
+        CommandGatedStreamProbePhase::PersistentConfig
+    );
+    assert_eq!(persistent.risk_gate, CommandRiskGate::CriticalStateChange);
+    assert!(!persistent.direct_send_allowed);
+    assert!(
+        persistent
+            .missing_requirements
+            .contains(&"official_capture_evidence".to_string())
+    );
 }
 
 #[test]

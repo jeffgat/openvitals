@@ -9,6 +9,7 @@ pub mod calibration;
 pub mod capture_correlation;
 pub mod capture_import;
 pub mod capture_sanitize;
+pub mod command_stream_delta;
 pub mod commands;
 pub mod debug_ws;
 pub mod debug_ws_server;

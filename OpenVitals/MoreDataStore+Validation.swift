@@ -588,11 +588,14 @@ extension MoreDataStore {
     if let string = value as? String {
       return string
     }
+    if let number = value as? NSNumber {
+      if CFGetTypeID(number) == CFBooleanGetTypeID() {
+        return number.boolValue ? "true" : "false"
+      }
+      return number.stringValue
+    }
     if let bool = value as? Bool {
       return bool ? "true" : "false"
-    }
-    if let number = value as? NSNumber {
-      return number.stringValue
     }
     if let array = value as? [Any] {
       return "\(array.count)"
@@ -790,8 +793,9 @@ extension MoreDataStore {
     }
     return sessions.prefix(6).map { session in
       let id = firstString(session, keys: ["session_id", "id"]) ?? "session"
-      let frames = firstString(session, keys: ["frame_count", "frames"]) ?? "0"
-      return "\(id.prefix(12)) | \(frames) frames"
+      let frames = firstString(session, keys: ["display_frame_count", "observed_frame_count", "frame_count", "frames"]) ?? "0"
+      let status = firstString(session, keys: ["status"]) ?? "unknown"
+      return "\(id.prefix(12)) | \(frames) frames | \(status)"
     }
   }
 

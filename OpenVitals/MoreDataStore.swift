@@ -61,6 +61,26 @@ final class MoreDataStore: ObservableObject {
   @Published var rawZipValidation = "Not validated"
   @Published var privacyLintStatus = "Not linted"
   @Published var sanitizedPrivacyStatus = "No sanitized copy"
+  @Published var streamProbeStart: String
+  @Published var streamProbeEnd: String
+  @Published var streamProbeBaselineStart = ""
+  @Published var streamProbeBaselineEnd = ""
+  @Published var streamProbeCaptureSessions = ""
+  @Published var streamProbePlanStatus = "No stream probe plan"
+  @Published var streamProbePlanInProgress = false
+  @Published var streamProbeDeltaStatus = "No packet delta analysis"
+  @Published var streamProbeDeltaInProgress = false
+  @Published var streamProbeExpectedPacketFamilies: [String] = []
+  @Published var streamProbeSteps: [MoreStreamProbeStep] = []
+  @Published var streamProbePacketDeltas: [MoreStreamProbePacketDelta] = []
+  @Published var streamProbeNextActions: [String] = []
+  @Published var k20ChannelScanStatus = "No K20 channel scan"
+  @Published var k20ChannelScanInProgress = false
+  @Published var k20ChannelCandidates: [MoreK20ChannelCandidate] = []
+  @Published var k20ChannelNextActions: [String] = []
+  @Published var automaticStreamProbeStatus = "No automatic stream probe run"
+  @Published var automaticStreamProbeInProgress = false
+  @Published var automaticStreamProbeStartedAt: Date?
   @Published var localExportStatus = "No local export"
   @Published var localExportInProgress = false
   @Published var localExportURL: URL?
@@ -130,6 +150,8 @@ final class MoreDataStore: ObservableObject {
     let runbookURL: URL?
   }
   var debugSessionID = "swift-more-\(UUID().uuidString)"
+  var automaticStreamProbeStopWorkItem: DispatchWorkItem?
+  lazy var rrReferenceCapture = OpenVitalsRRReferenceCapture(databasePath: databasePath)
 
   init(databasePath: String? = nil) {
     let appDirectory = MoreDataStore.applicationDirectory()
@@ -161,6 +183,8 @@ final class MoreDataStore: ObservableObject {
     healthBackfillEnd = end
     rawExportStart = start
     rawExportEnd = end
+    streamProbeStart = start
+    streamProbeEnd = end
     if supabaseUploadIsConfigured {
       supabaseUploadStatus = "Ready to upload debug bundle"
     }
@@ -175,6 +199,7 @@ final class MoreDataStore: ObservableObject {
       localStore: databaseExists ? .ready : .unavailable,
       healthSync: healthSyncBackfillWindowIssueSummary() == nil ? .pending : .blocked,
       rawExport: rawExportRouteStatus,
+      streamProbePlan: streamProbeRouteStatus,
       algorithms: .ready,
       debug: coreVersionStatus.hasPrefix("Rust core") ? .ready : .pending,
       appearance: .ready,
@@ -196,6 +221,25 @@ final class MoreDataStore: ObservableObject {
       return .inProgress
     }
     return rawBundlePath == "No bundle" ? .notRun : .ready
+  }
+
+  private var streamProbeRouteStatus: MoreStatusKind {
+    if automaticStreamProbeInProgress || streamProbePlanInProgress || streamProbeDeltaInProgress || k20ChannelScanInProgress {
+      return .inProgress
+    }
+    if streamProbePlanStatus.localizedCaseInsensitiveContains("blocked")
+      || streamProbeDeltaStatus.localizedCaseInsensitiveContains("blocked")
+      || k20ChannelScanStatus.localizedCaseInsensitiveContains("blocked")
+      || streamProbePlanStatus.localizedCaseInsensitiveContains("failed")
+      || streamProbeDeltaStatus.localizedCaseInsensitiveContains("failed")
+      || k20ChannelScanStatus.localizedCaseInsensitiveContains("failed")
+    {
+      return .blocked
+    }
+    if !streamProbePacketDeltas.isEmpty || !k20ChannelCandidates.isEmpty {
+      return .ready
+    }
+    return streamProbeSteps.isEmpty ? .notRun : .pending
   }
 
   func refreshBridgeStatus(model: OpenVitalsAppModel) {
@@ -474,6 +518,11 @@ final class MoreDataStore: ObservableObject {
     rawZipValidation = "Not validated"
     privacyLintStatus = "Not linted"
     sanitizedPrivacyStatus = "No sanitized copy"
+    automaticStreamProbeStatus = "No automatic stream probe run"
+    automaticStreamProbeInProgress = false
+    automaticStreamProbeStartedAt = nil
+    automaticStreamProbeStopWorkItem?.cancel()
+    automaticStreamProbeStopWorkItem = nil
     localExportStatus = "No local export"
     localExportURL = nil
     localExportManifestURL = nil

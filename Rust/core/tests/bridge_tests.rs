@@ -144,6 +144,95 @@ fn bridge_returns_openwhoop_reference_report() {
 }
 
 #[test]
+fn bridge_records_and_summarizes_rr_reference_samples() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let db = tempdir.path().join("open_vitals.sqlite");
+    let database_path = db.to_string_lossy().to_string();
+
+    let start = request(serde_json::json!({
+        "schema": "open_vitals.bridge.request.v1",
+        "request_id": "rr-reference-start",
+        "method": "capture.start_session",
+        "args": {
+            "database_path": database_path,
+            "session_id": "rr-reference.test-session",
+            "source": "ios.rr_reference_capture",
+            "started_at_unix_ms": 1781211600000i64,
+            "device_model": "BLE Heart Rate Reference",
+            "active_device_id": "polar-test",
+            "provenance": {"test": true}
+        }
+    }));
+    assert!(start.ok, "{:?}", start.error);
+
+    let inserted = request(serde_json::json!({
+        "schema": "open_vitals.bridge.request.v1",
+        "request_id": "rr-reference-insert",
+        "method": "reference_rr.insert_samples",
+        "args": {
+            "database_path": database_path,
+            "samples": [
+                {
+                    "sample_id": "rr-reference.test-session.1.0",
+                    "session_id": "rr-reference.test-session",
+                    "captured_at": "2026-06-11T20:30:00.000Z",
+                    "device_name": "Polar H10",
+                    "device_id": "polar-test",
+                    "heart_rate_bpm": 60.0,
+                    "rr_interval_ms": 1000.0,
+                    "notification_sequence": 1,
+                    "rr_index": 0,
+                    "contact_detected": true,
+                    "energy_expended_j": 12,
+                    "provenance": {"characteristic_uuid": "2A37"}
+                },
+                {
+                    "sample_id": "rr-reference.test-session.1.1",
+                    "session_id": "rr-reference.test-session",
+                    "captured_at": "2026-06-11T20:30:00.000Z",
+                    "device_name": "Polar H10",
+                    "device_id": "polar-test",
+                    "heart_rate_bpm": 60.0,
+                    "rr_interval_ms": 980.0,
+                    "notification_sequence": 1,
+                    "rr_index": 1,
+                    "contact_detected": true,
+                    "energy_expended_j": 12,
+                    "provenance": {"characteristic_uuid": "2A37"}
+                }
+            ]
+        }
+    }));
+    assert!(inserted.ok, "{:?}", inserted.error);
+    let inserted_result = inserted.result.unwrap();
+    assert_eq!(
+        inserted_result["schema"],
+        "open_vitals.rr-reference-sample-insert-report.v1"
+    );
+    assert_eq!(inserted_result["inserted_count"], 2);
+
+    let summary = request(serde_json::json!({
+        "schema": "open_vitals.bridge.request.v1",
+        "request_id": "rr-reference-summary",
+        "method": "reference_rr.summary",
+        "args": {
+            "database_path": database_path,
+            "session_id": "rr-reference.test-session"
+        }
+    }));
+    assert!(summary.ok, "{:?}", summary.error);
+    let summary_result = summary.result.unwrap();
+    assert_eq!(
+        summary_result["schema"],
+        "open_vitals.rr-reference-summary-report.v1"
+    );
+    assert_eq!(summary_result["sample_count"], 2);
+    assert_eq!(summary_result["notification_count"], 1);
+    assert_eq!(summary_result["median_rr_interval_ms"], 990.0);
+    assert_eq!(summary_result["device_names"][0], "Polar H10");
+}
+
+#[test]
 fn bridge_runs_historical_sync_dry_run() {
     let response = request(serde_json::json!({
         "schema": "open_vitals.bridge.request.v1",
@@ -1885,6 +1974,9 @@ fn bridge_records_capture_session_lifecycle_for_live_owned_capture() {
         list_result["sessions"][0]["session_id"],
         "capture-live-bridge"
     );
+    assert_eq!(list_result["sessions"][0]["frame_count"], 7);
+    assert_eq!(list_result["sessions"][0]["observed_frame_count"], 0);
+    assert_eq!(list_result["sessions"][0]["display_frame_count"], 7);
 }
 
 #[test]

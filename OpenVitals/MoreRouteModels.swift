@@ -8,6 +8,7 @@ enum MoreRoute: String, CaseIterable, Identifiable, Hashable {
   case localStore
   case healthSync
   case rawExport
+  case streamProbePlan
   case algorithms
   case debug
   case appearance
@@ -27,6 +28,7 @@ enum MoreRoute: String, CaseIterable, Identifiable, Hashable {
     case .localStore: "Local Store"
     case .healthSync: "Apple Health Profile"
     case .rawExport: "Raw Export"
+    case .streamProbePlan: "Stream Probe Plan"
     case .algorithms: "Algorithms"
     case .debug: "Debug"
     case .appearance: "Appearance"
@@ -46,6 +48,7 @@ enum MoreRoute: String, CaseIterable, Identifiable, Hashable {
     case .localStore: "SQLite path, schema, and storage health"
     case .healthSync: "Profile weight autofill only"
     case .rawExport: "Bundle windows, data scopes, validation, and lint"
+    case .streamProbePlan: "Gated stream plan and packet delta checks"
     case .algorithms: "Operational algorithm preferences"
     case .debug: "Rust, parser, command groups, and gated controls"
     case .appearance: "Light, dark, or system color scheme"
@@ -65,6 +68,7 @@ enum MoreRoute: String, CaseIterable, Identifiable, Hashable {
     case .localStore: "externaldrive"
     case .healthSync: "heart.text.square"
     case .rawExport: "square.and.arrow.up"
+    case .streamProbePlan: "waveform.path.ecg.rectangle"
     case .algorithms: "function"
     case .debug: "terminal"
     case .appearance: "circle.lefthalf.filled"
@@ -84,6 +88,7 @@ enum MoreRoute: String, CaseIterable, Identifiable, Hashable {
     case .localStore: \.localStore
     case .healthSync: \.healthSync
     case .rawExport: \.rawExport
+    case .streamProbePlan: \.streamProbePlan
     case .algorithms: \.algorithms
     case .debug: \.debug
     case .appearance: \.appearance
@@ -99,7 +104,7 @@ enum MoreRoute: String, CaseIterable, Identifiable, Hashable {
   static let settingsRoutes: [MoreRoute] = [.appearance, .privacy]
   static let supportRoutes: [MoreRoute] = [.support, .about]
   static let developerRoutes: [MoreRoute] = [.developer]
-  static let developerToolRoutes: [MoreRoute] = [.connectionLab, .capture, .localStore, .rawExport, .algorithms, .debug]
+  static let developerToolRoutes: [MoreRoute] = [.connectionLab, .capture, .localStore, .rawExport, .streamProbePlan, .algorithms, .debug]
 }
 
 struct MoreRouteStatus {
@@ -110,6 +115,7 @@ struct MoreRouteStatus {
   var localStore: MoreStatusKind
   var healthSync: MoreStatusKind
   var rawExport: MoreStatusKind
+  var streamProbePlan: MoreStatusKind
   var algorithms: MoreStatusKind
   var debug: MoreStatusKind
   var appearance: MoreStatusKind

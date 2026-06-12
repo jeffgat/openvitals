@@ -148,6 +148,11 @@ fn run() -> open_vitals_core::OpenVitalsResult<()> {
         ("--min-step-samples", "min_sample_count"),
         ("--min-peak-spacing-samples", "min_peak_spacing_samples"),
         ("--max-frame-summaries", "max_frame_summaries"),
+        ("--min-matching-frames", "min_matching_frames"),
+        ("--min-matching-segments", "min_matching_segments"),
+        ("--max-ranked-candidates", "max_ranked_candidates"),
+        ("--max-ranked-channels", "max_ranked_channels"),
+        ("--max-segment-summaries", "max_segment_summaries"),
     ] {
         insert_usize_arg(&mut request_args, &args, arg, field)?;
     }
@@ -216,7 +221,10 @@ fn run() -> open_vitals_core::OpenVitalsResult<()> {
         ("--energy-tolerance-kcal", "tolerance_kcal"),
         ("--energy-relative-tolerance", "relative_tolerance_fraction"),
         ("--motion-sample-rate-hz", "sample_rate_hz"),
+        ("--sample-rate-hz", "sample_rate_hz"),
         ("--motion-peak-threshold-i16", "peak_threshold_i16"),
+        ("--max-hr-match-lag-seconds", "max_hr_match_lag_seconds"),
+        ("--hr-tolerance-bpm", "hr_tolerance_bpm"),
     ] {
         insert_f64_arg(&mut request_args, &args, arg, field)?;
     }
@@ -332,7 +340,28 @@ fn metric_bridge_method(value: &str) -> open_vitals_core::OpenVitalsResult<&'sta
         | "rr_candidate_scan"
         | "k20-scan"
         | "k20_scan"
+        | "k26-scan"
+        | "k26_scan"
         | "metrics.beat_interval_candidate_scan" => Ok("metrics.beat_interval_candidate_scan"),
+        "beat-interval-hr-validation"
+        | "beat_interval_hr_validation"
+        | "beat-interval-validation"
+        | "beat_interval_validation"
+        | "k20-hr-validation"
+        | "k20_hr_validation"
+        | "k26-hr-validation"
+        | "k26_hr_validation"
+        | "metrics.beat_interval_hr_validation" => Ok("metrics.beat_interval_hr_validation"),
+        "k26-field-scan"
+        | "k26_field_scan"
+        | "k26-beat-field-scan"
+        | "k26_beat_field_scan"
+        | "metrics.k26_beat_field_scan" => Ok("metrics.k26_beat_field_scan"),
+        "k20-channel-scan"
+        | "k20_channel_scan"
+        | "k20-optical-channel-scan"
+        | "k20_optical_channel_scan"
+        | "metrics.k20_optical_channel_scan" => Ok("metrics.k20_optical_channel_scan"),
         "hrv-validation"
         | "hrv_capture_validation"
         | "hrv-capture-validation"

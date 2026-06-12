@@ -10,7 +10,7 @@ use crate::{
     protocol::{DeviceType, ParsedFrame},
 };
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 14;
+pub const CURRENT_SCHEMA_VERSION: i64 = 15;
 pub const DEFAULT_RAW_EVIDENCE_PAYLOAD_RETENTION_LIMIT_BYTES: i64 = 512 * 1024 * 1024;
 
 const ALLOWED_METRIC_SOURCE_KINDS: [&str; 4] = [
@@ -214,6 +214,69 @@ pub struct DecodedFrameRow {
     pub parsed_payload_json: String,
     pub parser_version: String,
     pub warnings_json: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RrReferenceSampleInput<'a> {
+    pub sample_id: &'a str,
+    pub session_id: &'a str,
+    pub captured_at: &'a str,
+    pub device_name: &'a str,
+    pub device_id: &'a str,
+    pub heart_rate_bpm: Option<f64>,
+    pub rr_interval_ms: f64,
+    pub notification_sequence: i64,
+    pub rr_index: i64,
+    pub contact_detected: Option<bool>,
+    pub energy_expended_j: Option<i64>,
+    pub provenance_json: &'a str,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RrReferenceSampleRow {
+    pub sample_id: String,
+    pub session_id: String,
+    pub captured_at: String,
+    pub device_name: String,
+    pub device_id: String,
+    pub heart_rate_bpm: Option<f64>,
+    pub rr_interval_ms: f64,
+    pub notification_sequence: i64,
+    pub rr_index: i64,
+    pub contact_detected: Option<bool>,
+    pub energy_expended_j: Option<i64>,
+    pub provenance_json: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RrReferenceSampleInsertReport {
+    pub schema: String,
+    pub inserted_count: i64,
+    pub existing_count: i64,
+    pub sample_count: i64,
+    pub session_id: Option<String>,
+    pub first_captured_at: Option<String>,
+    pub last_captured_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RrReferenceSummaryReport {
+    pub schema: String,
+    pub session_id: Option<String>,
+    pub start_time: Option<String>,
+    pub end_time: Option<String>,
+    pub sample_count: i64,
+    pub notification_count: i64,
+    pub heart_rate_sample_count: i64,
+    pub first_captured_at: Option<String>,
+    pub last_captured_at: Option<String>,
+    pub mean_rr_interval_ms: Option<f64>,
+    pub median_rr_interval_ms: Option<f64>,
+    pub rmssd_ms: Option<f64>,
+    pub mean_heart_rate_bpm: Option<f64>,
+    pub device_names: Vec<String>,
+    pub device_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1021,6 +1084,27 @@ impl OpenVitalsStore {
                 updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
             );
 
+            CREATE TABLE IF NOT EXISTS rr_reference_samples (
+                sample_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL REFERENCES capture_sessions(session_id) ON DELETE CASCADE,
+                captured_at TEXT NOT NULL,
+                device_name TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                heart_rate_bpm REAL,
+                rr_interval_ms REAL NOT NULL,
+                notification_sequence INTEGER NOT NULL,
+                rr_index INTEGER NOT NULL,
+                contact_detected INTEGER,
+                energy_expended_j INTEGER,
+                provenance_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_rr_reference_samples_by_session_time
+                ON rr_reference_samples(session_id, captured_at, notification_sequence, rr_index);
+            CREATE INDEX IF NOT EXISTS idx_rr_reference_samples_by_time
+                ON rr_reference_samples(captured_at);
+
             CREATE TABLE IF NOT EXISTS activity_sessions (
                 session_id TEXT PRIMARY KEY,
                 source TEXT NOT NULL,
@@ -1423,7 +1507,8 @@ impl OpenVitalsStore {
             INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (12);
             INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (13);
             INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (14);
-            PRAGMA user_version = 14;
+            INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (15);
+            PRAGMA user_version = 15;
             "#,
         )?;
         self.ensure_raw_evidence_columns()?;
@@ -2115,6 +2200,186 @@ impl OpenVitalsStore {
         )?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(OpenVitalsError::from)
+    }
+
+    pub fn capture_session_raw_evidence_summary(
+        &self,
+        session_id: &str,
+    ) -> OpenVitalsResult<(i64, Option<String>, Option<String>)> {
+        validate_required("session_id", session_id)?;
+        self.conn
+            .query_row(
+                r#"
+                SELECT
+                    COUNT(*),
+                    MIN(captured_at),
+                    MAX(captured_at)
+                FROM raw_evidence
+                WHERE capture_session_id = ?1
+                "#,
+                params![session_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(OpenVitalsError::from)
+    }
+
+    pub fn insert_rr_reference_samples(
+        &self,
+        samples: &[RrReferenceSampleInput<'_>],
+    ) -> OpenVitalsResult<RrReferenceSampleInsertReport> {
+        let mut inserted_count = 0i64;
+        let mut existing_count = 0i64;
+        let mut session_id = None;
+        let mut first_captured_at: Option<String> = None;
+        let mut last_captured_at: Option<String> = None;
+
+        self.immediate_transaction(|store| {
+            for sample in samples {
+                validate_rr_reference_sample(sample)?;
+                if session_id.is_none() {
+                    session_id = Some(sample.session_id.to_string());
+                }
+                first_captured_at = match first_captured_at.take() {
+                    Some(existing) if existing.as_str() <= sample.captured_at => Some(existing),
+                    _ => Some(sample.captured_at.to_string()),
+                };
+                last_captured_at = match last_captured_at.take() {
+                    Some(existing) if existing.as_str() >= sample.captured_at => Some(existing),
+                    _ => Some(sample.captured_at.to_string()),
+                };
+
+                let changed = store.conn.execute(
+                    r#"
+                    INSERT OR IGNORE INTO rr_reference_samples (
+                        sample_id,
+                        session_id,
+                        captured_at,
+                        device_name,
+                        device_id,
+                        heart_rate_bpm,
+                        rr_interval_ms,
+                        notification_sequence,
+                        rr_index,
+                        contact_detected,
+                        energy_expended_j,
+                        provenance_json
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                    "#,
+                    params![
+                        sample.sample_id,
+                        sample.session_id,
+                        sample.captured_at,
+                        sample.device_name,
+                        sample.device_id,
+                        sample.heart_rate_bpm,
+                        sample.rr_interval_ms,
+                        sample.notification_sequence,
+                        sample.rr_index,
+                        sample.contact_detected.map(bool_to_i64),
+                        sample.energy_expended_j,
+                        sample.provenance_json,
+                    ],
+                )?;
+                if changed > 0 {
+                    inserted_count += 1;
+                } else {
+                    existing_count += 1;
+                }
+            }
+            Ok(())
+        })?;
+
+        Ok(RrReferenceSampleInsertReport {
+            schema: "open_vitals.rr-reference-sample-insert-report.v1".to_string(),
+            inserted_count,
+            existing_count,
+            sample_count: samples.len() as i64,
+            session_id,
+            first_captured_at,
+            last_captured_at,
+        })
+    }
+
+    pub fn rr_reference_samples_between(
+        &self,
+        start: &str,
+        end: &str,
+    ) -> OpenVitalsResult<Vec<RrReferenceSampleRow>> {
+        validate_required("start", start)?;
+        validate_required("end", end)?;
+        let mut statement = self.conn.prepare(
+            r#"
+            SELECT
+                sample_id,
+                session_id,
+                captured_at,
+                device_name,
+                device_id,
+                heart_rate_bpm,
+                rr_interval_ms,
+                notification_sequence,
+                rr_index,
+                contact_detected,
+                energy_expended_j,
+                provenance_json,
+                created_at
+            FROM rr_reference_samples
+            WHERE captured_at >= ?1 AND captured_at < ?2
+            ORDER BY captured_at, notification_sequence, rr_index, sample_id
+            "#,
+        )?;
+        let rows = statement.query_map(params![start, end], rr_reference_sample_from_row)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(OpenVitalsError::from)
+    }
+
+    pub fn rr_reference_samples_for_session(
+        &self,
+        session_id: &str,
+    ) -> OpenVitalsResult<Vec<RrReferenceSampleRow>> {
+        validate_required("session_id", session_id)?;
+        let mut statement = self.conn.prepare(
+            r#"
+            SELECT
+                sample_id,
+                session_id,
+                captured_at,
+                device_name,
+                device_id,
+                heart_rate_bpm,
+                rr_interval_ms,
+                notification_sequence,
+                rr_index,
+                contact_detected,
+                energy_expended_j,
+                provenance_json,
+                created_at
+            FROM rr_reference_samples
+            WHERE session_id = ?1
+            ORDER BY captured_at, notification_sequence, rr_index, sample_id
+            "#,
+        )?;
+        let rows = statement.query_map(params![session_id], rr_reference_sample_from_row)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(OpenVitalsError::from)
+    }
+
+    pub fn rr_reference_summary(
+        &self,
+        session_id: Option<&str>,
+        start: Option<&str>,
+        end: Option<&str>,
+    ) -> OpenVitalsResult<RrReferenceSummaryReport> {
+        let samples = if let Some(session_id) = session_id {
+            self.rr_reference_samples_for_session(session_id)?
+        } else if let (Some(start), Some(end)) = (start, end) {
+            self.rr_reference_samples_between(start, end)?
+        } else {
+            Vec::new()
+        };
+        Ok(rr_reference_summary_from_samples(
+            session_id, start, end, &samples,
+        ))
     }
 
     pub fn insert_activity_session(
@@ -6805,6 +7070,33 @@ fn validate_unavailable_metric_provenance_confidence(
     Ok(())
 }
 
+fn validate_rr_reference_sample(input: &RrReferenceSampleInput<'_>) -> OpenVitalsResult<()> {
+    validate_required("sample_id", input.sample_id)?;
+    validate_required("session_id", input.session_id)?;
+    validate_required("captured_at", input.captured_at)?;
+    validate_required("device_name", input.device_name)?;
+    validate_required("device_id", input.device_id)?;
+    validate_non_negative("notification_sequence", input.notification_sequence)?;
+    validate_non_negative("rr_index", input.rr_index)?;
+    if let Some(heart_rate_bpm) = input.heart_rate_bpm {
+        if !heart_rate_bpm.is_finite() || !(20.0..=255.0).contains(&heart_rate_bpm) {
+            return Err(OpenVitalsError::message(
+                "heart_rate_bpm must be finite and between 20 and 255",
+            ));
+        }
+    }
+    if !input.rr_interval_ms.is_finite() || !(250.0..=2_500.0).contains(&input.rr_interval_ms) {
+        return Err(OpenVitalsError::message(
+            "rr_interval_ms must be finite and between 250 and 2500",
+        ));
+    }
+    if let Some(energy_expended_j) = input.energy_expended_j {
+        validate_non_negative("energy_expended_j", energy_expended_j)?;
+    }
+    validate_json_object("provenance_json", input.provenance_json)?;
+    Ok(())
+}
+
 fn validate_activity_session_input(
     _store: &OpenVitalsStore,
     input: &ActivitySessionInput<'_>,
@@ -7324,6 +7616,37 @@ fn i64_to_bool(value: i64) -> bool {
     value != 0
 }
 
+fn mean_f64(values: &[f64]) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    Some(values.iter().sum::<f64>() / values.len() as f64)
+}
+
+fn median_f64(mut values: Vec<f64>) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_by(|left, right| left.total_cmp(right));
+    let middle = values.len() / 2;
+    if values.len() % 2 == 0 {
+        Some((values[middle - 1] + values[middle]) / 2.0)
+    } else {
+        Some(values[middle])
+    }
+}
+
+fn rmssd_f64(values: &[f64]) -> Option<f64> {
+    if values.len() < 2 {
+        return None;
+    }
+    let squared_diffs = values
+        .windows(2)
+        .map(|pair| (pair[1] - pair[0]).powi(2))
+        .collect::<Vec<_>>();
+    mean_f64(&squared_diffs).map(f64::sqrt)
+}
+
 fn activity_session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ActivitySessionRow> {
     Ok(ActivitySessionRow {
         session_id: row.get(0)?,
@@ -7605,6 +7928,75 @@ fn debug_event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DebugEventR
     })
 }
 
+fn rr_reference_sample_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RrReferenceSampleRow> {
+    Ok(RrReferenceSampleRow {
+        sample_id: row.get(0)?,
+        session_id: row.get(1)?,
+        captured_at: row.get(2)?,
+        device_name: row.get(3)?,
+        device_id: row.get(4)?,
+        heart_rate_bpm: row.get(5)?,
+        rr_interval_ms: row.get(6)?,
+        notification_sequence: row.get(7)?,
+        rr_index: row.get(8)?,
+        contact_detected: row.get::<_, Option<i64>>(9)?.map(i64_to_bool),
+        energy_expended_j: row.get(10)?,
+        provenance_json: row.get(11)?,
+        created_at: row.get(12)?,
+    })
+}
+
+fn rr_reference_summary_from_samples(
+    session_id: Option<&str>,
+    start: Option<&str>,
+    end: Option<&str>,
+    samples: &[RrReferenceSampleRow],
+) -> RrReferenceSummaryReport {
+    let rr_values = samples
+        .iter()
+        .map(|sample| sample.rr_interval_ms)
+        .collect::<Vec<_>>();
+    let heart_rates = samples
+        .iter()
+        .filter_map(|sample| sample.heart_rate_bpm)
+        .collect::<Vec<_>>();
+    let notification_count = samples
+        .iter()
+        .map(|sample| (sample.session_id.as_str(), sample.notification_sequence))
+        .collect::<BTreeSet<_>>()
+        .len() as i64;
+    let device_names = samples
+        .iter()
+        .map(|sample| sample.device_name.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let device_ids = samples
+        .iter()
+        .map(|sample| sample.device_id.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+
+    RrReferenceSummaryReport {
+        schema: "open_vitals.rr-reference-summary-report.v1".to_string(),
+        session_id: session_id.map(str::to_string),
+        start_time: start.map(str::to_string),
+        end_time: end.map(str::to_string),
+        sample_count: samples.len() as i64,
+        notification_count,
+        heart_rate_sample_count: heart_rates.len() as i64,
+        first_captured_at: samples.first().map(|sample| sample.captured_at.clone()),
+        last_captured_at: samples.last().map(|sample| sample.captured_at.clone()),
+        mean_rr_interval_ms: mean_f64(&rr_values),
+        median_rr_interval_ms: median_f64(rr_values.clone()),
+        rmssd_ms: rmssd_f64(&rr_values),
+        mean_heart_rate_bpm: mean_f64(&heart_rates),
+        device_names,
+        device_ids,
+    }
+}
+
 fn device_type_name(device_type: DeviceType) -> &'static str {
     match device_type {
         DeviceType::Gen4 => "GEN_4",
@@ -7632,6 +8024,7 @@ pub fn known_tables() -> &'static [&'static str] {
         "algorithm_preferences",
         "command_validation_records",
         "capture_sessions",
+        "rr_reference_samples",
         "activity_sessions",
         "activity_metrics",
         "daily_activity_metrics",

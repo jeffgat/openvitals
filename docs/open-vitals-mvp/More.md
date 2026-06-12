@@ -8,7 +8,7 @@ MVP rule: More owns operational surfaces: device, connection lab, capture/import
 
 - [ ] Create a dedicated `MoreView.swift` or split `MorePlaceholderView` out of `AppShellView.swift`.
 - [ ] Keep this tab behind the Swift `More` tab item.
-- [ ] Define child routes: Device, Connection Lab, Capture, Debug, Local Store, Health Sync, Raw Export, Algorithms, Privacy, Support/About.
+- [ ] Define child routes: Device, Connection Lab, Capture, Debug, Local Store, Health Sync, Raw Export, Stream Probe Plan, Algorithms, Privacy, Support/About.
 - [ ] Keep operational rows compact and list-based.
 - [ ] Add status badges for ready, pending, blocked, unavailable, stale.
 - [ ] Add previews for default, connected, and debug-heavy states.
@@ -92,6 +92,15 @@ MVP rule: More owns operational surfaces: device, connection lab, capture/import
 - [ ] Show bundle validation, zip validation, privacy lint, and sanitized privacy statuses.
 - [x] Add a manual Supabase debug upload action that creates the local data bundle, uploads bundle/manifest objects, and records a queryable metadata row.
 - [x] Show Supabase debug upload states with explicit settings, object upload, manifest upload, metadata row, skipped, and failed labels instead of generic pending/ready badges.
+
+## Stream Probe Plan
+
+- [x] Add a Developer route that renders the Rust command capture plan for command-gated stream discovery.
+- [x] Show editable probe and baseline windows, expected packet families, ordered probe steps, safety gates, and expected evidence deltas.
+- [x] Add a packet-family delta analyzer that compares baseline/probe evidence and supports optional capture-session filters.
+- [x] Add a K20 optical-channel scanner that ranks channel peak-spacing candidates against nearby trusted heart-rate evidence while keeping results diagnostic-only.
+- [x] Keep the route analysis-only; live device command sends remain blocked behind command validation, explicit user intent, dry-run bytes, and rollback expectations.
+- [ ] Add a validated command execution flow only after command evidence and UI confirmations are ready.
 
 ## Algorithms
 

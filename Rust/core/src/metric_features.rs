@@ -19,7 +19,7 @@ use crate::{
     protocol::{
         DataPacketBodySummary, I16SeriesSummary, ParsedPayload, decode_hex_with_whitespace,
     },
-    store::{DecodedFrameRow, OpenVitalsStore},
+    store::{DecodedFrameRow, OpenVitalsStore, RrReferenceSampleRow},
     validation_labels::{
         OFFICIAL_WHOOP_LABEL_POLICY, official_label_policy_issue_action,
         official_label_policy_issues,
@@ -31,6 +31,11 @@ pub const HEART_RATE_FEATURE_REPORT_SCHEMA: &str = "open_vitals.heart-rate-featu
 pub const HRV_FEATURE_REPORT_SCHEMA: &str = "open_vitals.hrv-feature-report.v1";
 pub const BEAT_INTERVAL_CANDIDATE_SCAN_REPORT_SCHEMA: &str =
     "open_vitals.beat-interval-candidate-scan-report.v1";
+pub const BEAT_INTERVAL_HR_VALIDATION_REPORT_SCHEMA: &str =
+    "open_vitals.beat-interval-hr-validation-report.v1";
+pub const K26_BEAT_FIELD_SCAN_REPORT_SCHEMA: &str = "open_vitals.k26-beat-field-scan-report.v1";
+pub const K20_OPTICAL_CHANNEL_SCAN_REPORT_SCHEMA: &str =
+    "open_vitals.k20-optical-channel-scan-report.v1";
 pub const HRV_CAPTURE_VALIDATION_REPORT_SCHEMA: &str =
     "open_vitals.hrv-capture-validation-report.v1";
 pub const VITAL_EVENT_FEATURE_REPORT_SCHEMA: &str = "open_vitals.vital-event-feature-report.v1";
@@ -53,6 +58,8 @@ pub const STRESS_FEATURE_SCORE_REPORT_SCHEMA: &str = "open_vitals.stress-feature
 const MIN_SMOOTHED_SLEEP_STAGE_DURATION_MINUTES: f64 = 5.0;
 const RESTING_HR_LOW_MOTION_INTENSITY_MAX: f64 = 0.08;
 const RESTING_HR_MOTION_MATCH_WINDOW_MS: i64 = 10 * 60 * 1_000;
+const K20_RR_REFERENCE_MAX_LAG_MS: i64 = 10 * 1_000;
+const K20_RR_REFERENCE_TOLERANCE_MS: f64 = 80.0;
 
 #[derive(Debug, Clone, Copy)]
 pub struct MotionFeatureOptions {
@@ -88,6 +95,40 @@ pub struct BeatIntervalCandidateScanOptions {
     pub peak_threshold_i16: f64,
     pub min_peak_spacing_samples: usize,
     pub max_frame_summaries: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct BeatIntervalHrValidationOptions {
+    pub min_owned_captures_per_summary: usize,
+    pub sample_rate_hz: f64,
+    pub peak_threshold_i16: f64,
+    pub min_peak_spacing_samples: usize,
+    pub max_hr_match_lag_seconds: f64,
+    pub hr_tolerance_bpm: f64,
+    pub min_matching_frames: usize,
+    pub max_frame_summaries: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct K26BeatFieldScanOptions {
+    pub min_owned_captures_per_summary: usize,
+    pub max_hr_match_lag_seconds: f64,
+    pub hr_tolerance_bpm: f64,
+    pub min_matching_frames: usize,
+    pub max_ranked_candidates: usize,
+    pub max_frame_summaries: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct K20OpticalChannelScanOptions {
+    pub min_owned_captures_per_summary: usize,
+    pub sample_rate_hz: f64,
+    pub min_peak_spacing_samples: usize,
+    pub max_hr_match_lag_seconds: f64,
+    pub hr_tolerance_bpm: f64,
+    pub min_matching_segments: usize,
+    pub max_ranked_channels: usize,
+    pub max_segment_summaries: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -226,6 +267,21 @@ impl Default for BeatIntervalCandidateScanOptions {
             peak_threshold_i16: 800.0,
             min_peak_spacing_samples: 8,
             max_frame_summaries: 24,
+        }
+    }
+}
+
+impl Default for K20OpticalChannelScanOptions {
+    fn default() -> Self {
+        Self {
+            min_owned_captures_per_summary: DEFAULT_MIN_OWNED_CAPTURES_PER_SUMMARY,
+            sample_rate_hz: 25.0,
+            min_peak_spacing_samples: 8,
+            max_hr_match_lag_seconds: 10.0,
+            hr_tolerance_bpm: 8.0,
+            min_matching_segments: 2,
+            max_ranked_channels: 12,
+            max_segment_summaries: 12,
         }
     }
 }
@@ -747,6 +803,7 @@ pub struct BeatIntervalCandidateScanReport {
     pub end_time: String,
     pub decoded_frame_count: usize,
     pub candidate_frame_count: usize,
+    pub reference_frame_count: usize,
     pub packet_counts: BTreeMap<String, usize>,
     pub direct_rr_value_count: usize,
     pub peak_spacing_candidate_count: usize,
@@ -776,6 +833,251 @@ pub struct BeatIntervalCandidateFrameSummary {
     pub peak_count: usize,
     pub peak_spacing_count: usize,
     pub candidate_rr_intervals_ms_preview: Vec<f64>,
+    pub quality_flags: Vec<String>,
+    pub provenance: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BeatIntervalHrValidationReport {
+    pub schema: String,
+    pub generated_by: String,
+    pub pass: bool,
+    pub validation_status: String,
+    pub start_time: String,
+    pub end_time: String,
+    pub decoded_frame_count: usize,
+    pub candidate_frame_count: usize,
+    pub k20_frame_count: usize,
+    pub packet_counts: BTreeMap<String, usize>,
+    pub heart_rate_feature_count: usize,
+    pub trusted_heart_rate_feature_count: usize,
+    pub sample_rate_hz: f64,
+    pub peak_threshold_i16: f64,
+    pub min_peak_spacing_samples: usize,
+    pub max_hr_match_lag_seconds: f64,
+    pub hr_tolerance_bpm: f64,
+    pub min_matching_frames: usize,
+    pub direct_i16_summary: BeatIntervalHrValidationSourceSummary,
+    pub peak_spacing_summary: BeatIntervalHrValidationSourceSummary,
+    pub frame_summaries: Vec<BeatIntervalHrValidationFrameSummary>,
+    pub issues: Vec<String>,
+    #[serde(default)]
+    pub next_actions: Vec<MetricFeatureNextAction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BeatIntervalHrValidationSourceSummary {
+    pub source: String,
+    pub candidate_frame_count: usize,
+    pub matched_frame_count: usize,
+    pub within_tolerance_count: usize,
+    pub within_tolerance_fraction: Option<f64>,
+    pub mean_absolute_error_bpm: Option<f64>,
+    pub median_absolute_error_bpm: Option<f64>,
+    pub mean_candidate_hr_bpm: Option<f64>,
+    pub mean_reference_hr_bpm: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BeatIntervalHrValidationFrameSummary {
+    pub frame_id: String,
+    pub evidence_id: String,
+    pub captured_at: String,
+    pub sample_time: String,
+    pub sample_time_source: String,
+    pub packet_k: u8,
+    pub domain: String,
+    pub candidate_source: String,
+    pub candidate_interval_count: usize,
+    pub candidate_rr_intervals_ms_preview: Vec<f64>,
+    pub candidate_mean_rr_ms: Option<f64>,
+    pub candidate_hr_bpm: Option<f64>,
+    pub matched_hr_bpm: Option<f64>,
+    pub matched_hr_sample_time: Option<String>,
+    pub match_lag_seconds: Option<f64>,
+    pub absolute_error_bpm: Option<f64>,
+    pub within_tolerance: Option<bool>,
+    pub quality_flags: Vec<String>,
+    pub provenance: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct K26BeatFieldScanReport {
+    pub schema: String,
+    pub generated_by: String,
+    pub pass: bool,
+    pub validation_status: String,
+    pub start_time: String,
+    pub end_time: String,
+    pub decoded_frame_count: usize,
+    pub k26_frame_count: usize,
+    pub matched_k26_frame_count: usize,
+    pub heart_rate_feature_count: usize,
+    pub trusted_heart_rate_feature_count: usize,
+    pub max_hr_match_lag_seconds: f64,
+    pub hr_tolerance_bpm: f64,
+    pub min_matching_frames: usize,
+    pub raw_field_correlations: Vec<K26RawFieldCorrelationSummary>,
+    pub ranked_candidates: Vec<K26BeatFieldCandidateSummary>,
+    pub frame_summaries: Vec<K26BeatFieldFrameSummary>,
+    pub issues: Vec<String>,
+    #[serde(default)]
+    pub next_actions: Vec<MetricFeatureNextAction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct K26BeatFieldCandidateSummary {
+    pub rank: usize,
+    pub offset: usize,
+    pub width: usize,
+    pub endian: String,
+    pub signed: bool,
+    pub interpretation: String,
+    pub scale: f64,
+    pub matched_frame_count: usize,
+    pub usable_value_count: usize,
+    pub within_tolerance_count: usize,
+    pub within_tolerance_fraction: Option<f64>,
+    pub mean_absolute_error_bpm: Option<f64>,
+    pub median_absolute_error_bpm: Option<f64>,
+    pub mean_candidate_hr_bpm: Option<f64>,
+    pub mean_reference_hr_bpm: Option<f64>,
+    pub distinct_raw_value_count: usize,
+    pub distinct_candidate_value_count: usize,
+    pub min_raw_value: Option<f64>,
+    pub median_raw_value: Option<f64>,
+    pub max_raw_value: Option<f64>,
+    pub min_candidate_value: Option<f64>,
+    pub median_candidate_value: Option<f64>,
+    pub max_candidate_value: Option<f64>,
+    pub quality_flags: Vec<String>,
+    pub provenance: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct K26RawFieldCorrelationSummary {
+    pub rank: usize,
+    pub offset: usize,
+    pub width: usize,
+    pub endian: String,
+    pub signed: bool,
+    pub matched_frame_count: usize,
+    pub distinct_raw_value_count: usize,
+    pub min_raw_value: Option<f64>,
+    pub median_raw_value: Option<f64>,
+    pub max_raw_value: Option<f64>,
+    pub pearson_correlation_to_hr_bpm: Option<f64>,
+    pub pearson_correlation_to_rr_ms: Option<f64>,
+    pub absolute_correlation_score: Option<f64>,
+    pub quality_flags: Vec<String>,
+    pub provenance: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct K26BeatFieldFrameSummary {
+    pub frame_id: String,
+    pub evidence_id: String,
+    pub captured_at: String,
+    pub sample_time: String,
+    pub sample_time_source: String,
+    pub offset: usize,
+    pub width: usize,
+    pub endian: String,
+    pub signed: bool,
+    pub interpretation: String,
+    pub scale: f64,
+    pub raw_value: f64,
+    pub candidate_value: f64,
+    pub candidate_hr_bpm: f64,
+    pub matched_hr_bpm: Option<f64>,
+    pub matched_hr_sample_time: Option<String>,
+    pub match_lag_seconds: Option<f64>,
+    pub absolute_error_bpm: Option<f64>,
+    pub within_tolerance: Option<bool>,
+    pub quality_flags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct K20OpticalChannelScanReport {
+    pub schema: String,
+    pub generated_by: String,
+    pub pass: bool,
+    pub validation_status: String,
+    pub start_time: String,
+    pub end_time: String,
+    pub decoded_frame_count: usize,
+    pub k20_frame_count: usize,
+    pub realtime_k20_frame_count: usize,
+    pub candidate_segment_count: usize,
+    pub matched_segment_count: usize,
+    pub rr_reference_sample_count: usize,
+    pub rr_reference_matched_segment_count: usize,
+    pub rr_reference_tolerance_ms: f64,
+    pub heart_rate_feature_count: usize,
+    pub trusted_heart_rate_feature_count: usize,
+    pub sample_rate_hz: f64,
+    pub min_peak_spacing_samples: usize,
+    pub max_hr_match_lag_seconds: f64,
+    pub hr_tolerance_bpm: f64,
+    pub channel_offsets: Vec<usize>,
+    pub ranked_channels: Vec<K20OpticalChannelCandidateSummary>,
+    pub segment_summaries: Vec<K20OpticalChannelSegmentSummary>,
+    pub issues: Vec<String>,
+    #[serde(default)]
+    pub next_actions: Vec<MetricFeatureNextAction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct K20OpticalChannelCandidateSummary {
+    pub rank: usize,
+    pub channel_id: String,
+    pub offset: usize,
+    pub polarity: String,
+    pub matched_segment_count: usize,
+    pub usable_segment_count: usize,
+    pub within_tolerance_count: usize,
+    pub within_tolerance_fraction: Option<f64>,
+    pub mean_absolute_error_bpm: Option<f64>,
+    pub median_absolute_error_bpm: Option<f64>,
+    pub mean_candidate_hr_bpm: Option<f64>,
+    pub mean_reference_hr_bpm: Option<f64>,
+    pub median_candidate_rr_ms: Option<f64>,
+    pub rr_reference_matched_segment_count: usize,
+    pub rr_reference_within_tolerance_count: usize,
+    pub rr_reference_within_tolerance_fraction: Option<f64>,
+    pub mean_absolute_error_rr_ms: Option<f64>,
+    pub median_absolute_error_rr_ms: Option<f64>,
+    pub mean_reference_rr_ms: Option<f64>,
+    pub median_rmssd_ms: Option<f64>,
+    pub median_sdnn_ms: Option<f64>,
+    pub median_interval_count: Option<f64>,
+    pub quality_flags: Vec<String>,
+    pub provenance: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct K20OpticalChannelSegmentSummary {
+    pub capture_session_id: Option<String>,
+    pub segment_index: usize,
+    pub start_time: String,
+    pub end_time: String,
+    pub frame_count: usize,
+    pub channel_id: String,
+    pub offset: usize,
+    pub polarity: String,
+    pub interval_count: usize,
+    pub rr_intervals_ms_preview: Vec<f64>,
+    pub candidate_hr_bpm: Option<f64>,
+    pub candidate_rmssd_ms: Option<f64>,
+    pub candidate_sdnn_ms: Option<f64>,
+    pub matched_hr_bpm: Option<f64>,
+    pub matched_hr_sample_count: usize,
+    pub absolute_error_bpm: Option<f64>,
+    pub within_tolerance: Option<bool>,
+    pub matched_reference_rr_ms: Option<f64>,
+    pub matched_reference_rr_sample_count: usize,
+    pub absolute_error_rr_ms: Option<f64>,
+    pub rr_within_tolerance: Option<bool>,
     pub quality_flags: Vec<String>,
     pub provenance: serde_json::Value,
 }
@@ -1955,6 +2257,7 @@ pub fn run_beat_interval_candidate_scan(
     options: BeatIntervalCandidateScanOptions,
 ) -> OpenVitalsResult<BeatIntervalCandidateScanReport> {
     let mut candidate_frame_count = 0usize;
+    let mut reference_frame_count = 0usize;
     let mut packet_counts = BTreeMap::new();
     let mut direct_rr_value_count = 0usize;
     let mut peak_spacing_candidate_count = 0usize;
@@ -1983,7 +2286,15 @@ pub fn run_beat_interval_candidate_scan(
         else {
             continue;
         };
-        if !matches!(packet_k, 16 | 17 | 20) {
+        if packet_k == 18 {
+            reference_frame_count += 1;
+            let domain = domain.unwrap_or_else(|| "unknown".to_string());
+            *packet_counts
+                .entry(format!("K{packet_k} {domain} reference"))
+                .or_insert(0) += 1;
+            continue;
+        }
+        if !matches!(packet_k, 16 | 17 | 20 | 26) {
             continue;
         }
 
@@ -2024,6 +2335,10 @@ pub fn run_beat_interval_candidate_scan(
                 }
                 20 => {
                     quality_flags.insert("raw_research_k20_candidate_not_promoted".to_string());
+                }
+                26 => {
+                    quality_flags
+                        .insert("pulse_information_k26_candidate_not_promoted".to_string());
                 }
                 _ => {}
             }
@@ -2078,7 +2393,7 @@ pub fn run_beat_interval_candidate_scan(
 
     let mut issues = Vec::new();
     if candidate_frame_count == 0 {
-        issues.push("no_k16_k17_k20_candidate_frames".to_string());
+        issues.push("no_k16_k17_k20_k26_candidate_frames".to_string());
     }
     if direct_rr_value_count + peak_spacing_candidate_count == 0 {
         issues.push("no_direct_rr_or_waveform_peak_candidates".to_string());
@@ -2103,6 +2418,7 @@ pub fn run_beat_interval_candidate_scan(
         end_time: end.to_string(),
         decoded_frame_count: decoded_rows.len(),
         candidate_frame_count,
+        reference_frame_count,
         packet_counts,
         direct_rr_value_count,
         peak_spacing_candidate_count,
@@ -2115,10 +2431,2032 @@ pub fn run_beat_interval_candidate_scan(
     })
 }
 
+pub fn run_beat_interval_hr_validation_for_store(
+    store: &OpenVitalsStore,
+    database_path: &str,
+    start: &str,
+    end: &str,
+    options: BeatIntervalHrValidationOptions,
+) -> OpenVitalsResult<BeatIntervalHrValidationReport> {
+    let decoded_rows = store.decoded_frames_between(start, end)?;
+    let correlation = run_capture_correlation_for_store(
+        store,
+        database_path,
+        start,
+        end,
+        CaptureCorrelationOptions {
+            min_owned_captures_per_summary: options.min_owned_captures_per_summary,
+            require_owned_captures: false,
+        },
+    )?;
+    let heart_rate_report = run_heart_rate_feature_report(
+        &decoded_rows,
+        &correlation,
+        HeartRateFeatureOptions {
+            min_owned_captures_per_summary: options.min_owned_captures_per_summary,
+            require_trusted_evidence: false,
+        },
+    )?;
+    run_beat_interval_hr_validation(&decoded_rows, &heart_rate_report, start, end, options)
+}
+
+pub fn run_beat_interval_hr_validation(
+    decoded_rows: &[DecodedFrameRow],
+    heart_rate_report: &HeartRateFeatureReport,
+    start: &str,
+    end: &str,
+    options: BeatIntervalHrValidationOptions,
+) -> OpenVitalsResult<BeatIntervalHrValidationReport> {
+    let sample_rate_hz = if options.sample_rate_hz.is_finite() && options.sample_rate_hz > 0.0 {
+        options.sample_rate_hz
+    } else {
+        25.0
+    };
+    let peak_threshold_i16 =
+        if options.peak_threshold_i16.is_finite() && options.peak_threshold_i16 > 0.0 {
+            options.peak_threshold_i16
+        } else {
+            800.0
+        };
+    let min_peak_spacing_samples = options.min_peak_spacing_samples.max(1);
+    let max_hr_match_lag_seconds =
+        if options.max_hr_match_lag_seconds.is_finite() && options.max_hr_match_lag_seconds > 0.0 {
+            options.max_hr_match_lag_seconds
+        } else {
+            10.0
+        };
+    let hr_tolerance_bpm = if options.hr_tolerance_bpm.is_finite() && options.hr_tolerance_bpm > 0.0
+    {
+        options.hr_tolerance_bpm
+    } else {
+        8.0
+    };
+    let min_matching_frames = options.min_matching_frames.max(1);
+    let max_hr_match_lag_ms = (max_hr_match_lag_seconds * 1_000.0).round() as i64;
+
+    let trusted_heart_rates = heart_rate_report
+        .features
+        .iter()
+        .filter(|feature| feature.trusted_metric_input)
+        .filter_map(|feature| {
+            heart_rate_feature_time_unix_ms(feature).map(|unix_ms| (unix_ms, feature))
+        })
+        .collect::<Vec<_>>();
+    let trusted_heart_rate_feature_count = trusted_heart_rates.len();
+
+    let mut candidate_frame_count = 0usize;
+    let mut k20_frame_count = 0usize;
+    let mut packet_counts = BTreeMap::new();
+    let mut frame_summaries = Vec::new();
+    let mut all_validation_frames = Vec::new();
+
+    for row in decoded_rows {
+        let parsed_payload = parsed_payload_from_row(row)?;
+        let Some(ParsedPayload::DataPacket {
+            packet_k: Some(packet_k),
+            domain,
+            body_hex,
+            timestamp_seconds,
+            timestamp_subseconds,
+            ..
+        }) = parsed_payload
+        else {
+            continue;
+        };
+        if !matches!(packet_k, 20 | 26) {
+            continue;
+        }
+        candidate_frame_count += 1;
+        if packet_k == 20 {
+            k20_frame_count += 1;
+        }
+        let domain = domain.unwrap_or_else(|| "unknown".to_string());
+        *packet_counts
+            .entry(format!("K{packet_k} {domain}"))
+            .or_insert(0) += 1;
+
+        let body = decode_hex_with_whitespace(&body_hex)?;
+        let samples = i16_samples_from_bytes(&body);
+        let direct_rr_values = samples
+            .iter()
+            .filter(|&&sample| (300..=2000).contains(&sample))
+            .map(|&sample| f64::from(sample))
+            .collect::<Vec<_>>();
+        let peak_intervals = beat_interval_peak_spacing_candidates(
+            &samples,
+            sample_rate_hz,
+            peak_threshold_i16,
+            min_peak_spacing_samples,
+        );
+        if direct_rr_values.is_empty() && peak_intervals.intervals_ms.is_empty() {
+            continue;
+        }
+
+        let mut sample_time_flags = BTreeSet::new();
+        let sample_time = normalized_sample_time(
+            row,
+            timestamp_seconds,
+            timestamp_subseconds,
+            &mut sample_time_flags,
+        );
+        if !direct_rr_values.is_empty() {
+            all_validation_frames.push(beat_interval_hr_validation_frame_summary(
+                row,
+                packet_k,
+                &domain,
+                "direct_i16_plausible",
+                &direct_rr_values,
+                &sample_time,
+                &sample_time_flags,
+                &trusted_heart_rates,
+                max_hr_match_lag_ms,
+                hr_tolerance_bpm,
+            ));
+        }
+        if !peak_intervals.intervals_ms.is_empty() {
+            all_validation_frames.push(beat_interval_hr_validation_frame_summary(
+                row,
+                packet_k,
+                &domain,
+                "peak_spacing",
+                &peak_intervals.intervals_ms,
+                &sample_time,
+                &sample_time_flags,
+                &trusted_heart_rates,
+                max_hr_match_lag_ms,
+                hr_tolerance_bpm,
+            ));
+        }
+    }
+
+    frame_summaries.extend(
+        all_validation_frames
+            .iter()
+            .take(options.max_frame_summaries)
+            .cloned(),
+    );
+    let direct_i16_summary =
+        beat_interval_hr_validation_source_summary("direct_i16_plausible", &all_validation_frames);
+    let peak_spacing_summary =
+        beat_interval_hr_validation_source_summary("peak_spacing", &all_validation_frames);
+
+    let mut issues = Vec::new();
+    if candidate_frame_count == 0 {
+        issues.push("no_k20_k26_candidate_frames".to_string());
+    }
+    if direct_i16_summary.candidate_frame_count + peak_spacing_summary.candidate_frame_count == 0 {
+        issues.push("no_k20_k26_rr_or_peak_spacing_candidates".to_string());
+    }
+    if trusted_heart_rate_feature_count == 0 {
+        issues.push("no_trusted_heart_rate_reference_features".to_string());
+    }
+    if direct_i16_summary.matched_frame_count + peak_spacing_summary.matched_frame_count
+        < min_matching_frames
+    {
+        issues.push("not_enough_k20_k26_hr_matches".to_string());
+    }
+    if direct_i16_summary.matched_frame_count >= min_matching_frames
+        && direct_i16_summary.within_tolerance_fraction.unwrap_or(0.0) < 0.8
+    {
+        issues.push("direct_i16_hr_alignment_below_threshold".to_string());
+    }
+    if peak_spacing_summary.matched_frame_count >= min_matching_frames
+        && peak_spacing_summary
+            .within_tolerance_fraction
+            .unwrap_or(0.0)
+            < 0.8
+    {
+        issues.push("peak_spacing_hr_alignment_below_threshold".to_string());
+    }
+    if !(options.sample_rate_hz.is_finite() && options.sample_rate_hz > 0.0) {
+        issues.push("sample_rate_defaulted".to_string());
+    }
+    if !(options.peak_threshold_i16.is_finite() && options.peak_threshold_i16 > 0.0) {
+        issues.push("peak_threshold_defaulted".to_string());
+    }
+
+    let validation_status = beat_interval_hr_validation_status(
+        &issues,
+        &direct_i16_summary,
+        &peak_spacing_summary,
+        min_matching_frames,
+    );
+    let next_actions = beat_interval_hr_validation_next_actions(&issues, &validation_status);
+
+    Ok(BeatIntervalHrValidationReport {
+        schema: BEAT_INTERVAL_HR_VALIDATION_REPORT_SCHEMA.to_string(),
+        generated_by: "open-vitals-beat-interval-hr-validator".to_string(),
+        pass: issues.is_empty(),
+        validation_status,
+        start_time: start.to_string(),
+        end_time: end.to_string(),
+        decoded_frame_count: decoded_rows.len(),
+        candidate_frame_count,
+        k20_frame_count,
+        packet_counts,
+        heart_rate_feature_count: heart_rate_report.features.len(),
+        trusted_heart_rate_feature_count,
+        sample_rate_hz,
+        peak_threshold_i16,
+        min_peak_spacing_samples,
+        max_hr_match_lag_seconds,
+        hr_tolerance_bpm,
+        min_matching_frames,
+        direct_i16_summary,
+        peak_spacing_summary,
+        frame_summaries,
+        issues,
+        next_actions,
+    })
+}
+
+pub fn run_k26_beat_field_scan_for_store(
+    store: &OpenVitalsStore,
+    database_path: &str,
+    start: &str,
+    end: &str,
+    options: K26BeatFieldScanOptions,
+) -> OpenVitalsResult<K26BeatFieldScanReport> {
+    let decoded_rows = store.decoded_frames_between(start, end)?;
+    let correlation = run_capture_correlation_for_store(
+        store,
+        database_path,
+        start,
+        end,
+        CaptureCorrelationOptions {
+            min_owned_captures_per_summary: options.min_owned_captures_per_summary,
+            require_owned_captures: false,
+        },
+    )?;
+    let heart_rate_report = run_heart_rate_feature_report(
+        &decoded_rows,
+        &correlation,
+        HeartRateFeatureOptions {
+            min_owned_captures_per_summary: options.min_owned_captures_per_summary,
+            require_trusted_evidence: false,
+        },
+    )?;
+    run_k26_beat_field_scan(&decoded_rows, &heart_rate_report, start, end, options)
+}
+
+pub fn run_k26_beat_field_scan(
+    decoded_rows: &[DecodedFrameRow],
+    heart_rate_report: &HeartRateFeatureReport,
+    start: &str,
+    end: &str,
+    options: K26BeatFieldScanOptions,
+) -> OpenVitalsResult<K26BeatFieldScanReport> {
+    let max_hr_match_lag_seconds =
+        if options.max_hr_match_lag_seconds.is_finite() && options.max_hr_match_lag_seconds > 0.0 {
+            options.max_hr_match_lag_seconds
+        } else {
+            10.0
+        };
+    let hr_tolerance_bpm = if options.hr_tolerance_bpm.is_finite() && options.hr_tolerance_bpm > 0.0
+    {
+        options.hr_tolerance_bpm
+    } else {
+        8.0
+    };
+    let min_matching_frames = options.min_matching_frames.max(1);
+    let max_ranked_candidates = options.max_ranked_candidates.max(1);
+    let max_frame_summaries = options.max_frame_summaries;
+    let max_hr_match_lag_ms = (max_hr_match_lag_seconds * 1_000.0).round() as i64;
+
+    let trusted_heart_rates = heart_rate_report
+        .features
+        .iter()
+        .filter(|feature| feature.trusted_metric_input)
+        .filter_map(|feature| {
+            heart_rate_feature_time_unix_ms(feature).map(|unix_ms| (unix_ms, feature))
+        })
+        .collect::<Vec<_>>();
+    let trusted_heart_rate_feature_count = trusted_heart_rates.len();
+
+    let mut k26_frames = Vec::new();
+    for row in decoded_rows {
+        let parsed_payload = parsed_payload_from_row(row)?;
+        let Some(ParsedPayload::DataPacket {
+            packet_k: Some(26),
+            body_hex,
+            timestamp_seconds,
+            timestamp_subseconds,
+            ..
+        }) = parsed_payload
+        else {
+            continue;
+        };
+        let body = decode_hex_with_whitespace(&body_hex)?;
+        let mut sample_time_flags = BTreeSet::new();
+        let sample_time = normalized_sample_time(
+            row,
+            timestamp_seconds,
+            timestamp_subseconds,
+            &mut sample_time_flags,
+        );
+        let sample_time_unix_ms = sample_time
+            .unix_ms
+            .or_else(|| parse_rfc3339_utc_unix_ms(&sample_time.time));
+        let matched = sample_time_unix_ms.and_then(|unix_ms| {
+            nearest_heart_rate_feature(unix_ms, &trusted_heart_rates, max_hr_match_lag_ms)
+        });
+        let (matched_hr_bpm, matched_hr_sample_time, match_lag_ms) = matched
+            .map(|(lag_ms, feature)| {
+                (
+                    Some(round_1(feature.heart_rate_bpm)),
+                    Some(feature.sample_time.clone()),
+                    Some(lag_ms),
+                )
+            })
+            .unwrap_or((None, None, None));
+        k26_frames.push(K26BeatFieldFrameData {
+            frame_id: row.frame_id.clone(),
+            evidence_id: row.evidence_id.clone(),
+            captured_at: row.captured_at.clone(),
+            body,
+            sample_time,
+            sample_time_flags,
+            matched_hr_bpm,
+            matched_hr_sample_time,
+            match_lag_ms,
+        });
+    }
+
+    let max_body_len = k26_frames
+        .iter()
+        .map(|frame| frame.body.len())
+        .max()
+        .unwrap_or(0);
+    let specs = k26_field_specs(max_body_len);
+    let matched_k26_frame_count = k26_frames
+        .iter()
+        .filter(|frame| frame.matched_hr_bpm.is_some())
+        .count();
+    let raw_field_correlations = k26_raw_field_correlations(
+        &k26_frames,
+        max_body_len,
+        min_matching_frames,
+        max_ranked_candidates,
+        max_hr_match_lag_ms,
+    );
+    let mut ranked_candidates = Vec::new();
+    for spec in specs {
+        let mut raw_values = Vec::new();
+        let mut candidate_values = Vec::new();
+        let mut candidate_hrs = Vec::new();
+        let mut reference_hrs = Vec::new();
+        let mut errors = Vec::new();
+        let mut within_tolerance_count = 0usize;
+
+        for frame in &k26_frames {
+            let Some(reference_hr) = frame.matched_hr_bpm else {
+                continue;
+            };
+            let Some(raw_value) = k26_field_raw_value(&frame.body, &spec) else {
+                continue;
+            };
+            let Some((candidate_value, candidate_hr_bpm)) =
+                k26_field_candidate_value(raw_value, &spec)
+            else {
+                continue;
+            };
+            let error = (candidate_hr_bpm - reference_hr).abs();
+            raw_values.push(raw_value);
+            candidate_values.push(candidate_value);
+            candidate_hrs.push(candidate_hr_bpm);
+            reference_hrs.push(reference_hr);
+            errors.push(error);
+            if error <= hr_tolerance_bpm {
+                within_tolerance_count += 1;
+            }
+        }
+
+        if errors.is_empty() {
+            continue;
+        }
+        let matched_frame_count = errors.len();
+        let within_tolerance_fraction =
+            round_3(within_tolerance_count as f64 / matched_frame_count as f64);
+        let distinct_raw_value_count = distinct_rounded_value_count(&raw_values);
+        let distinct_candidate_value_count = distinct_rounded_value_count(&candidate_values);
+        let mut quality_flags = BTreeSet::new();
+        quality_flags.insert("diagnostic_only_not_score_input".to_string());
+        quality_flags.insert("validation_against_hr_only_not_rr_reference".to_string());
+        if spec.interpretation == "rr_ms" {
+            quality_flags.insert("rr_interval_field_candidate".to_string());
+        }
+        if (spec.scale - 1.0).abs() > f64::EPSILON {
+            quality_flags.insert("scaled_field_candidate".to_string());
+        }
+        if spec.offset == 59
+            && spec.width == 2
+            && spec.endian == "big"
+            && spec.interpretation == "rr_ms"
+        {
+            quality_flags.insert("current_k26_offset_59_lead".to_string());
+        }
+        if matched_frame_count >= min_matching_frames && within_tolerance_fraction >= 0.8 {
+            quality_flags.insert("hr_alignment_candidate".to_string());
+        } else {
+            quality_flags.insert("hr_alignment_below_threshold".to_string());
+        }
+        if matched_frame_count >= min_matching_frames && distinct_candidate_value_count <= 3 {
+            quality_flags.insert("low_candidate_value_variability".to_string());
+        }
+
+        ranked_candidates.push(K26BeatFieldCandidateSummary {
+            rank: 0,
+            offset: spec.offset,
+            width: spec.width,
+            endian: spec.endian.to_string(),
+            signed: spec.signed,
+            interpretation: spec.interpretation.to_string(),
+            scale: spec.scale,
+            matched_frame_count,
+            usable_value_count: candidate_values.len(),
+            within_tolerance_count,
+            within_tolerance_fraction: Some(within_tolerance_fraction),
+            mean_absolute_error_bpm: mean_f64(&errors).map(round_1),
+            median_absolute_error_bpm: median_f64(errors).map(round_1),
+            mean_candidate_hr_bpm: mean_f64(&candidate_hrs).map(round_1),
+            mean_reference_hr_bpm: mean_f64(&reference_hrs).map(round_1),
+            distinct_raw_value_count,
+            distinct_candidate_value_count,
+            min_raw_value: raw_values.iter().copied().reduce(f64::min).map(round_1),
+            median_raw_value: median_f64(raw_values.clone()).map(round_1),
+            max_raw_value: raw_values.iter().copied().reduce(f64::max).map(round_1),
+            min_candidate_value: candidate_values
+                .iter()
+                .copied()
+                .reduce(f64::min)
+                .map(round_1),
+            median_candidate_value: median_f64(candidate_values.clone()).map(round_1),
+            max_candidate_value: candidate_values
+                .iter()
+                .copied()
+                .reduce(f64::max)
+                .map(round_1),
+            quality_flags: quality_flags.into_iter().collect(),
+            provenance: json!({
+                "input_source": "decoded_frame",
+                "packet_k": 26,
+                "domain": "pulse_information_packet",
+                "promotion_policy": "diagnostic_only_requires_external_rr_reference_before_hrv",
+                "validation_policy": "field_candidates_ranked_against_nearby_trusted_hr",
+                "hr_tolerance_bpm": hr_tolerance_bpm,
+                "max_hr_match_lag_ms": max_hr_match_lag_ms,
+            }),
+        });
+    }
+
+    ranked_candidates.sort_by(|left, right| {
+        let left_eligible = left.matched_frame_count >= min_matching_frames;
+        let right_eligible = right.matched_frame_count >= min_matching_frames;
+        let left_variable = left.distinct_candidate_value_count > 3;
+        let right_variable = right.distinct_candidate_value_count > 3;
+        let right_fraction = right.within_tolerance_fraction.unwrap_or(0.0);
+        let left_fraction = left.within_tolerance_fraction.unwrap_or(0.0);
+        right_eligible
+            .cmp(&left_eligible)
+            .then_with(|| right_variable.cmp(&left_variable))
+            .then_with(|| {
+                if left_eligible && right_eligible {
+                    right_fraction.total_cmp(&left_fraction)
+                } else {
+                    right.matched_frame_count.cmp(&left.matched_frame_count)
+                }
+            })
+            .then_with(|| {
+                if left_eligible && right_eligible {
+                    right.matched_frame_count.cmp(&left.matched_frame_count)
+                } else {
+                    right_fraction.total_cmp(&left_fraction)
+                }
+            })
+            .then_with(|| {
+                left.mean_absolute_error_bpm
+                    .unwrap_or(f64::MAX)
+                    .total_cmp(&right.mean_absolute_error_bpm.unwrap_or(f64::MAX))
+            })
+            .then_with(|| {
+                left.median_absolute_error_bpm
+                    .unwrap_or(f64::MAX)
+                    .total_cmp(&right.median_absolute_error_bpm.unwrap_or(f64::MAX))
+            })
+            .then_with(|| left.offset.cmp(&right.offset))
+    });
+    for (index, candidate) in ranked_candidates.iter_mut().enumerate() {
+        candidate.rank = index + 1;
+    }
+    let has_enough_candidate = ranked_candidates
+        .iter()
+        .any(|candidate| candidate.matched_frame_count >= min_matching_frames);
+    ranked_candidates.truncate(max_ranked_candidates);
+
+    let frame_summaries = ranked_candidates
+        .first()
+        .map(|candidate| {
+            k26_field_frame_summaries(
+                &k26_frames,
+                candidate,
+                hr_tolerance_bpm,
+                max_frame_summaries,
+            )
+        })
+        .unwrap_or_default();
+
+    let best = ranked_candidates.first();
+    let mut issues = Vec::new();
+    if k26_frames.is_empty() {
+        issues.push("no_k26_candidate_frames".to_string());
+    }
+    if trusted_heart_rate_feature_count == 0 {
+        issues.push("no_trusted_heart_rate_reference_features".to_string());
+    }
+    if ranked_candidates.is_empty() {
+        issues.push("no_k26_field_candidates".to_string());
+    }
+    if !ranked_candidates.is_empty() && !has_enough_candidate {
+        issues.push("not_enough_k26_field_matches".to_string());
+    }
+    if has_enough_candidate
+        && best
+            .and_then(|candidate| candidate.within_tolerance_fraction)
+            .is_some_and(|fraction| fraction < 0.8)
+    {
+        issues.push("best_k26_field_alignment_below_threshold".to_string());
+    }
+
+    let validation_status = k26_field_scan_status(best, &issues, min_matching_frames);
+    let next_actions = k26_field_scan_next_actions(&issues, &validation_status);
+
+    Ok(K26BeatFieldScanReport {
+        schema: K26_BEAT_FIELD_SCAN_REPORT_SCHEMA.to_string(),
+        generated_by: "open-vitals-k26-beat-field-scanner".to_string(),
+        pass: issues.is_empty(),
+        validation_status,
+        start_time: start.to_string(),
+        end_time: end.to_string(),
+        decoded_frame_count: decoded_rows.len(),
+        k26_frame_count: k26_frames.len(),
+        matched_k26_frame_count,
+        heart_rate_feature_count: heart_rate_report.features.len(),
+        trusted_heart_rate_feature_count,
+        max_hr_match_lag_seconds,
+        hr_tolerance_bpm,
+        min_matching_frames,
+        raw_field_correlations,
+        ranked_candidates,
+        frame_summaries,
+        issues,
+        next_actions,
+    })
+}
+
+pub fn run_k20_optical_channel_scan_for_store(
+    store: &OpenVitalsStore,
+    database_path: &str,
+    start: &str,
+    end: &str,
+    options: K20OpticalChannelScanOptions,
+) -> OpenVitalsResult<K20OpticalChannelScanReport> {
+    let decoded_rows = store.decoded_frames_between(start, end)?;
+    let correlation = run_capture_correlation_for_store(
+        store,
+        database_path,
+        start,
+        end,
+        CaptureCorrelationOptions {
+            min_owned_captures_per_summary: options.min_owned_captures_per_summary,
+            require_owned_captures: false,
+        },
+    )?;
+    let heart_rate_report = run_heart_rate_feature_report(
+        &decoded_rows,
+        &correlation,
+        HeartRateFeatureOptions {
+            min_owned_captures_per_summary: options.min_owned_captures_per_summary,
+            require_trusted_evidence: false,
+        },
+    )?;
+    let rr_reference_samples = store.rr_reference_samples_between(start, end)?;
+    run_k20_optical_channel_scan(
+        &decoded_rows,
+        &heart_rate_report,
+        &rr_reference_samples,
+        start,
+        end,
+        options,
+    )
+}
+
+pub fn run_k20_optical_channel_scan(
+    decoded_rows: &[DecodedFrameRow],
+    heart_rate_report: &HeartRateFeatureReport,
+    rr_reference_samples: &[RrReferenceSampleRow],
+    start: &str,
+    end: &str,
+    options: K20OpticalChannelScanOptions,
+) -> OpenVitalsResult<K20OpticalChannelScanReport> {
+    let sample_rate_hz = if options.sample_rate_hz.is_finite() && options.sample_rate_hz > 0.0 {
+        options.sample_rate_hz
+    } else {
+        25.0
+    };
+    let min_peak_spacing_samples = options.min_peak_spacing_samples.max(1);
+    let max_hr_match_lag_seconds =
+        if options.max_hr_match_lag_seconds.is_finite() && options.max_hr_match_lag_seconds > 0.0 {
+            options.max_hr_match_lag_seconds
+        } else {
+            10.0
+        };
+    let hr_tolerance_bpm = if options.hr_tolerance_bpm.is_finite() && options.hr_tolerance_bpm > 0.0
+    {
+        options.hr_tolerance_bpm
+    } else {
+        8.0
+    };
+    let min_matching_segments = options.min_matching_segments.max(1);
+    let max_ranked_channels = options.max_ranked_channels.max(1);
+    let max_segment_summaries = options.max_segment_summaries;
+    let max_hr_match_lag_ms = (max_hr_match_lag_seconds * 1_000.0).round() as i64;
+
+    let trusted_heart_rates = heart_rate_report
+        .features
+        .iter()
+        .filter(|feature| feature.trusted_metric_input)
+        .filter_map(|feature| {
+            heart_rate_feature_time_unix_ms(feature).map(|unix_ms| (unix_ms, feature))
+        })
+        .collect::<Vec<_>>();
+    let trusted_heart_rate_feature_count = trusted_heart_rates.len();
+    let rr_reference_points = rr_reference_samples
+        .iter()
+        .filter_map(|sample| {
+            parse_rfc3339_utc_unix_ms(&sample.captured_at)
+                .map(|unix_ms| (unix_ms, sample.rr_interval_ms))
+        })
+        .collect::<Vec<_>>();
+    let rr_reference_sample_count = rr_reference_points.len();
+
+    let mut k20_frame_count = 0usize;
+    let mut realtime_k20_frames = Vec::new();
+    for row in decoded_rows {
+        let parsed_payload = parsed_payload_from_row(row)?;
+        let Some(ParsedPayload::DataPacket {
+            packet_k: Some(20),
+            body_hex,
+            timestamp_seconds,
+            timestamp_subseconds,
+            ..
+        }) = parsed_payload
+        else {
+            continue;
+        };
+        k20_frame_count += 1;
+        if row.packet_type_name.as_deref() != Some("REALTIME_RAW_DATA") {
+            continue;
+        }
+        let body = decode_hex_with_whitespace(&body_hex)?;
+        if !k20_body_has_any_channel(&body) {
+            continue;
+        }
+        let mut sample_time_flags = BTreeSet::new();
+        let sample_time = normalized_sample_time(
+            row,
+            timestamp_seconds,
+            timestamp_subseconds,
+            &mut sample_time_flags,
+        );
+        let sample_time_unix_ms = sample_time
+            .unix_ms
+            .or_else(|| parse_rfc3339_utc_unix_ms(&sample_time.time));
+        realtime_k20_frames.push(K20OpticalFrameData {
+            body,
+            sample_time,
+            sample_time_flags,
+            sample_time_unix_ms,
+        });
+    }
+
+    let realtime_k20_frame_count = realtime_k20_frames.len();
+    let mut segments = k20_segments(realtime_k20_frames);
+    let mut candidate_segments = Vec::new();
+    for segment in &mut segments {
+        let Some(start_ms) = segment.start_unix_ms() else {
+            continue;
+        };
+        let Some(end_ms) = segment.end_unix_ms() else {
+            continue;
+        };
+        let reference_hrs = heart_rate_features_in_window(
+            start_ms,
+            end_ms,
+            &trusted_heart_rates,
+            max_hr_match_lag_ms,
+        )
+        .into_iter()
+        .map(|feature| feature.heart_rate_bpm)
+        .collect::<Vec<_>>();
+        let matched_hr_bpm = median_f64(reference_hrs.clone()).map(round_1);
+        let reference_rr_intervals = rr_reference_intervals_in_window(
+            start_ms,
+            end_ms,
+            &rr_reference_points,
+            K20_RR_REFERENCE_MAX_LAG_MS,
+        );
+        let matched_reference_rr_ms = median_f64(reference_rr_intervals.clone()).map(round_1);
+
+        for channel in k20_channel_specs() {
+            let Some(samples) = segment.channel_values(channel.offset) else {
+                continue;
+            };
+            for polarity in [K20PeakPolarity::Positive, K20PeakPolarity::Negative] {
+                let intervals_ms = k20_channel_peak_intervals_ms(
+                    &samples,
+                    sample_rate_hz,
+                    min_peak_spacing_samples,
+                    polarity,
+                );
+                if intervals_ms.len() < 3 {
+                    continue;
+                }
+                let candidate_hr_bpm = median_f64(
+                    intervals_ms
+                        .iter()
+                        .filter_map(|interval| (*interval > 0.0).then_some(60_000.0 / *interval))
+                        .collect(),
+                )
+                .map(round_1);
+                let candidate_rmssd_ms = rmssd_ms(&intervals_ms).map(round_1);
+                let candidate_sdnn_ms = sdnn_ms(&intervals_ms).map(round_1);
+                let candidate_rr_ms = median_f64(intervals_ms.clone()).map(round_1);
+                let absolute_error_bpm = candidate_hr_bpm
+                    .zip(matched_hr_bpm)
+                    .map(|(candidate, reference)| round_1((candidate - reference).abs()));
+                let within_tolerance = absolute_error_bpm.map(|error| error <= hr_tolerance_bpm);
+                let absolute_error_rr_ms = candidate_rr_ms
+                    .zip(matched_reference_rr_ms)
+                    .map(|(candidate, reference)| round_1((candidate - reference).abs()));
+                let rr_within_tolerance =
+                    absolute_error_rr_ms.map(|error| error <= K20_RR_REFERENCE_TOLERANCE_MS);
+                let mut quality_flags = segment.sample_time_flags();
+                quality_flags.insert("diagnostic_only_not_score_input".to_string());
+                quality_flags.insert("k20_optical_channel_candidate".to_string());
+                quality_flags.insert("time_sliced_validation_segment".to_string());
+                quality_flags.insert("peak_spacing_scan_heuristic_only".to_string());
+                if matched_hr_bpm.is_none() {
+                    quality_flags.insert("no_nearby_trusted_hr_reference".to_string());
+                }
+                if within_tolerance == Some(true) {
+                    quality_flags.insert("hr_alignment_within_tolerance".to_string());
+                } else if absolute_error_bpm.is_some() {
+                    quality_flags.insert("hr_alignment_outside_tolerance".to_string());
+                }
+                if matched_reference_rr_ms.is_none() {
+                    quality_flags.insert("no_nearby_rr_reference".to_string());
+                } else if rr_within_tolerance == Some(true) {
+                    quality_flags.insert("rr_reference_alignment_within_tolerance".to_string());
+                } else if absolute_error_rr_ms.is_some() {
+                    quality_flags.insert("rr_reference_alignment_outside_tolerance".to_string());
+                }
+
+                candidate_segments.push(K20OpticalChannelSegmentSummary {
+                    capture_session_id: None,
+                    segment_index: segment.index,
+                    start_time: segment.start_time().unwrap_or_default(),
+                    end_time: segment.end_time().unwrap_or_default(),
+                    frame_count: segment.frames.len(),
+                    channel_id: channel.id.to_string(),
+                    offset: channel.offset,
+                    polarity: polarity.as_str().to_string(),
+                    interval_count: intervals_ms.len(),
+                    rr_intervals_ms_preview: intervals_ms.iter().take(12).copied().collect(),
+                    candidate_hr_bpm,
+                    candidate_rmssd_ms,
+                    candidate_sdnn_ms,
+                    matched_hr_bpm,
+                    matched_hr_sample_count: reference_hrs.len(),
+                    absolute_error_bpm,
+                    within_tolerance,
+                    matched_reference_rr_ms,
+                    matched_reference_rr_sample_count: reference_rr_intervals.len(),
+                    absolute_error_rr_ms,
+                    rr_within_tolerance,
+                    quality_flags: quality_flags.into_iter().collect(),
+                    provenance: json!({
+                        "input_source": "decoded_frame",
+                        "packet_k": 20,
+                        "domain": "raw_or_research_counted",
+                        "channel_offset": channel.offset,
+                        "sample_rate_hz": sample_rate_hz,
+                        "min_peak_spacing_samples": min_peak_spacing_samples,
+                        "segment_max_duration_ms": K20_SEGMENT_MAX_DURATION_MS,
+                        "promotion_policy": "diagnostic_only_requires_external_rr_reference_before_hrv",
+                        "validation_policy": "channel peak spacing ranked against nearby trusted HR and optional RR reference",
+                        "rr_reference_tolerance_ms": K20_RR_REFERENCE_TOLERANCE_MS,
+                    }),
+                });
+            }
+        }
+    }
+
+    let matched_segment_count = candidate_segments
+        .iter()
+        .filter(|segment| segment.absolute_error_bpm.is_some())
+        .count();
+    let rr_reference_matched_segment_count = candidate_segments
+        .iter()
+        .filter(|segment| segment.absolute_error_rr_ms.is_some())
+        .count();
+    let mut ranked_channels =
+        k20_ranked_channel_candidates(&candidate_segments, hr_tolerance_bpm, max_ranked_channels);
+    let best = ranked_channels.first();
+    let has_enough_candidate =
+        best.is_some_and(|candidate| candidate.matched_segment_count >= min_matching_segments);
+    let has_enough_rr_reference_candidate = best.is_some_and(|candidate| {
+        candidate.rr_reference_matched_segment_count >= min_matching_segments
+    });
+
+    let mut issues = Vec::new();
+    if k20_frame_count == 0 {
+        issues.push("no_k20_candidate_frames".to_string());
+    }
+    if realtime_k20_frame_count == 0 {
+        issues.push("no_realtime_k20_frames_with_channel_bodies".to_string());
+    }
+    if trusted_heart_rate_feature_count == 0 {
+        issues.push("no_trusted_heart_rate_reference_features".to_string());
+    }
+    if candidate_segments.is_empty() {
+        issues.push("no_k20_channel_peak_candidates".to_string());
+    }
+    if !ranked_channels.is_empty() && !has_enough_candidate {
+        issues.push("not_enough_k20_channel_hr_matches".to_string());
+    }
+    if has_enough_candidate
+        && best
+            .and_then(|candidate| candidate.within_tolerance_fraction)
+            .is_some_and(|fraction| fraction < 0.8)
+    {
+        issues.push("best_k20_channel_alignment_below_threshold".to_string());
+    }
+    if rr_reference_sample_count == 0 {
+        issues.push("no_rr_reference_samples".to_string());
+    } else if !ranked_channels.is_empty() && !has_enough_rr_reference_candidate {
+        issues.push("not_enough_k20_channel_rr_reference_matches".to_string());
+    } else if has_enough_rr_reference_candidate
+        && best
+            .and_then(|candidate| candidate.rr_reference_within_tolerance_fraction)
+            .is_some_and(|fraction| fraction < 0.8)
+    {
+        issues.push("best_k20_channel_rr_reference_alignment_below_threshold".to_string());
+    }
+    if !(options.sample_rate_hz.is_finite() && options.sample_rate_hz > 0.0) {
+        issues.push("sample_rate_defaulted".to_string());
+    }
+
+    let validation_status = k20_channel_scan_status(best, &issues, min_matching_segments);
+    let next_actions = k20_channel_scan_next_actions(&issues, &validation_status);
+    let segment_summaries = candidate_segments
+        .iter()
+        .take(max_segment_summaries)
+        .cloned()
+        .collect();
+    ranked_channels.truncate(max_ranked_channels);
+
+    Ok(K20OpticalChannelScanReport {
+        schema: K20_OPTICAL_CHANNEL_SCAN_REPORT_SCHEMA.to_string(),
+        generated_by: "open-vitals-k20-optical-channel-scanner".to_string(),
+        pass: issues.is_empty(),
+        validation_status,
+        start_time: start.to_string(),
+        end_time: end.to_string(),
+        decoded_frame_count: decoded_rows.len(),
+        k20_frame_count,
+        realtime_k20_frame_count,
+        candidate_segment_count: candidate_segments.len(),
+        matched_segment_count,
+        rr_reference_sample_count,
+        rr_reference_matched_segment_count,
+        rr_reference_tolerance_ms: K20_RR_REFERENCE_TOLERANCE_MS,
+        heart_rate_feature_count: heart_rate_report.features.len(),
+        trusted_heart_rate_feature_count,
+        sample_rate_hz,
+        min_peak_spacing_samples,
+        max_hr_match_lag_seconds,
+        hr_tolerance_bpm,
+        channel_offsets: k20_channel_specs()
+            .iter()
+            .map(|channel| channel.offset)
+            .collect(),
+        ranked_channels,
+        segment_summaries,
+        issues,
+        next_actions,
+    })
+}
+
 #[derive(Debug, Clone, Default)]
 struct BeatIntervalPeakSpacing {
     peak_count: usize,
     intervals_ms: Vec<f64>,
+}
+
+#[derive(Debug, Clone)]
+struct K20OpticalFrameData {
+    body: Vec<u8>,
+    sample_time: NormalizedSampleTime,
+    sample_time_flags: BTreeSet<String>,
+    sample_time_unix_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+struct K20OpticalSegment {
+    index: usize,
+    frames: Vec<K20OpticalFrameData>,
+}
+
+const K20_SEGMENT_MIN_FRAME_COUNT: usize = 8;
+const K20_SEGMENT_MAX_GAP_MS: i64 = 2_500;
+const K20_SEGMENT_MAX_DURATION_MS: i64 = 120_000;
+
+impl K20OpticalSegment {
+    fn start_unix_ms(&self) -> Option<i64> {
+        self.frames
+            .first()
+            .and_then(|frame| frame.sample_time_unix_ms)
+    }
+
+    fn end_unix_ms(&self) -> Option<i64> {
+        self.frames
+            .last()
+            .and_then(|frame| frame.sample_time_unix_ms)
+    }
+
+    fn start_time(&self) -> Option<String> {
+        self.frames
+            .first()
+            .map(|frame| frame.sample_time.time.clone())
+    }
+
+    fn end_time(&self) -> Option<String> {
+        self.frames
+            .last()
+            .map(|frame| frame.sample_time.time.clone())
+    }
+
+    fn sample_time_flags(&self) -> BTreeSet<String> {
+        self.frames
+            .iter()
+            .flat_map(|frame| frame.sample_time_flags.iter().cloned())
+            .collect()
+    }
+
+    fn channel_values(&self, offset: usize) -> Option<Vec<f64>> {
+        let mut values = Vec::new();
+        for frame in &self.frames {
+            let Some(samples) = k20_channel_values_from_body(&frame.body, offset) else {
+                continue;
+            };
+            values.extend(samples);
+        }
+        (!values.is_empty()).then_some(values)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct K20ChannelSpec {
+    id: &'static str,
+    offset: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum K20PeakPolarity {
+    Positive,
+    Negative,
+}
+
+impl K20PeakPolarity {
+    fn as_str(self) -> &'static str {
+        match self {
+            K20PeakPolarity::Positive => "positive",
+            K20PeakPolarity::Negative => "negative",
+        }
+    }
+
+    fn sign(self) -> f64 {
+        match self {
+            K20PeakPolarity::Positive => 1.0,
+            K20PeakPolarity::Negative => -1.0,
+        }
+    }
+}
+
+fn k20_channel_specs() -> [K20ChannelSpec; 6] {
+    [
+        K20ChannelSpec {
+            id: "k20_ch0_offset_26",
+            offset: 26,
+        },
+        K20ChannelSpec {
+            id: "k20_ch1_offset_226",
+            offset: 226,
+        },
+        K20ChannelSpec {
+            id: "k20_ch2_offset_1292",
+            offset: 1292,
+        },
+        K20ChannelSpec {
+            id: "k20_ch3_offset_1492",
+            offset: 1492,
+        },
+        K20ChannelSpec {
+            id: "k20_ch4_offset_1714",
+            offset: 1714,
+        },
+        K20ChannelSpec {
+            id: "k20_ch5_offset_1914",
+            offset: 1914,
+        },
+    ]
+}
+
+fn k20_body_has_any_channel(body: &[u8]) -> bool {
+    k20_channel_specs()
+        .iter()
+        .any(|channel| k20_channel_values_from_body(body, channel.offset).is_some())
+}
+
+fn k20_channel_values_from_body(body: &[u8], offset: usize) -> Option<Vec<f64>> {
+    let end = offset.checked_add(25 * 4)?;
+    if body.len() < end {
+        return None;
+    }
+    let values = (0..25)
+        .filter_map(|index| read_u32_le(body, offset + index * 4).map(|value| f64::from(value)))
+        .collect::<Vec<_>>();
+    let non_zero_count = values.iter().filter(|value| **value != 0.0).count();
+    (non_zero_count >= 20).then_some(values)
+}
+
+fn k20_segments(frames: Vec<K20OpticalFrameData>) -> Vec<K20OpticalSegment> {
+    let mut frames = frames
+        .into_iter()
+        .filter(|frame| frame.sample_time_unix_ms.is_some())
+        .collect::<Vec<_>>();
+    frames.sort_by_key(|frame| frame.sample_time_unix_ms);
+
+    let mut segments = Vec::new();
+    let mut current = Vec::new();
+    let mut last_ms = None;
+    let mut segment_start_ms = None;
+    for frame in frames {
+        let current_ms = frame.sample_time_unix_ms;
+        let should_split_on_gap = last_ms
+            .zip(current_ms)
+            .is_some_and(|(last, current)| current.saturating_sub(last) > K20_SEGMENT_MAX_GAP_MS);
+        let should_split_on_duration =
+            segment_start_ms
+                .zip(current_ms)
+                .is_some_and(|(start, current)| {
+                    current.saturating_sub(start) >= K20_SEGMENT_MAX_DURATION_MS
+                });
+
+        if should_split_on_gap || should_split_on_duration {
+            if current.len() >= K20_SEGMENT_MIN_FRAME_COUNT {
+                let index = segments.len();
+                segments.push(K20OpticalSegment {
+                    index,
+                    frames: current,
+                });
+            }
+            current = Vec::new();
+            segment_start_ms = current_ms;
+        }
+        if current.is_empty() {
+            segment_start_ms = current_ms;
+        }
+        last_ms = frame.sample_time_unix_ms;
+        current.push(frame);
+    }
+    if current.len() >= K20_SEGMENT_MIN_FRAME_COUNT {
+        let index = segments.len();
+        segments.push(K20OpticalSegment {
+            index,
+            frames: current,
+        });
+    }
+    segments
+}
+
+fn heart_rate_features_in_window<'a>(
+    start_unix_ms: i64,
+    end_unix_ms: i64,
+    trusted_heart_rates: &[(i64, &'a HeartRateFeature)],
+    max_lag_ms: i64,
+) -> Vec<&'a HeartRateFeature> {
+    trusted_heart_rates
+        .iter()
+        .filter_map(|(unix_ms, feature)| {
+            ((*unix_ms >= start_unix_ms.saturating_sub(max_lag_ms))
+                && (*unix_ms <= end_unix_ms.saturating_add(max_lag_ms)))
+            .then_some(*feature)
+        })
+        .collect()
+}
+
+fn rr_reference_intervals_in_window(
+    start_unix_ms: i64,
+    end_unix_ms: i64,
+    reference_points: &[(i64, f64)],
+    max_lag_ms: i64,
+) -> Vec<f64> {
+    reference_points
+        .iter()
+        .filter_map(|(unix_ms, rr_interval_ms)| {
+            ((*unix_ms >= start_unix_ms.saturating_sub(max_lag_ms))
+                && (*unix_ms <= end_unix_ms.saturating_add(max_lag_ms))
+                && rr_interval_ms.is_finite())
+            .then_some(*rr_interval_ms)
+        })
+        .collect()
+}
+
+fn k20_channel_peak_intervals_ms(
+    samples: &[f64],
+    sample_rate_hz: f64,
+    min_peak_spacing_samples: usize,
+    polarity: K20PeakPolarity,
+) -> Vec<f64> {
+    if samples.len() < 3 || !(sample_rate_hz.is_finite() && sample_rate_hz > 0.0) {
+        return Vec::new();
+    }
+    let window = ((sample_rate_hz * 2.0).round() as usize).max(3);
+    let smoothed = rolling_mean(samples, window);
+    let centered = samples
+        .iter()
+        .zip(smoothed.iter())
+        .map(|(sample, mean)| polarity.sign() * (sample - mean))
+        .collect::<Vec<_>>();
+    let stddev = stddev_f64(&centered).unwrap_or(0.0);
+    if stddev <= f64::EPSILON {
+        return Vec::new();
+    }
+    let threshold = (stddev * 0.45).max(1.0);
+    let min_spacing = min_peak_spacing_samples.max(1);
+    let mut peaks = Vec::new();
+    for index in 1..centered.len() - 1 {
+        if centered[index] <= threshold {
+            continue;
+        }
+        if centered[index] < centered[index - 1] || centered[index] < centered[index + 1] {
+            continue;
+        }
+        if peaks
+            .last()
+            .is_some_and(|last_index| index - last_index < min_spacing)
+        {
+            continue;
+        }
+        peaks.push(index);
+    }
+
+    peaks
+        .windows(2)
+        .filter_map(|pair| {
+            let spacing_samples = pair[1].saturating_sub(pair[0]);
+            let interval_ms = spacing_samples as f64 * 1_000.0 / sample_rate_hz;
+            (300.0..=2_000.0)
+                .contains(&interval_ms)
+                .then(|| round_1(interval_ms))
+        })
+        .collect()
+}
+
+fn rolling_mean(values: &[f64], window: usize) -> Vec<f64> {
+    if values.is_empty() {
+        return Vec::new();
+    }
+    let window = window.max(1);
+    let mut means = Vec::with_capacity(values.len());
+    let mut sum = 0.0;
+    for index in 0..values.len() {
+        sum += values[index];
+        if index >= window {
+            sum -= values[index - window];
+        }
+        let count = (index + 1).min(window);
+        means.push(sum / count as f64);
+    }
+    means
+}
+
+fn variance_f64(values: &[f64]) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    let mean = mean_f64(values)?;
+    Some(
+        values
+            .iter()
+            .map(|value| (value - mean).powi(2))
+            .sum::<f64>()
+            / values.len() as f64,
+    )
+}
+
+fn stddev_f64(values: &[f64]) -> Option<f64> {
+    variance_f64(values).map(f64::sqrt)
+}
+
+fn rmssd_ms(intervals_ms: &[f64]) -> Option<f64> {
+    if intervals_ms.len() < 2 {
+        return None;
+    }
+    let squared_diffs = intervals_ms
+        .windows(2)
+        .map(|pair| (pair[1] - pair[0]).powi(2))
+        .collect::<Vec<_>>();
+    mean_f64(&squared_diffs).map(f64::sqrt)
+}
+
+fn sdnn_ms(intervals_ms: &[f64]) -> Option<f64> {
+    stddev_f64(intervals_ms)
+}
+
+fn k20_ranked_channel_candidates(
+    segments: &[K20OpticalChannelSegmentSummary],
+    hr_tolerance_bpm: f64,
+    max_ranked_channels: usize,
+) -> Vec<K20OpticalChannelCandidateSummary> {
+    let mut grouped =
+        BTreeMap::<(String, usize, String), Vec<&K20OpticalChannelSegmentSummary>>::new();
+    for segment in segments {
+        grouped
+            .entry((
+                segment.channel_id.clone(),
+                segment.offset,
+                segment.polarity.clone(),
+            ))
+            .or_default()
+            .push(segment);
+    }
+
+    let mut candidates = grouped
+        .into_iter()
+        .filter_map(|((channel_id, offset, polarity), rows)| {
+            let usable_segment_count = rows.len();
+            let matched_rows = rows
+                .iter()
+                .copied()
+                .filter(|row| row.absolute_error_bpm.is_some())
+                .collect::<Vec<_>>();
+            if matched_rows.is_empty() {
+                return None;
+            }
+            let within_tolerance_count = matched_rows
+                .iter()
+                .filter(|row| row.within_tolerance == Some(true))
+                .count();
+            let matched_segment_count = matched_rows.len();
+            let rr_matched_rows = rows
+                .iter()
+                .copied()
+                .filter(|row| row.absolute_error_rr_ms.is_some())
+                .collect::<Vec<_>>();
+            let rr_reference_matched_segment_count = rr_matched_rows.len();
+            let rr_reference_within_tolerance_count = rr_matched_rows
+                .iter()
+                .filter(|row| row.rr_within_tolerance == Some(true))
+                .count();
+            let errors = matched_rows
+                .iter()
+                .filter_map(|row| row.absolute_error_bpm)
+                .collect::<Vec<_>>();
+            let rr_errors = rr_matched_rows
+                .iter()
+                .filter_map(|row| row.absolute_error_rr_ms)
+                .collect::<Vec<_>>();
+            let candidate_hrs = matched_rows
+                .iter()
+                .filter_map(|row| row.candidate_hr_bpm)
+                .collect::<Vec<_>>();
+            let reference_hrs = matched_rows
+                .iter()
+                .filter_map(|row| row.matched_hr_bpm)
+                .collect::<Vec<_>>();
+            let reference_rr = rr_matched_rows
+                .iter()
+                .filter_map(|row| row.matched_reference_rr_ms)
+                .collect::<Vec<_>>();
+            let candidate_rr = rows
+                .iter()
+                .flat_map(|row| row.rr_intervals_ms_preview.iter().copied())
+                .collect::<Vec<_>>();
+            let rmssd_values = rows
+                .iter()
+                .filter_map(|row| row.candidate_rmssd_ms)
+                .collect::<Vec<_>>();
+            let sdnn_values = rows
+                .iter()
+                .filter_map(|row| row.candidate_sdnn_ms)
+                .collect::<Vec<_>>();
+            let interval_counts = rows
+                .iter()
+                .map(|row| row.interval_count as f64)
+                .collect::<Vec<_>>();
+            let within_tolerance_fraction =
+                round_3(within_tolerance_count as f64 / matched_segment_count as f64);
+            let rr_reference_within_tolerance_fraction = (rr_reference_matched_segment_count > 0)
+                .then(|| {
+                    round_3(
+                        rr_reference_within_tolerance_count as f64
+                            / rr_reference_matched_segment_count as f64,
+                    )
+                });
+            let mut quality_flags = BTreeSet::new();
+            quality_flags.insert("diagnostic_only_not_score_input".to_string());
+            quality_flags.insert("k20_optical_channel_candidate".to_string());
+            if within_tolerance_fraction >= 0.8 {
+                quality_flags.insert("hr_alignment_candidate".to_string());
+            } else {
+                quality_flags.insert("hr_alignment_below_threshold".to_string());
+            }
+            if rr_reference_matched_segment_count == 0 {
+                quality_flags.insert("no_rr_reference_segments".to_string());
+            } else if rr_reference_within_tolerance_fraction.unwrap_or(0.0) >= 0.8 {
+                quality_flags.insert("rr_reference_alignment_candidate".to_string());
+            } else {
+                quality_flags.insert("rr_reference_alignment_below_threshold".to_string());
+            }
+            if median_f64(interval_counts.clone()).unwrap_or(0.0) < 5.0 {
+                quality_flags.insert("low_interval_count".to_string());
+            }
+            Some(K20OpticalChannelCandidateSummary {
+                rank: 0,
+                channel_id: channel_id.clone(),
+                offset,
+                polarity: polarity.clone(),
+                matched_segment_count,
+                usable_segment_count,
+                within_tolerance_count,
+                within_tolerance_fraction: Some(within_tolerance_fraction),
+                mean_absolute_error_bpm: mean_f64(&errors).map(round_1),
+                median_absolute_error_bpm: median_f64(errors).map(round_1),
+                mean_candidate_hr_bpm: mean_f64(&candidate_hrs).map(round_1),
+                mean_reference_hr_bpm: mean_f64(&reference_hrs).map(round_1),
+                median_candidate_rr_ms: median_f64(candidate_rr).map(round_1),
+                rr_reference_matched_segment_count,
+                rr_reference_within_tolerance_count,
+                rr_reference_within_tolerance_fraction,
+                mean_absolute_error_rr_ms: mean_f64(&rr_errors).map(round_1),
+                median_absolute_error_rr_ms: median_f64(rr_errors).map(round_1),
+                mean_reference_rr_ms: mean_f64(&reference_rr).map(round_1),
+                median_rmssd_ms: median_f64(rmssd_values).map(round_1),
+                median_sdnn_ms: median_f64(sdnn_values).map(round_1),
+                median_interval_count: median_f64(interval_counts).map(round_1),
+                quality_flags: quality_flags.into_iter().collect(),
+                provenance: json!({
+                    "input_source": "decoded_frame",
+                    "packet_k": 20,
+                    "domain": "raw_or_research_counted",
+                    "channel_offset": offset,
+                    "polarity": polarity,
+                    "hr_tolerance_bpm": hr_tolerance_bpm,
+                    "promotion_policy": "diagnostic_only_requires_external_rr_reference_before_hrv",
+                    "validation_policy": "rank K20 channel peak spacing against nearby trusted HR",
+                }),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    candidates.sort_by(|left, right| {
+        right
+            .matched_segment_count
+            .cmp(&left.matched_segment_count)
+            .then_with(|| {
+                right
+                    .within_tolerance_fraction
+                    .unwrap_or(0.0)
+                    .total_cmp(&left.within_tolerance_fraction.unwrap_or(0.0))
+            })
+            .then_with(|| {
+                left.mean_absolute_error_bpm
+                    .unwrap_or(f64::MAX)
+                    .total_cmp(&right.mean_absolute_error_bpm.unwrap_or(f64::MAX))
+            })
+            .then_with(|| left.offset.cmp(&right.offset))
+            .then_with(|| left.polarity.cmp(&right.polarity))
+    });
+    for (index, candidate) in candidates.iter_mut().enumerate() {
+        candidate.rank = index + 1;
+    }
+    candidates.truncate(max_ranked_channels);
+    candidates
+}
+
+fn k20_channel_scan_status(
+    best: Option<&K20OpticalChannelCandidateSummary>,
+    issues: &[String],
+    min_matching_segments: usize,
+) -> String {
+    if issues.is_empty() {
+        return "candidate_hr_and_rr_aligned".to_string();
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "no_k20_candidate_frames")
+    {
+        return "no_k20_frames".to_string();
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "no_realtime_k20_frames_with_channel_bodies")
+    {
+        return "no_realtime_channel_bodies".to_string();
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "no_trusted_heart_rate_reference_features")
+    {
+        return "missing_hr_reference".to_string();
+    }
+    if best.is_some_and(|candidate| candidate.matched_segment_count < min_matching_segments) {
+        return "not_enough_hr_matches".to_string();
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "best_k20_channel_alignment_below_threshold")
+    {
+        return "candidate_not_hr_aligned".to_string();
+    }
+    if issues.iter().any(|issue| {
+        issue == "no_rr_reference_samples" || issue == "not_enough_k20_channel_rr_reference_matches"
+    }) {
+        return "candidate_hr_aligned_needs_rr_reference".to_string();
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "best_k20_channel_rr_reference_alignment_below_threshold")
+    {
+        return "candidate_rr_alignment_below_threshold".to_string();
+    }
+    "candidate_not_hr_aligned".to_string()
+}
+
+fn k20_channel_scan_next_actions(
+    issues: &[String],
+    validation_status: &str,
+) -> Vec<MetricFeatureNextAction> {
+    let mut actions = Vec::new();
+    if issues
+        .iter()
+        .any(|issue| issue == "no_k20_candidate_frames")
+        || issues
+            .iter()
+            .any(|issue| issue == "no_realtime_k20_frames_with_channel_bodies")
+    {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.capture".to_string(),
+            reason: validation_status.to_string(),
+            action: "Run a quiet on-body capture that emits realtime K20 raw/research frames, then rerun K20 channel scan.".to_string(),
+        });
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "no_trusted_heart_rate_reference_features")
+    {
+        actions.push(MetricFeatureNextAction {
+            scope: "heart_rate.reference".to_string(),
+            reason: "no_trusted_heart_rate_reference_features".to_string(),
+            action: "Capture trusted K18 heart-rate history or another validated HR reference in the same window as K20.".to_string(),
+        });
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "best_k20_channel_alignment_below_threshold")
+    {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.decoder".to_string(),
+            reason: "best_k20_channel_alignment_below_threshold".to_string(),
+            action: "Keep K20 diagnostic-only; compare channel peaks against an external RR reference or probe alternate optical/filtered streams.".to_string(),
+        });
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "not_enough_k20_channel_hr_matches")
+    {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.capture".to_string(),
+            reason: "not_enough_k20_channel_hr_matches".to_string(),
+            action: "Use a longer K20 capture with overlapping trusted HR so channel ranking has enough matched segments.".to_string(),
+        });
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "no_rr_reference_samples")
+    {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.external_reference".to_string(),
+            reason: "no_rr_reference_samples".to_string(),
+            action: "Run RR Reference capture from a standard BLE heart-rate reference device during the same automatic Stream Probe window, then export and rerun K20 channel scan.".to_string(),
+        });
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "not_enough_k20_channel_rr_reference_matches")
+    {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.external_reference".to_string(),
+            reason: "not_enough_k20_channel_rr_reference_matches".to_string(),
+            action: "Collect a longer overlapping RR Reference capture so each K20 time slice has nearby reference RR samples.".to_string(),
+        });
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "best_k20_channel_rr_reference_alignment_below_threshold")
+    {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.decoder".to_string(),
+            reason: "best_k20_channel_rr_reference_alignment_below_threshold".to_string(),
+            action: "Keep K20 diagnostic-only; the top HR-aligned channel does not yet match the RR reference closely enough for HRV.".to_string(),
+        });
+    }
+    if validation_status == "candidate_hr_aligned_needs_rr_reference" {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.external_reference".to_string(),
+            reason: "hr_alignment_is_not_rr_validation".to_string(),
+            action: "Compare the top K20 channel against the RR Reference capture before using it for HRV.".to_string(),
+        });
+    }
+    actions.sort();
+    actions.dedup();
+    actions
+}
+
+#[derive(Debug, Clone)]
+struct K26BeatFieldFrameData {
+    frame_id: String,
+    evidence_id: String,
+    captured_at: String,
+    body: Vec<u8>,
+    sample_time: NormalizedSampleTime,
+    sample_time_flags: BTreeSet<String>,
+    matched_hr_bpm: Option<f64>,
+    matched_hr_sample_time: Option<String>,
+    match_lag_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+struct K26FieldSpec {
+    offset: usize,
+    width: usize,
+    endian: &'static str,
+    signed: bool,
+    interpretation: &'static str,
+    scale: f64,
+}
+
+#[derive(Debug, Clone)]
+struct K26RawFieldSpec {
+    offset: usize,
+    width: usize,
+    endian: &'static str,
+    signed: bool,
+}
+
+fn k26_field_specs(max_body_len: usize) -> Vec<K26FieldSpec> {
+    let rr_scales = [
+        0.0625, 0.1, 0.125, 0.2, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 4.0,
+    ];
+    let hr_scales = [0.0625, 0.1, 0.125, 0.2, 0.25, 0.5, 1.0, 2.0];
+    let mut specs = Vec::new();
+    for width in [1usize, 2, 4] {
+        if max_body_len < width {
+            continue;
+        }
+        for offset in 0..=max_body_len - width {
+            let endians: &[&str] = if width == 1 {
+                &["little"]
+            } else {
+                &["little", "big"]
+            };
+            let signed_options: &[bool] = if width == 1 { &[false] } else { &[false, true] };
+            for endian in endians {
+                for signed in signed_options {
+                    for scale in rr_scales {
+                        specs.push(K26FieldSpec {
+                            offset,
+                            width,
+                            endian: *endian,
+                            signed: *signed,
+                            interpretation: "rr_ms",
+                            scale,
+                        });
+                    }
+                    for scale in hr_scales {
+                        specs.push(K26FieldSpec {
+                            offset,
+                            width,
+                            endian: *endian,
+                            signed: *signed,
+                            interpretation: "hr_bpm",
+                            scale,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    specs
+}
+
+fn k26_raw_field_specs(max_body_len: usize) -> Vec<K26RawFieldSpec> {
+    let mut specs = Vec::new();
+    for width in [1usize, 2, 4] {
+        if max_body_len < width {
+            continue;
+        }
+        for offset in 0..=max_body_len - width {
+            let endians: &[&str] = if width == 1 {
+                &["little"]
+            } else {
+                &["little", "big"]
+            };
+            let signed_options: &[bool] = if width == 1 { &[false] } else { &[false, true] };
+            for endian in endians {
+                for signed in signed_options {
+                    specs.push(K26RawFieldSpec {
+                        offset,
+                        width,
+                        endian: *endian,
+                        signed: *signed,
+                    });
+                }
+            }
+        }
+    }
+    specs
+}
+
+fn distinct_rounded_value_count(values: &[f64]) -> usize {
+    values
+        .iter()
+        .filter(|value| value.is_finite())
+        .map(|value| format!("{:.1}", round_1(*value)))
+        .collect::<BTreeSet<_>>()
+        .len()
+}
+
+fn k26_raw_field_correlations(
+    frames: &[K26BeatFieldFrameData],
+    max_body_len: usize,
+    min_matching_frames: usize,
+    max_ranked_candidates: usize,
+    max_hr_match_lag_ms: i64,
+) -> Vec<K26RawFieldCorrelationSummary> {
+    let mut correlations = Vec::new();
+    for spec in k26_raw_field_specs(max_body_len) {
+        let mut raw_values = Vec::new();
+        let mut reference_hrs = Vec::new();
+        let mut reference_rr_ms = Vec::new();
+        for frame in frames {
+            let Some(reference_hr) = frame.matched_hr_bpm else {
+                continue;
+            };
+            if reference_hr <= 0.0 {
+                continue;
+            }
+            let Some(raw_value) = k26_raw_field_value(&frame.body, &spec) else {
+                continue;
+            };
+            if !raw_value.is_finite() {
+                continue;
+            }
+            raw_values.push(raw_value);
+            reference_hrs.push(reference_hr);
+            reference_rr_ms.push(60_000.0 / reference_hr);
+        }
+        if raw_values.len() < min_matching_frames {
+            continue;
+        }
+
+        let distinct_raw_value_count = distinct_rounded_value_count(&raw_values);
+        let hr_correlation = pearson_correlation(&raw_values, &reference_hrs).map(round_3);
+        let rr_correlation = pearson_correlation(&raw_values, &reference_rr_ms).map(round_3);
+        let absolute_correlation_score = hr_correlation
+            .zip(rr_correlation)
+            .map(|(hr, rr)| round_3(hr.abs().max(rr.abs())));
+        let mut quality_flags = BTreeSet::new();
+        quality_flags.insert("diagnostic_only_not_score_input".to_string());
+        quality_flags.insert("raw_field_correlation_not_rr_validation".to_string());
+        if distinct_raw_value_count <= 3 {
+            quality_flags.insert("low_raw_value_variability".to_string());
+        }
+        if spec.offset == 0 {
+            quality_flags.insert("header_field_suspected".to_string());
+        }
+        if spec.offset >= 54 || spec.offset + spec.width > 57 {
+            quality_flags.insert("tail_metadata_field_suspected".to_string());
+        }
+        if absolute_correlation_score.unwrap_or(0.0) >= 0.7 {
+            quality_flags.insert("strong_raw_correlation".to_string());
+        }
+
+        correlations.push(K26RawFieldCorrelationSummary {
+            rank: 0,
+            offset: spec.offset,
+            width: spec.width,
+            endian: spec.endian.to_string(),
+            signed: spec.signed,
+            matched_frame_count: raw_values.len(),
+            distinct_raw_value_count,
+            min_raw_value: raw_values.iter().copied().reduce(f64::min).map(round_1),
+            median_raw_value: median_f64(raw_values.clone()).map(round_1),
+            max_raw_value: raw_values.iter().copied().reduce(f64::max).map(round_1),
+            pearson_correlation_to_hr_bpm: hr_correlation,
+            pearson_correlation_to_rr_ms: rr_correlation,
+            absolute_correlation_score,
+            quality_flags: quality_flags.into_iter().collect(),
+            provenance: json!({
+                "input_source": "decoded_frame",
+                "packet_k": 26,
+                "domain": "pulse_information_packet",
+                "validation_policy": "raw_fields_correlated_against_nearby_trusted_hr_for_discovery_only",
+                "promotion_policy": "diagnostic_only_requires_external_rr_reference_before_hrv",
+                "max_hr_match_lag_ms": max_hr_match_lag_ms,
+            }),
+        });
+    }
+
+    correlations.sort_by(|left, right| {
+        let left_variable = left.distinct_raw_value_count > 3;
+        let right_variable = right.distinct_raw_value_count > 3;
+        right_variable
+            .cmp(&left_variable)
+            .then_with(|| {
+                right
+                    .absolute_correlation_score
+                    .unwrap_or(0.0)
+                    .total_cmp(&left.absolute_correlation_score.unwrap_or(0.0))
+            })
+            .then_with(|| {
+                right
+                    .distinct_raw_value_count
+                    .cmp(&left.distinct_raw_value_count)
+            })
+            .then_with(|| left.offset.cmp(&right.offset))
+    });
+    for (index, correlation) in correlations.iter_mut().enumerate() {
+        correlation.rank = index + 1;
+    }
+    correlations.truncate(max_ranked_candidates);
+    correlations
+}
+
+fn pearson_correlation(left: &[f64], right: &[f64]) -> Option<f64> {
+    if left.len() != right.len() || left.len() < 3 {
+        return None;
+    }
+    let left_mean = mean_f64(left)?;
+    let right_mean = mean_f64(right)?;
+    let mut numerator = 0.0;
+    let mut left_sum = 0.0;
+    let mut right_sum = 0.0;
+    for (left_value, right_value) in left.iter().zip(right) {
+        let left_delta = left_value - left_mean;
+        let right_delta = right_value - right_mean;
+        numerator += left_delta * right_delta;
+        left_sum += left_delta * left_delta;
+        right_sum += right_delta * right_delta;
+    }
+    if left_sum <= 0.0 || right_sum <= 0.0 {
+        return None;
+    }
+    Some(numerator / (left_sum * right_sum).sqrt())
+}
+
+fn k26_field_raw_value(body: &[u8], spec: &K26FieldSpec) -> Option<f64> {
+    let bytes = body.get(spec.offset..spec.offset + spec.width)?;
+    match (spec.width, spec.endian, spec.signed) {
+        (1, _, false) => Some(f64::from(bytes[0])),
+        (2, "little", false) => Some(f64::from(u16::from_le_bytes([bytes[0], bytes[1]]))),
+        (2, "big", false) => Some(f64::from(u16::from_be_bytes([bytes[0], bytes[1]]))),
+        (2, "little", true) => Some(f64::from(i16::from_le_bytes([bytes[0], bytes[1]]))),
+        (2, "big", true) => Some(f64::from(i16::from_be_bytes([bytes[0], bytes[1]]))),
+        (4, "little", false) => {
+            Some(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64)
+        }
+        (4, "big", false) => {
+            Some(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64)
+        }
+        (4, "little", true) => {
+            Some(i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64)
+        }
+        (4, "big", true) => {
+            Some(i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64)
+        }
+        _ => None,
+    }
+}
+
+fn k26_raw_field_value(body: &[u8], spec: &K26RawFieldSpec) -> Option<f64> {
+    let bytes = body.get(spec.offset..spec.offset + spec.width)?;
+    match (spec.width, spec.endian, spec.signed) {
+        (1, _, false) => Some(f64::from(bytes[0])),
+        (2, "little", false) => Some(f64::from(u16::from_le_bytes([bytes[0], bytes[1]]))),
+        (2, "big", false) => Some(f64::from(u16::from_be_bytes([bytes[0], bytes[1]]))),
+        (2, "little", true) => Some(f64::from(i16::from_le_bytes([bytes[0], bytes[1]]))),
+        (2, "big", true) => Some(f64::from(i16::from_be_bytes([bytes[0], bytes[1]]))),
+        (4, "little", false) => {
+            Some(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64)
+        }
+        (4, "big", false) => {
+            Some(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64)
+        }
+        (4, "little", true) => {
+            Some(i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64)
+        }
+        (4, "big", true) => {
+            Some(i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64)
+        }
+        _ => None,
+    }
+}
+
+fn k26_field_candidate_value(raw_value: f64, spec: &K26FieldSpec) -> Option<(f64, f64)> {
+    if !raw_value.is_finite() || !spec.scale.is_finite() || spec.scale <= 0.0 {
+        return None;
+    }
+    let candidate_value = raw_value * spec.scale;
+    if !candidate_value.is_finite() || candidate_value <= 0.0 {
+        return None;
+    }
+    match spec.interpretation {
+        "rr_ms" => (300.0..=2_000.0).contains(&candidate_value).then(|| {
+            (
+                round_1(candidate_value),
+                round_1(60_000.0 / candidate_value),
+            )
+        }),
+        "hr_bpm" => (30.0..=220.0)
+            .contains(&candidate_value)
+            .then(|| (round_1(candidate_value), round_1(candidate_value))),
+        _ => None,
+    }
+}
+
+fn k26_field_frame_summaries(
+    frames: &[K26BeatFieldFrameData],
+    candidate: &K26BeatFieldCandidateSummary,
+    hr_tolerance_bpm: f64,
+    max_frame_summaries: usize,
+) -> Vec<K26BeatFieldFrameSummary> {
+    let spec = K26FieldSpec {
+        offset: candidate.offset,
+        width: candidate.width,
+        endian: match candidate.endian.as_str() {
+            "big" => "big",
+            _ => "little",
+        },
+        signed: candidate.signed,
+        interpretation: match candidate.interpretation.as_str() {
+            "hr_bpm" => "hr_bpm",
+            _ => "rr_ms",
+        },
+        scale: candidate.scale,
+    };
+    let mut summaries = Vec::new();
+    for frame in frames {
+        if summaries.len() >= max_frame_summaries {
+            break;
+        }
+        let Some(raw_value) = k26_field_raw_value(&frame.body, &spec) else {
+            continue;
+        };
+        let Some((candidate_value, candidate_hr_bpm)) = k26_field_candidate_value(raw_value, &spec)
+        else {
+            continue;
+        };
+        let absolute_error_bpm = frame
+            .matched_hr_bpm
+            .map(|reference| round_1((candidate_hr_bpm - reference).abs()));
+        let within_tolerance = absolute_error_bpm.map(|error| error <= hr_tolerance_bpm);
+        let mut quality_flags = BTreeSet::new();
+        quality_flags.insert("diagnostic_only_not_score_input".to_string());
+        quality_flags.insert("validation_against_hr_only_not_rr_reference".to_string());
+        for flag in &frame.sample_time_flags {
+            quality_flags.insert(flag.clone());
+        }
+        match within_tolerance {
+            Some(true) => {
+                quality_flags.insert("hr_alignment_within_tolerance".to_string());
+            }
+            Some(false) => {
+                quality_flags.insert("hr_alignment_outside_tolerance".to_string());
+            }
+            None => {
+                quality_flags.insert("no_nearby_trusted_hr_reference".to_string());
+            }
+        }
+        summaries.push(K26BeatFieldFrameSummary {
+            frame_id: frame.frame_id.clone(),
+            evidence_id: frame.evidence_id.clone(),
+            captured_at: frame.captured_at.clone(),
+            sample_time: frame.sample_time.time.clone(),
+            sample_time_source: frame.sample_time.source.clone(),
+            offset: spec.offset,
+            width: spec.width,
+            endian: spec.endian.to_string(),
+            signed: spec.signed,
+            interpretation: spec.interpretation.to_string(),
+            scale: spec.scale,
+            raw_value: round_1(raw_value),
+            candidate_value,
+            candidate_hr_bpm,
+            matched_hr_bpm: frame.matched_hr_bpm,
+            matched_hr_sample_time: frame.matched_hr_sample_time.clone(),
+            match_lag_seconds: frame
+                .match_lag_ms
+                .map(|lag_ms| round_1(lag_ms as f64 / 1_000.0)),
+            absolute_error_bpm,
+            within_tolerance,
+            quality_flags: quality_flags.into_iter().collect(),
+        });
+    }
+    summaries
+}
+
+fn k26_field_scan_status(
+    best: Option<&K26BeatFieldCandidateSummary>,
+    issues: &[String],
+    min_matching_frames: usize,
+) -> String {
+    if issues.iter().any(|issue| {
+        matches!(
+            issue.as_str(),
+            "no_k26_candidate_frames"
+                | "no_trusted_heart_rate_reference_features"
+                | "no_k26_field_candidates"
+                | "not_enough_k26_field_matches"
+        )
+    }) {
+        return "blocked".to_string();
+    }
+    let best_aligned = best.is_some_and(|candidate| {
+        candidate.matched_frame_count >= min_matching_frames
+            && candidate.within_tolerance_fraction.unwrap_or(0.0) >= 0.8
+    });
+    if best_aligned {
+        "field_hr_aligned_needs_external_rr_reference".to_string()
+    } else {
+        "field_candidate_not_hr_aligned".to_string()
+    }
+}
+
+fn k26_field_scan_next_actions(
+    issues: &[String],
+    validation_status: &str,
+) -> Vec<MetricFeatureNextAction> {
+    let mut actions = Vec::new();
+    if issues
+        .iter()
+        .any(|issue| issue == "no_k26_candidate_frames")
+    {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.capture".to_string(),
+            reason: "no_k26_candidate_frames".to_string(),
+            action: "Run aggregate capture with optical data and persistent R20/R21 enabled, then rerun the K26 field scan.".to_string(),
+        });
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "no_trusted_heart_rate_reference_features")
+    {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.validation".to_string(),
+            reason: "no_trusted_heart_rate_reference_features".to_string(),
+            action: "Capture K18 normal-history heart-rate frames in the same window as K26 pulse-information frames.".to_string(),
+        });
+    }
+    if validation_status == "field_hr_aligned_needs_external_rr_reference" {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.external_reference".to_string(),
+            reason: "hr_alignment_is_not_rr_validation".to_string(),
+            action: "Compare the top K26 field against a true RR/beat-interval reference before using it for HRV.".to_string(),
+        });
+    }
+    if validation_status == "field_candidate_not_hr_aligned" {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.decoder".to_string(),
+            reason: "best_k26_field_alignment_below_threshold".to_string(),
+            action: "Keep K26 diagnostic-only; inspect alternate transforms, multi-field combinations, and adjacent optical/filtered command variants.".to_string(),
+        });
+    }
+    actions.sort();
+    actions.dedup();
+    actions
 }
 
 fn beat_interval_candidate_scan_next_actions(
@@ -2130,7 +4468,7 @@ fn beat_interval_candidate_scan_next_actions(
     if candidate_frame_count == 0 {
         actions.push(MetricFeatureNextAction {
             scope: "beat_interval.capture".to_string(),
-            reason: "no_k16_k17_k20_candidate_frames".to_string(),
+            reason: "no_k16_k17_k20_k26_candidate_frames".to_string(),
             action: "Run an aggregate capture while the band is on-body, then export the local bundle and rerun this scan.".to_string(),
         });
     }
@@ -2138,7 +4476,7 @@ fn beat_interval_candidate_scan_next_actions(
         actions.push(MetricFeatureNextAction {
             scope: "beat_interval.scan".to_string(),
             reason: "no_direct_rr_or_waveform_peak_candidates".to_string(),
-            action: "Try a longer quiet on-body capture and keep probing command payloads until K16, K17, or richer K20 waveform bodies appear.".to_string(),
+            action: "Try a longer quiet on-body capture and keep probing command payloads until K16, K17, richer K20, or K26 pulse-information bodies appear.".to_string(),
         });
     }
     if direct_rr_value_count + peak_spacing_candidate_count > 0 {
@@ -2233,6 +4571,285 @@ fn interval_preview(direct_rr_values: &[i16], peak_intervals_ms: &[f64]) -> Vec<
         .chain(peak_intervals_ms.iter().copied())
         .take(16)
         .collect()
+}
+
+fn beat_interval_hr_validation_frame_summary(
+    row: &DecodedFrameRow,
+    packet_k: u8,
+    domain: &str,
+    candidate_source: &str,
+    intervals_ms: &[f64],
+    sample_time: &NormalizedSampleTime,
+    sample_time_flags: &BTreeSet<String>,
+    trusted_heart_rates: &[(i64, &HeartRateFeature)],
+    max_hr_match_lag_ms: i64,
+    hr_tolerance_bpm: f64,
+) -> BeatIntervalHrValidationFrameSummary {
+    let candidate_mean_rr_ms = mean_f64(intervals_ms).filter(|value| value.is_finite());
+    let candidate_hr_bpm = candidate_mean_rr_ms
+        .filter(|value| *value > 0.0)
+        .map(|value| round_1(60_000.0 / value));
+    let sample_time_unix_ms = sample_time
+        .unix_ms
+        .or_else(|| parse_rfc3339_utc_unix_ms(&sample_time.time));
+    let matched = sample_time_unix_ms.and_then(|unix_ms| {
+        nearest_heart_rate_feature(unix_ms, trusted_heart_rates, max_hr_match_lag_ms)
+    });
+    let (matched_hr_bpm, matched_hr_sample_time, match_lag_seconds) = matched
+        .map(|(lag_ms, feature)| {
+            (
+                Some(round_1(feature.heart_rate_bpm)),
+                Some(feature.sample_time.clone()),
+                Some(round_1(lag_ms as f64 / 1_000.0)),
+            )
+        })
+        .unwrap_or((None, None, None));
+    let absolute_error_bpm = candidate_hr_bpm
+        .zip(matched_hr_bpm)
+        .map(|(candidate, reference)| round_1((candidate - reference).abs()));
+    let within_tolerance = absolute_error_bpm.map(|error| error <= hr_tolerance_bpm);
+
+    let mut quality_flags = BTreeSet::new();
+    quality_flags.insert("discovery_only_not_score_input".to_string());
+    quality_flags.insert("beat_interval_candidate_not_promoted".to_string());
+    quality_flags.insert("validation_against_hr_only_not_rr_reference".to_string());
+    match packet_k {
+        20 => {
+            quality_flags.insert("raw_research_k20_candidate_not_promoted".to_string());
+        }
+        26 => {
+            quality_flags.insert("pulse_information_k26_candidate_not_promoted".to_string());
+        }
+        _ => {}
+    }
+    match candidate_source {
+        "direct_i16_plausible" => {
+            quality_flags.insert("direct_plausible_i16_values_present".to_string());
+        }
+        "peak_spacing" => {
+            quality_flags.insert("peak_spacing_scan_heuristic_only".to_string());
+        }
+        _ => {}
+    }
+    for flag in sample_time_flags {
+        quality_flags.insert(flag.clone());
+    }
+    match within_tolerance {
+        Some(true) => {
+            quality_flags.insert("hr_alignment_within_tolerance".to_string());
+        }
+        Some(false) => {
+            quality_flags.insert("hr_alignment_outside_tolerance".to_string());
+        }
+        None => {
+            quality_flags.insert("no_nearby_trusted_hr_reference".to_string());
+        }
+    }
+
+    BeatIntervalHrValidationFrameSummary {
+        frame_id: row.frame_id.clone(),
+        evidence_id: row.evidence_id.clone(),
+        captured_at: row.captured_at.clone(),
+        sample_time: sample_time.time.clone(),
+        sample_time_source: sample_time.source.clone(),
+        packet_k,
+        domain: domain.to_string(),
+        candidate_source: candidate_source.to_string(),
+        candidate_interval_count: intervals_ms.len(),
+        candidate_rr_intervals_ms_preview: intervals_ms.iter().copied().take(16).collect(),
+        candidate_mean_rr_ms: candidate_mean_rr_ms.map(round_1),
+        candidate_hr_bpm,
+        matched_hr_bpm,
+        matched_hr_sample_time,
+        match_lag_seconds,
+        absolute_error_bpm,
+        within_tolerance,
+        quality_flags: quality_flags.into_iter().collect(),
+        provenance: json!({
+            "input_source": "decoded_frame",
+            "parser_version": row.parser_version,
+            "packet_k": packet_k,
+            "domain": domain,
+            "candidate_source": candidate_source,
+            "validation_policy": "compare_candidate_hr_against_trusted_hr_before_external_rr_reference",
+            "promotion_policy": "diagnostic_only_not_hrv_score_input",
+            "hr_tolerance_bpm": hr_tolerance_bpm,
+            "max_hr_match_lag_ms": max_hr_match_lag_ms,
+        }),
+    }
+}
+
+fn nearest_heart_rate_feature<'a>(
+    sample_time_unix_ms: i64,
+    trusted_heart_rates: &[(i64, &'a HeartRateFeature)],
+    max_hr_match_lag_ms: i64,
+) -> Option<(i64, &'a HeartRateFeature)> {
+    trusted_heart_rates
+        .iter()
+        .filter_map(|(unix_ms, feature)| {
+            let lag_ms = (*unix_ms - sample_time_unix_ms).abs();
+            (lag_ms <= max_hr_match_lag_ms).then_some((lag_ms, *feature))
+        })
+        .min_by_key(|(lag_ms, _feature)| *lag_ms)
+}
+
+fn beat_interval_hr_validation_source_summary(
+    source: &str,
+    frames: &[BeatIntervalHrValidationFrameSummary],
+) -> BeatIntervalHrValidationSourceSummary {
+    let source_frames = frames
+        .iter()
+        .filter(|frame| frame.candidate_source == source)
+        .collect::<Vec<_>>();
+    let matched_frames = source_frames
+        .iter()
+        .filter(|frame| frame.absolute_error_bpm.is_some())
+        .copied()
+        .collect::<Vec<_>>();
+    let within_tolerance_count = matched_frames
+        .iter()
+        .filter(|frame| frame.within_tolerance == Some(true))
+        .count();
+    let errors = matched_frames
+        .iter()
+        .filter_map(|frame| frame.absolute_error_bpm)
+        .collect::<Vec<_>>();
+    let candidate_hrs = matched_frames
+        .iter()
+        .filter_map(|frame| frame.candidate_hr_bpm)
+        .collect::<Vec<_>>();
+    let reference_hrs = matched_frames
+        .iter()
+        .filter_map(|frame| frame.matched_hr_bpm)
+        .collect::<Vec<_>>();
+
+    BeatIntervalHrValidationSourceSummary {
+        source: source.to_string(),
+        candidate_frame_count: source_frames.len(),
+        matched_frame_count: matched_frames.len(),
+        within_tolerance_count,
+        within_tolerance_fraction: (!matched_frames.is_empty())
+            .then(|| round_3(within_tolerance_count as f64 / matched_frames.len() as f64)),
+        mean_absolute_error_bpm: mean_f64(&errors).map(round_1),
+        median_absolute_error_bpm: median_f64(errors).map(round_1),
+        mean_candidate_hr_bpm: mean_f64(&candidate_hrs).map(round_1),
+        mean_reference_hr_bpm: mean_f64(&reference_hrs).map(round_1),
+    }
+}
+
+fn beat_interval_hr_validation_status(
+    issues: &[String],
+    direct_i16_summary: &BeatIntervalHrValidationSourceSummary,
+    peak_spacing_summary: &BeatIntervalHrValidationSourceSummary,
+    min_matching_frames: usize,
+) -> String {
+    if issues.iter().any(|issue| {
+        matches!(
+            issue.as_str(),
+            "no_k20_candidate_frames"
+                | "no_k20_rr_or_peak_spacing_candidates"
+                | "no_k20_k26_candidate_frames"
+                | "no_k20_k26_rr_or_peak_spacing_candidates"
+                | "no_trusted_heart_rate_reference_features"
+                | "not_enough_k20_hr_matches"
+                | "not_enough_k20_k26_hr_matches"
+        )
+    }) {
+        return "blocked".to_string();
+    }
+    let direct_aligned = direct_i16_summary.matched_frame_count >= min_matching_frames
+        && direct_i16_summary.within_tolerance_fraction.unwrap_or(0.0) >= 0.8;
+    let peak_aligned = peak_spacing_summary.matched_frame_count >= min_matching_frames
+        && peak_spacing_summary
+            .within_tolerance_fraction
+            .unwrap_or(0.0)
+            >= 0.8;
+    match (direct_aligned, peak_aligned) {
+        (true, true) => "hr_aligned_needs_external_rr_reference".to_string(),
+        (true, false) => "direct_i16_hr_aligned_needs_external_rr_reference".to_string(),
+        (false, true) => "peak_spacing_hr_aligned_needs_external_rr_reference".to_string(),
+        (false, false) => "candidate_not_hr_aligned".to_string(),
+    }
+}
+
+fn beat_interval_hr_validation_next_actions(
+    issues: &[String],
+    validation_status: &str,
+) -> Vec<MetricFeatureNextAction> {
+    let mut actions = Vec::new();
+    if issues
+        .iter()
+        .any(|issue| issue == "no_k20_candidate_frames" || issue == "no_k20_k26_candidate_frames")
+    {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.capture".to_string(),
+            reason: "no_k20_k26_candidate_frames".to_string(),
+            action:
+                "Run aggregate capture while the band is on-body and export another local bundle."
+                    .to_string(),
+        });
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "no_trusted_heart_rate_reference_features")
+    {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.validation".to_string(),
+            reason: "no_trusted_heart_rate_reference_features".to_string(),
+            action: "Capture normal-history or another trusted HR stream in the same window as K20 candidates.".to_string(),
+        });
+    }
+    if issues.iter().any(|issue| {
+        issue == "not_enough_k20_hr_matches" || issue == "not_enough_k20_k26_hr_matches"
+    }) {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.validation".to_string(),
+            reason: "not_enough_k20_k26_hr_matches".to_string(),
+            action: "Use a longer quiet on-body capture so K20/K26 candidates and trusted HR overlap in time.".to_string(),
+        });
+    }
+    if matches!(
+        validation_status,
+        "hr_aligned_needs_external_rr_reference"
+            | "direct_i16_hr_aligned_needs_external_rr_reference"
+            | "peak_spacing_hr_aligned_needs_external_rr_reference"
+    ) {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.external_reference".to_string(),
+            reason: "hr_alignment_is_not_rr_validation".to_string(),
+            action: "Compare K20-derived intervals against an external RR reference or validated broadcast RR stream before using them for HRV.".to_string(),
+        });
+    }
+    if validation_status == "candidate_not_hr_aligned" {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.decoder".to_string(),
+            reason: "candidate_not_hr_aligned".to_string(),
+            action: "Do not promote K20/K26 yet; inspect alternate byte offsets, scales, or command-gated streams for beat-interval evidence.".to_string(),
+        });
+    }
+    actions.sort();
+    actions.dedup();
+    actions
+}
+
+fn mean_f64(values: &[f64]) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    Some(values.iter().sum::<f64>() / values.len() as f64)
+}
+
+fn median_f64(mut values: Vec<f64>) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_by(|left, right| left.total_cmp(right));
+    let middle = values.len() / 2;
+    if values.len() % 2 == 0 {
+        Some((values[middle - 1] + values[middle]) / 2.0)
+    } else {
+        Some(values[middle])
+    }
 }
 
 pub fn run_recovery_sensor_discovery_report_for_store(
@@ -3506,7 +6123,7 @@ fn hrv_validation_next_actions(issues: &[String]) -> Vec<MetricFeatureNextAction
             reason: "hrv_label_delta_out_of_tolerance".to_string(),
             action:
                 "Keep packet-derived HRV blocked and collect more owned captures or a beat-interval reference before validating the interval scale."
-                    .to_string(),
+                .to_string(),
         });
     }
     actions.sort();
@@ -3679,6 +6296,10 @@ fn temperature_validation_next_actions(issues: &[String]) -> Vec<MetricFeatureNe
 
 fn round_1(value: f64) -> f64 {
     (value * 10.0).round() / 10.0
+}
+
+fn round_3(value: f64) -> f64 {
+    (value * 1_000.0).round() / 1_000.0
 }
 
 fn metric_feature_next_actions(family: &str, issues: &[String]) -> Vec<MetricFeatureNextAction> {
