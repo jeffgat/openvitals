@@ -95,6 +95,11 @@ struct MoreStreamProbePacketDelta: Identifiable, Equatable {
   let increased: Bool
   let firstSeen: String
   let lastSeen: String
+  let probeFirstSeen: String
+  let probeLastSeen: String
+  let baselineFirstSeen: String
+  let baselineLastSeen: String
+  let presenceAttribution: String
 
   var id: String { family }
 
@@ -112,9 +117,18 @@ struct MoreStreamProbePacketDelta: Identifiable, Equatable {
   }
 
   var detail: String {
-    let window = [firstSeen, lastSeen].filter { !$0.isEmpty }.joined(separator: " to ")
-    let suffix = window.isEmpty ? "" : " | \(window)"
-    return "probe \(probeCount) | baseline \(baselineCount) | delta \(deltaCount)\(suffix)"
+    let probeWindow = [probeFirstSeen, probeLastSeen].filter { !$0.isEmpty }.joined(separator: " to ")
+    let baselineWindow = [baselineFirstSeen, baselineLastSeen].filter { !$0.isEmpty }.joined(separator: " to ")
+    let timing: String
+    if !probeWindow.isEmpty && !baselineWindow.isEmpty {
+      timing = " | probe \(probeWindow) | baseline \(baselineWindow)"
+    } else if !probeWindow.isEmpty {
+      timing = " | probe \(probeWindow)"
+    } else {
+      let window = [firstSeen, lastSeen].filter { !$0.isEmpty }.joined(separator: " to ")
+      timing = window.isEmpty ? "" : " | \(window)"
+    }
+    return "\(presenceAttribution.replacingOccurrences(of: "_", with: " ")) | probe \(probeCount) | baseline \(baselineCount) | delta \(deltaCount)\(timing)"
   }
 
   init(row: [String: Any]) {
@@ -127,6 +141,11 @@ struct MoreStreamProbePacketDelta: Identifiable, Equatable {
     increased = MoreStreamProbeStep.boolValueForDelta(row["increased"])
     firstSeen = MoreDataStore.firstString(row, keys: ["first_seen"]) ?? ""
     lastSeen = MoreDataStore.firstString(row, keys: ["last_seen"]) ?? ""
+    probeFirstSeen = MoreDataStore.firstString(row, keys: ["probe_first_seen"]) ?? ""
+    probeLastSeen = MoreDataStore.firstString(row, keys: ["probe_last_seen"]) ?? ""
+    baselineFirstSeen = MoreDataStore.firstString(row, keys: ["baseline_first_seen"]) ?? ""
+    baselineLastSeen = MoreDataStore.firstString(row, keys: ["baseline_last_seen"]) ?? ""
+    presenceAttribution = MoreDataStore.firstString(row, keys: ["presence_attribution"]) ?? "unknown"
   }
 }
 
@@ -185,11 +204,79 @@ struct MoreK20ChannelCandidate: Identifiable, Equatable {
     medianIntervalCount = MoreStreamProbeStep.optionalDoubleValueForDelta(row["median_interval_count"])
   }
 
-  private static func format(_ value: Double) -> String {
+  fileprivate static func format(_ value: Double) -> String {
     if value.rounded() == value {
       return "\(Int(value))"
     }
     return String(format: "%.1f", value)
+  }
+}
+
+struct MoreK20WaveformCandidate: Identifiable, Equatable {
+  let rank: Int
+  let channelId: String
+  let offset: Int
+  let polarity: String
+  let sampleRateHz: Double
+  let minPeakSpacingSamples: Int
+  let smoothingWindowSamples: Int
+  let thresholdStddevMultiplier: Double
+  let matchedSegmentCount: Int
+  let usableSegmentCount: Int
+  let withinToleranceFraction: Double
+  let meanAbsoluteErrorBPM: Double?
+  let medianCandidateRRMS: Double?
+  let rrReferenceMatchedSegmentCount: Int
+  let rrReferenceWithinToleranceFraction: Double?
+  let meanAbsoluteErrorRRMS: Double?
+  let medianRMSSDMS: Double?
+  let medianIntervalCount: Double?
+
+  var id: String { "\(rank)-\(channelId)-\(polarity)-\(sampleRateHz)-\(thresholdStddevMultiplier)" }
+
+  var status: MoreStatusKind {
+    if rrReferenceWithinToleranceFraction ?? 0 >= 0.8 {
+      return .ready
+    }
+    if withinToleranceFraction >= 0.8 {
+      return .stale
+    }
+    return matchedSegmentCount > 0 ? .blocked : .notRun
+  }
+
+  var detail: String {
+    let percent = Int((withinToleranceFraction * 100).rounded())
+    let rrReference = rrReferenceWithinToleranceFraction.map {
+      let referencePercent = Int(($0 * 100).rounded())
+      let referenceError = meanAbsoluteErrorRRMS.map { "MAE \(MoreK20ChannelCandidate.format($0)) ms" } ?? "MAE --"
+      return "RR ref \(rrReferenceMatchedSegmentCount) | \(referencePercent)% | \(referenceError)"
+    } ?? "RR ref --"
+    let error = meanAbsoluteErrorBPM.map { "MAE \(MoreK20ChannelCandidate.format($0)) bpm" } ?? "No HR match"
+    let rr = medianCandidateRRMS.map { "RR \(MoreK20ChannelCandidate.format($0)) ms" } ?? "RR --"
+    let rmssd = medianRMSSDMS.map { "RMSSD \(MoreK20ChannelCandidate.format($0)) ms" } ?? "RMSSD --"
+    let intervals = medianIntervalCount.map { "intervals \(MoreK20ChannelCandidate.format($0))" } ?? "intervals --"
+    return "\(polarity) | \(MoreK20ChannelCandidate.format(sampleRateHz)) Hz | smooth \(smoothingWindowSamples) | threshold \(MoreK20ChannelCandidate.format(thresholdStddevMultiplier)) | \(matchedSegmentCount)/\(usableSegmentCount) matched | \(percent)% within | \(error) | \(rr) | \(rrReference) | \(rmssd) | \(intervals)"
+  }
+
+  init(row: [String: Any]) {
+    rank = MoreStreamProbeStep.intValueForDelta(row["rank"])
+    channelId = MoreDataStore.firstString(row, keys: ["channel_id"]) ?? "k20_waveform"
+    offset = MoreStreamProbeStep.intValueForDelta(row["offset"])
+    polarity = MoreDataStore.firstString(row, keys: ["polarity"]) ?? "unknown"
+    sampleRateHz = MoreStreamProbeStep.doubleValueForDelta(row["sample_rate_hz"])
+    minPeakSpacingSamples = MoreStreamProbeStep.intValueForDelta(row["min_peak_spacing_samples"])
+    smoothingWindowSamples = MoreStreamProbeStep.intValueForDelta(row["smoothing_window_samples"])
+    thresholdStddevMultiplier = MoreStreamProbeStep.doubleValueForDelta(row["threshold_stddev_multiplier"])
+    matchedSegmentCount = MoreStreamProbeStep.intValueForDelta(row["matched_segment_count"])
+    usableSegmentCount = MoreStreamProbeStep.intValueForDelta(row["usable_segment_count"])
+    withinToleranceFraction = MoreStreamProbeStep.doubleValueForDelta(row["within_tolerance_fraction"])
+    meanAbsoluteErrorBPM = MoreStreamProbeStep.optionalDoubleValueForDelta(row["mean_absolute_error_bpm"])
+    medianCandidateRRMS = MoreStreamProbeStep.optionalDoubleValueForDelta(row["median_candidate_rr_ms"])
+    rrReferenceMatchedSegmentCount = MoreStreamProbeStep.intValueForDelta(row["rr_reference_matched_segment_count"])
+    rrReferenceWithinToleranceFraction = MoreStreamProbeStep.optionalDoubleValueForDelta(row["rr_reference_within_tolerance_fraction"])
+    meanAbsoluteErrorRRMS = MoreStreamProbeStep.optionalDoubleValueForDelta(row["mean_absolute_error_rr_ms"])
+    medianRMSSDMS = MoreStreamProbeStep.optionalDoubleValueForDelta(row["median_rmssd_ms"])
+    medianIntervalCount = MoreStreamProbeStep.optionalDoubleValueForDelta(row["median_interval_count"])
   }
 }
 
@@ -369,6 +456,103 @@ extension MoreDataStore {
     }
   }
 
+  func runK20WaveformTransformScan() {
+    guard streamProbeWindowIssueSummary() == nil else {
+      k20WaveformScanStatus = streamProbeWindowIssueSummary() ?? "Window blocked"
+      return
+    }
+
+    k20WaveformScanInProgress = true
+    k20WaveformScanStatus = "Sweeping K20 waveform transforms..."
+    k20WaveformCandidates = []
+    k20WaveformNextActions = []
+    let databasePath = databasePath
+    let start = streamProbeStart
+    let end = streamProbeEnd
+    OpenVitalsRustBridge.performInBackground(qos: .utility, {
+      try OpenVitalsRustBridge().request(
+        method: "metrics.k20_waveform_transform_scan",
+        args: [
+          "database_path": databasePath,
+          "start": start,
+          "end": end,
+          "min_owned_captures": 1,
+          "max_hr_match_lag_seconds": 10.0,
+          "hr_tolerance_bpm": 8.0,
+          "min_matching_segments": 2,
+          "max_ranked_transforms": 12,
+          "max_segment_summaries": 8,
+        ]
+      )
+    }) { [weak self] result in
+      guard let self else {
+        return
+      }
+      k20WaveformScanInProgress = false
+      switch result {
+      case .success(let value):
+        applyK20WaveformTransformScan(value)
+      case .failure(let error):
+        k20WaveformScanStatus = "K20 waveform scan failed: \(Self.errorSummary(error))"
+      }
+    }
+  }
+
+  func runBeatEvidenceReport() {
+    guard streamProbeWindowIssueSummary() == nil else {
+      beatEvidenceStatus = streamProbeWindowIssueSummary() ?? "Window blocked"
+      return
+    }
+
+    beatEvidenceInProgress = true
+    beatEvidenceStatus = "Building beat evidence report..."
+    beatEvidenceNextActions = []
+    let databasePath = databasePath
+    let expected = streamProbeExpectedPacketFamilies.isEmpty ? Self.defaultStreamProbeExpectedPacketFamilies : streamProbeExpectedPacketFamilies
+    var args: [String: Any] = [
+      "database_path": databasePath,
+      "start": streamProbeStart,
+      "end": streamProbeEnd,
+      "expected_packet_families": expected,
+      "capture_session_ids": Self.csvValues(streamProbeCaptureSessions),
+      "min_owned_captures": 1,
+      "max_hr_match_lag_seconds": 10.0,
+      "hr_tolerance_bpm": 8.0,
+      "min_matching_segments": 2,
+      "min_matching_frames": 20,
+      "max_ranked_transforms": 12,
+      "max_ranked_channels": 8,
+      "max_ranked_fields": 12,
+      "max_ranked_candidates": 12,
+      "max_segment_summaries": 8,
+      "max_frame_summaries": 8,
+      "max_analyzed_frames": 600,
+    ]
+    if !streamProbeBaselineStart.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+       !streamProbeBaselineEnd.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      args["baseline_start"] = streamProbeBaselineStart
+      args["baseline_end"] = streamProbeBaselineEnd
+    }
+
+    OpenVitalsRustBridge.performInBackground(qos: .utility, {
+      try OpenVitalsRustBridge().request(
+        method: "metrics.beat_evidence_report",
+        args: args
+      )
+    }) { [weak self] result in
+      guard let self else {
+        return
+      }
+      beatEvidenceInProgress = false
+      switch result {
+      case .success(let value):
+        applyBeatEvidenceReport(value)
+      case .failure(let error):
+        beatEvidenceStatus = "Beat evidence failed: \(Self.errorSummary(error))"
+      }
+    }
+  }
+
   func streamProbeWindowIssueSummary() -> String? {
     guard let start = Self.parseISO8601(streamProbeStart) else {
       return "Start must be ISO-8601 UTC"
@@ -450,6 +634,51 @@ extension MoreDataStore {
     k20ChannelScanStatus = "\(status) | K20 \(k20Frames) | realtime \(realtimeFrames) | HR \(matched)/\(candidatesCount) | RR ref \(rrMatched)/\(rrSamples) | \(pass ? "passed" : "blocked")"
   }
 
+  private func applyK20WaveformTransformScan(_ value: [String: Any]) {
+    let candidates = value["ranked_transforms"] as? [[String: Any]] ?? []
+    k20WaveformCandidates = candidates.map(MoreK20WaveformCandidate.init(row:))
+    let nextActions = value["next_actions"] as? [[String: Any]] ?? []
+    k20WaveformNextActions = nextActions.map { row in
+      let reason = Self.firstString(row, keys: ["reason"]) ?? "next_action"
+      let action = Self.firstString(row, keys: ["action"]) ?? Self.shortBridgeSummary(row)
+      return "\(reason): \(action)"
+    }
+    let status = Self.firstString(value, keys: ["validation_status"]) ?? "unknown"
+    let k20Frames = Self.firstString(value, keys: ["k20_frame_count"]) ?? "0"
+    let realtimeFrames = Self.firstString(value, keys: ["realtime_k20_frame_count"]) ?? "0"
+    let matched = Self.firstString(value, keys: ["matched_segment_count"]) ?? "0"
+    let rrMatched = Self.firstString(value, keys: ["rr_reference_matched_segment_count"]) ?? "0"
+    let rrSamples = Self.firstString(value, keys: ["rr_reference_sample_count"]) ?? "0"
+    let transforms = Self.firstString(value, keys: ["tested_transform_count"]) ?? "0"
+    let pass = (value["pass"] as? Bool) == true
+    k20WaveformScanStatus = "\(status) | K20 \(k20Frames) | realtime \(realtimeFrames) | transforms \(transforms) | HR \(matched) | RR ref \(rrMatched)/\(rrSamples) | \(pass ? "passed" : "blocked")"
+  }
+
+  private func applyBeatEvidenceReport(_ value: [String: Any]) {
+    let nextActions = value["next_actions"] as? [[String: Any]] ?? []
+    beatEvidenceNextActions = nextActions.map { row in
+      let reason = Self.firstString(row, keys: ["reason"]) ?? "next_action"
+      let action = Self.firstString(row, keys: ["action"]) ?? Self.shortBridgeSummary(row)
+      return "\(reason): \(action)"
+    }
+    if let waveform = value["k20_waveform_transform_scan"] as? [String: Any] {
+      applyK20WaveformTransformScan(waveform)
+    }
+    if let channel = value["k20_optical_channel_scan"] as? [String: Any] {
+      applyK20ChannelScan(channel)
+    }
+    if let packetDelta = value["packet_delta"] as? [String: Any] {
+      applyStreamProbeDelta(packetDelta)
+    }
+    let status = Self.firstString(value, keys: ["validation_status"]) ?? "unknown"
+    let rrSamples = Self.firstString(value, keys: ["rr_reference_sample_count"]) ?? "0"
+    let pass = (value["pass"] as? Bool) == true
+    let summary = value["summary"] as? [String: Any] ?? [:]
+    let k20Frames = Self.firstString(summary, keys: ["k20_frame_count"]) ?? "0"
+    let k26Frames = Self.firstString(summary, keys: ["k26_frame_count"]) ?? "0"
+    beatEvidenceStatus = "\(status) | K20 \(k20Frames) | K26 \(k26Frames) | RR ref \(rrSamples) | \(pass ? "passed" : "blocked")"
+  }
+
   private static func stringArray(_ value: Any?) -> [String] {
     if let values = value as? [String] {
       return values
@@ -460,8 +689,100 @@ extension MoreDataStore {
     return []
   }
 
-  static let automaticStreamProbeDuration: TimeInterval = 30 * 60
+  static let automaticStreamProbeDuration: TimeInterval = 5 * 60
   static let automaticStreamProbeWindowPadding: TimeInterval = 30
+  static let automaticStreamProbeStartRetryDelay: TimeInterval = 1
+  static let guidedReferenceProbePollDelay: TimeInterval = 1
+  static let guidedReferenceProbeTimeout: TimeInterval = 90
+
+  func startGuidedReferenceProbe(model: OpenVitalsAppModel) {
+    guard !guidedReferenceProbeInProgress else {
+      guidedReferenceProbeStatus = "Guided reference probe already starting"
+      return
+    }
+    guard !automaticStreamProbeInProgress else {
+      guidedReferenceProbeStatus = "Automatic probe is already running"
+      return
+    }
+    guard model.ble.connectionState == "ready" else {
+      guidedReferenceProbeStatus = "Connect the band first. Current state: \(model.ble.connectionState)"
+      return
+    }
+
+    guidedReferenceProbeWorkItem?.cancel()
+    guidedReferenceProbeWorkItem = nil
+    guidedReferenceProbeInProgress = true
+    guidedReferenceProbeStatus = "Starting RR reference, then automatic probe..."
+    if !rrReferenceCapture.isCapturing, !rrReferenceCapture.isScanning {
+      rrReferenceCapture.startScanning()
+    }
+    advanceGuidedReferenceProbe(model: model, startedAt: Date())
+  }
+
+  func cancelGuidedReferenceProbe() {
+    guidedReferenceProbeWorkItem?.cancel()
+    guidedReferenceProbeWorkItem = nil
+    guidedReferenceProbeInProgress = false
+    guidedReferenceProbeStatus = "Guided reference probe canceled"
+    if rrReferenceCapture.isScanning, !rrReferenceCapture.isCapturing {
+      rrReferenceCapture.stopScanning()
+    }
+  }
+
+  private func advanceGuidedReferenceProbe(model: OpenVitalsAppModel, startedAt: Date) {
+    guard guidedReferenceProbeInProgress else {
+      return
+    }
+    guard model.ble.connectionState == "ready" else {
+      guidedReferenceProbeInProgress = false
+      guidedReferenceProbeStatus = "Band disconnected before probe start. Current state: \(model.ble.connectionState)"
+      return
+    }
+    guard !automaticStreamProbeInProgress else {
+      guidedReferenceProbeInProgress = false
+      guidedReferenceProbeStatus = "RR reference ready; automatic probe is running"
+      return
+    }
+
+    if rrReferenceCapture.hasLiveRRSamples {
+      guidedReferenceProbeInProgress = false
+      guidedReferenceProbeWorkItem = nil
+      guidedReferenceProbeStatus = "RR reference ready with \(rrReferenceCapture.sampleCount) samples. Starting automatic probe."
+      startAutomaticStreamProbe(model: model)
+      return
+    }
+
+    let elapsed = Date().timeIntervalSince(startedAt)
+    if elapsed > Self.guidedReferenceProbeTimeout {
+      guidedReferenceProbeInProgress = false
+      guidedReferenceProbeStatus = "No RR samples yet. Check strap contact, then use Start Automatic Probe once RR samples appear."
+      return
+    }
+
+    if rrReferenceCapture.isCapturing {
+      guidedReferenceProbeStatus = "Waiting for RR samples from \(rrReferenceCapture.activeDeviceName)..."
+    } else if !rrReferenceCapture.discoveredDevices.isEmpty {
+      let deviceName = rrReferenceCapture.discoveredDevices.first?.name ?? "reference device"
+      guidedReferenceProbeStatus = "Connecting to \(deviceName)..."
+      _ = rrReferenceCapture.startCaptureFromBestDevice()
+    } else {
+      guidedReferenceProbeStatus = rrReferenceCapture.isScanning
+        ? "Scanning for RR reference device..."
+        : "Starting RR reference scan..."
+      if !rrReferenceCapture.isScanning {
+        rrReferenceCapture.startScanning()
+      }
+    }
+
+    let workItem = DispatchWorkItem { [weak self, weak model] in
+      guard let self, let model else {
+        return
+      }
+      self.advanceGuidedReferenceProbe(model: model, startedAt: startedAt)
+    }
+    guidedReferenceProbeWorkItem = workItem
+    DispatchQueue.main.asyncAfter(deadline: .now() + Self.guidedReferenceProbePollDelay, execute: workItem)
+  }
 
   func startAutomaticStreamProbe(model: OpenVitalsAppModel) {
     guard !automaticStreamProbeInProgress else {
@@ -475,8 +796,12 @@ extension MoreDataStore {
 
     automaticStreamProbeStopWorkItem?.cancel()
     automaticStreamProbeStopWorkItem = nil
+    guidedReferenceProbeWorkItem?.cancel()
+    guidedReferenceProbeWorkItem = nil
+    guidedReferenceProbeInProgress = false
     automaticStreamProbeInProgress = true
     automaticStreamProbeStartedAt = nil
+    model.cancelPendingPassiveActivityCapture(reason: "stream_probe_auto_start")
     automaticStreamProbeStatus = "Starting diagnostic packet capture..."
     streamProbeBaselineStart = ""
     streamProbeBaselineEnd = ""
@@ -485,15 +810,44 @@ extension MoreDataStore {
     streamProbeNextActions = []
     k20ChannelCandidates = []
     k20ChannelNextActions = []
+    k20WaveformCandidates = []
+    k20WaveformNextActions = []
+    beatEvidenceNextActions = []
+    k20WaveformScanStatus = "No K20 waveform transform scan"
+    beatEvidenceStatus = "No beat evidence report"
     localExportURL = nil
     localExportManifestURL = nil
 
     refreshStreamProbePlan()
 
+    continueAutomaticStreamProbeStart(model: model)
+  }
+
+  private func continueAutomaticStreamProbeStart(model: OpenVitalsAppModel) {
+    guard automaticStreamProbeInProgress else {
+      return
+    }
+
+    if model.healthPacketCaptureStartInProgress {
+      automaticStreamProbeStatus = "Waiting for the current capture start to finish..."
+      DispatchQueue.main.asyncAfter(deadline: .now() + Self.automaticStreamProbeStartRetryDelay) { [weak self, weak model] in
+        guard let self, let model else {
+          return
+        }
+        self.continueAutomaticStreamProbeStart(model: model)
+      }
+      return
+    }
+
     if model.healthPacketCaptureSessionID != nil {
       automaticStreamProbeStatus = "Stopping existing packet capture before starting automatic probe..."
-      model.stopHealthPacketCapture(reason: "stream_probe_auto_replace_existing_capture") { [weak self, weak model] in
+      model.stopHealthPacketCapture(reason: "stream_probe_auto_replace_existing_capture") { [weak self, weak model] stopped in
         guard let self, let model else {
+          return
+        }
+        guard stopped else {
+          self.automaticStreamProbeInProgress = false
+          self.automaticStreamProbeStatus = "Could not stop the existing capture: \(model.healthPacketCaptureStatus)"
           return
         }
         guard model.healthPacketCaptureSessionID == nil else {
@@ -527,6 +881,10 @@ extension MoreDataStore {
 
       let startedAt = model.healthPacketCaptureStartedAt ?? Date()
       self.automaticStreamProbeStartedAt = startedAt
+      if let sessionID = model.healthPacketCaptureSessionID {
+        self.streamProbeCaptureSessions = sessionID
+        self.rawCaptureSessions = sessionID
+      }
       self.streamProbeStart = startedAt.addingTimeInterval(-Self.automaticStreamProbeWindowPadding).moreISO8601String()
       self.streamProbeEnd = startedAt.addingTimeInterval(Self.automaticStreamProbeDuration + Self.automaticStreamProbeWindowPadding).moreISO8601String()
       self.rawExportStart = self.streamProbeStart
@@ -554,8 +912,8 @@ extension MoreDataStore {
     }
 
     automaticStreamProbeStatus = "Stopping capture and preparing analysis..."
-    model.stopHealthPacketCapture(reason: "stream_probe_auto_\(reason.replacingOccurrences(of: " ", with: "_"))") { [weak self] in
-      guard let self else {
+    model.stopHealthPacketCapture(reason: "stream_probe_auto_\(reason.replacingOccurrences(of: " ", with: "_"))") { [weak self, weak model] stopped in
+      guard let self, let model else {
         return
       }
       let endedAt = Date()
@@ -567,11 +925,37 @@ extension MoreDataStore {
       self.rawExportStart = self.streamProbeStart
       self.rawExportEnd = self.streamProbeEnd
       self.refreshRecentCaptureSessions()
-      self.automaticStreamProbeStatus = "Capture stopped. Running packet delta and K20 channel analysis, then creating the AirDrop bundle."
-      self.runStreamProbePacketDelta()
-      self.runK20ChannelScan()
-      self.saveLocalDataBundle()
+      guard stopped else {
+        self.automaticStreamProbeInProgress = false
+        self.automaticStreamProbeStatus = "Could not stop capture: \(model.healthPacketCaptureStatus). Wait a few seconds, then start the automatic probe again."
+        return
+      }
       self.automaticStreamProbeInProgress = false
+      if self.rrReferenceCapture.isCapturing {
+        self.automaticStreamProbeStatus = "Probe stopped. Stopping RR reference and storing samples..."
+        self.rrReferenceCapture.stopCapture()
+        self.waitForReferenceStorageBeforeExport(startedAt: Date())
+      } else if self.rrReferenceCapture.sampleCount > 0 && !self.rrReferenceCapture.storageReadyForExport {
+        self.automaticStreamProbeStatus = "Probe stopped. Waiting for RR storage before export..."
+        self.waitForReferenceStorageBeforeExport(startedAt: Date())
+      } else {
+        self.automaticStreamProbeStatus = "Probe stopped. Ready to create export bundle."
+      }
+    }
+  }
+
+  private func waitForReferenceStorageBeforeExport(startedAt: Date) {
+    if rrReferenceCapture.storageReadyForExport {
+      automaticStreamProbeStatus = "RR samples stored. Ready to create export bundle."
+      return
+    }
+    if Date().timeIntervalSince(startedAt) > Self.guidedReferenceProbeTimeout {
+      automaticStreamProbeStatus = "RR storage still not ready: \(rrReferenceCapture.lastFlushStatus). Wait or retry export after storage catches up."
+      return
+    }
+    automaticStreamProbeStatus = "Waiting for RR storage: \(rrReferenceCapture.lastFlushStatus)"
+    DispatchQueue.main.asyncAfter(deadline: .now() + Self.guidedReferenceProbePollDelay) { [weak self] in
+      self?.waitForReferenceStorageBeforeExport(startedAt: startedAt)
     }
   }
 
@@ -696,6 +1080,19 @@ struct MoreStreamProbePlanView: View {
     List {
       Section("Automatic Probe") {
         MoreActionRow(
+          title: store.guidedReferenceProbeInProgress ? "Cancel RR + Probe Start" : "Start RR + Probe",
+          detail: store.guidedReferenceProbeStatus,
+          systemImage: store.guidedReferenceProbeInProgress ? "xmark.circle" : "waveform.path.ecg.rectangle",
+          status: guidedProbeStatus,
+          disabled: guidedProbeDisabled
+        ) {
+          if store.guidedReferenceProbeInProgress {
+            store.cancelGuidedReferenceProbe()
+          } else {
+            store.startGuidedReferenceProbe(model: model)
+          }
+        }
+        MoreActionRow(
           title: store.automaticStreamProbeInProgress ? "Stop And Analyze Now" : "Start Automatic Probe",
           detail: automaticProbeDetail,
           systemImage: store.automaticStreamProbeInProgress ? "stop.circle" : "play.circle",
@@ -720,8 +1117,23 @@ struct MoreStreamProbePlanView: View {
           systemImage: "doc",
           status: store.localExportInProgress ? .inProgress : (store.localExportURL == nil ? .pending : .ready)
         )
-        if store.automaticStreamProbeInProgress || store.localExportInProgress {
-          ProgressView(store.automaticStreamProbeInProgress ? store.automaticStreamProbeStatus : store.localExportStatus)
+        MoreActionRow(
+          title: "Create Export Bundle",
+          detail: exportBundleDetail,
+          systemImage: "externaldrive.badge.plus",
+          status: exportBundleStatus,
+          disabled: exportBundleDisabled
+        ) {
+          store.saveLocalDataBundle()
+        }
+        if store.automaticStreamProbeInProgress {
+          ProgressView(store.automaticStreamProbeStatus)
+        }
+        if store.localExportInProgress {
+          MoreLocalExportProgressView(
+            progress: store.localExportProgress,
+            fallback: store.localExportStatus
+          )
         }
         if let localExportURL = store.localExportURL {
           ShareLink(item: localExportURL) {
@@ -800,6 +1212,27 @@ struct MoreStreamProbePlanView: View {
         }
       }
 
+      Section("Beat Evidence") {
+        MoreActionRow(
+          title: "Run Beat Evidence Report",
+          detail: store.beatEvidenceStatus,
+          systemImage: "heart.text.square",
+          status: beatEvidenceStatus,
+          disabled: store.beatEvidenceInProgress || store.streamProbeWindowIssueSummary() != nil
+        ) {
+          store.runBeatEvidenceReport()
+        }
+        if store.beatEvidenceInProgress {
+          ProgressView(store.beatEvidenceStatus)
+        }
+        MoreInfoRow(
+          title: "Status",
+          value: store.beatEvidenceStatus,
+          systemImage: "heart.text.square",
+          status: beatEvidenceStatus
+        )
+      }
+
       Section("Expected Families") {
         let families = store.streamProbeExpectedPacketFamilies.isEmpty ? MoreDataStore.defaultStreamProbeExpectedPacketFamilies : store.streamProbeExpectedPacketFamilies
         ForEach(families, id: \.self) { family in
@@ -859,6 +1292,44 @@ struct MoreStreamProbePlanView: View {
         }
       }
 
+      Section("K20 Waveform Transform") {
+        MoreActionRow(
+          title: "Run K20 Waveform Transform Scan",
+          detail: store.k20WaveformScanStatus,
+          systemImage: "waveform.path.ecg",
+          status: k20WaveformStatus,
+          disabled: store.k20WaveformScanInProgress || store.streamProbeWindowIssueSummary() != nil
+        ) {
+          store.runK20WaveformTransformScan()
+        }
+        if store.k20WaveformScanInProgress {
+          ProgressView(store.k20WaveformScanStatus)
+        }
+        MoreInfoRow(
+          title: "Status",
+          value: store.k20WaveformScanStatus,
+          systemImage: "waveform.path.ecg",
+          status: k20WaveformStatus
+        )
+        if store.k20WaveformCandidates.isEmpty {
+          MoreInfoRow(
+            title: "Transforms",
+            value: "Run K20 waveform transform scan",
+            systemImage: "chart.xyaxis.line",
+            status: .notRun
+          )
+        } else {
+          ForEach(store.k20WaveformCandidates.prefix(8)) { candidate in
+            MoreInfoRow(
+              title: "\(candidate.rank). offset \(candidate.offset)",
+              value: candidate.detail,
+              systemImage: "waveform.path.ecg",
+              status: candidate.status
+            )
+          }
+        }
+      }
+
       Section("K20 Channel Scan") {
         MoreActionRow(
           title: "Run K20 Channel Scan",
@@ -910,9 +1381,9 @@ struct MoreStreamProbePlanView: View {
         }
       }
 
-      if !store.k20ChannelNextActions.isEmpty {
-        Section("K20 Next Actions") {
-          ForEach(store.k20ChannelNextActions.prefix(6), id: \.self) { action in
+      if !store.beatEvidenceNextActions.isEmpty || !store.k20WaveformNextActions.isEmpty || !store.k20ChannelNextActions.isEmpty {
+        Section("Beat Evidence Next Actions") {
+          ForEach((store.beatEvidenceNextActions + store.k20WaveformNextActions + store.k20ChannelNextActions).prefix(8), id: \.self) { action in
             MoreInfoRow(
               title: "Action",
               value: action,
@@ -938,7 +1409,7 @@ struct MoreStreamProbePlanView: View {
     if store.automaticStreamProbeInProgress {
       return .listening
     }
-    if store.localExportInProgress || store.streamProbeDeltaInProgress || store.k20ChannelScanInProgress {
+    if store.localExportInProgress || store.streamProbeDeltaInProgress || store.k20ChannelScanInProgress || store.k20WaveformScanInProgress || store.beatEvidenceInProgress {
       return .inProgress
     }
     if store.automaticStreamProbeStatus.localizedCaseInsensitiveContains("could not start")
@@ -953,6 +1424,70 @@ struct MoreStreamProbePlanView: View {
     return .notRun
   }
 
+  private var guidedProbeStatus: MoreStatusKind {
+    if store.guidedReferenceProbeInProgress {
+      return .inProgress
+    }
+    if store.guidedReferenceProbeStatus.localizedCaseInsensitiveContains("ready")
+      || store.rrReferenceCapture.hasLiveRRSamples {
+      return .ready
+    }
+    if store.guidedReferenceProbeStatus.localizedCaseInsensitiveContains("connect the band")
+      || store.guidedReferenceProbeStatus.localizedCaseInsensitiveContains("disconnected")
+      || store.guidedReferenceProbeStatus.localizedCaseInsensitiveContains("no rr samples") {
+      return .blocked
+    }
+    return .notRun
+  }
+
+  private var guidedProbeDisabled: Bool {
+    if store.guidedReferenceProbeInProgress {
+      return false
+    }
+    return store.automaticStreamProbeInProgress
+      || store.localExportInProgress
+      || model.ble.connectionState != "ready"
+  }
+
+  private var exportBundleDetail: String {
+    if store.localExportInProgress {
+      return store.localExportStatus
+    }
+    if store.automaticStreamProbeInProgress || store.guidedReferenceProbeInProgress {
+      return "Wait for the probe to finish before exporting."
+    }
+    if store.rrReferenceCapture.sampleCount > 0 && !store.rrReferenceCapture.storageReadyForExport {
+      return "Wait for RR storage: \(store.rrReferenceCapture.lastFlushStatus)"
+    }
+    if store.localExportURL != nil {
+      return "Bundle ready. Share the local data file and manifest below."
+    }
+    return "Creates the local bundle that includes band packets and stored RR reference samples."
+  }
+
+  private var exportBundleStatus: MoreStatusKind {
+    if store.localExportInProgress {
+      return .inProgress
+    }
+    if store.localExportURL != nil {
+      return .ready
+    }
+    if store.automaticStreamProbeInProgress || store.guidedReferenceProbeInProgress {
+      return .waiting
+    }
+    if store.rrReferenceCapture.sampleCount > 0 && !store.rrReferenceCapture.storageReadyForExport {
+      return .waiting
+    }
+    return .pending
+  }
+
+  private var exportBundleDisabled: Bool {
+    store.localExportInProgress
+      || store.automaticStreamProbeInProgress
+      || store.guidedReferenceProbeInProgress
+      || (store.rrReferenceCapture.sampleCount > 0 && !store.rrReferenceCapture.storageReadyForExport)
+  }
+
   private var automaticProbeDetail: String {
     if store.automaticStreamProbeInProgress {
       return store.automaticStreamProbeStatus
@@ -965,6 +1500,12 @@ struct MoreStreamProbePlanView: View {
     }
     if store.streamProbeDeltaInProgress {
       return store.streamProbeDeltaStatus
+    }
+    if store.beatEvidenceInProgress {
+      return store.beatEvidenceStatus
+    }
+    if store.k20WaveformScanInProgress {
+      return store.k20WaveformScanStatus
     }
     if store.k20ChannelScanInProgress {
       return store.k20ChannelScanStatus
@@ -1013,6 +1554,36 @@ struct MoreStreamProbePlanView: View {
       return .blocked
     }
     return store.k20ChannelCandidates.isEmpty ? .notRun : .stale
+  }
+
+  private var k20WaveformStatus: MoreStatusKind {
+    if store.k20WaveformScanInProgress {
+      return .inProgress
+    }
+    if store.k20WaveformScanStatus.localizedCaseInsensitiveContains("passed") {
+      return .ready
+    }
+    if store.k20WaveformScanStatus.localizedCaseInsensitiveContains("blocked")
+      || store.k20WaveformScanStatus.localizedCaseInsensitiveContains("failed")
+    {
+      return .blocked
+    }
+    return store.k20WaveformCandidates.isEmpty ? .notRun : .stale
+  }
+
+  private var beatEvidenceStatus: MoreStatusKind {
+    if store.beatEvidenceInProgress {
+      return .inProgress
+    }
+    if store.beatEvidenceStatus.localizedCaseInsensitiveContains("passed") {
+      return .ready
+    }
+    if store.beatEvidenceStatus.localizedCaseInsensitiveContains("blocked")
+      || store.beatEvidenceStatus.localizedCaseInsensitiveContains("failed")
+    {
+      return .blocked
+    }
+    return store.beatEvidenceNextActions.isEmpty ? .notRun : .stale
   }
 
   private func icon(for step: MoreStreamProbeStep) -> String {

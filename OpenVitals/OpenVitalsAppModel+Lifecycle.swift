@@ -143,6 +143,7 @@ extension OpenVitalsAppModel {
           !autoStartTemperaturePacketCaptureOnReady,
           !autoStartPhysiologyPacketCaptureOnReady,
           !autoStartRespiratoryPacketWatchOnReady,
+          !healthPacketCaptureStartInProgress,
           activeHealthPacketCapture == nil else {
       return
     }
@@ -161,12 +162,22 @@ extension OpenVitalsAppModel {
     passiveActivityCaptureWorkItem = nil
     guard ble.connectionState == "ready",
           activeHealthPacketCapture == nil,
+          !healthPacketCaptureStartInProgress,
           !autoStartPhysiologyPacketCaptureOnReady,
           !activitySession.isActive else {
       return
     }
     ble.record(source: "activity.detect", title: "passive_capture.auto_start", body: reason)
     startHealthPacketCapture(duration: Self.passiveActivityCaptureDuration, source: "auto.passive_activity_detection")
+  }
+
+  func cancelPendingPassiveActivityCapture(reason: String) {
+    guard passiveActivityCaptureWorkItem != nil else {
+      return
+    }
+    passiveActivityCaptureWorkItem?.cancel()
+    passiveActivityCaptureWorkItem = nil
+    ble.record(level: .debug, source: "activity.detect", title: "passive_capture.cancelled", body: reason)
   }
 
   func startMovementPacketValidationTest(timeout: TimeInterval = 45) {

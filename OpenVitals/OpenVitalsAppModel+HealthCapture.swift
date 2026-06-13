@@ -90,6 +90,9 @@ extension OpenVitalsAppModel {
     completion: ((Bool) -> Void)? = nil
   ) {
     ble.record(source: "health.packet_capture", title: "start.requested", body: "source=\(source)")
+    if source != "auto.passive_activity_detection" {
+      cancelPendingPassiveActivityCapture(reason: "health_capture_start_\(source)")
+    }
     guard ble.connectionState == "ready" else {
       healthPacketCaptureStatus = "Connect device first. Current state: \(ble.connectionState)"
       ble.record(level: .warn, source: "health.packet_capture", title: "start.blocked", body: healthPacketCaptureStatus)
@@ -98,6 +101,12 @@ extension OpenVitalsAppModel {
     }
     guard activeHealthPacketCapture == nil else {
       healthPacketCaptureStatus = "Capture already active: \(healthPacketCaptureSessionID?.prefix(8) ?? "?")"
+      ble.record(level: .debug, source: "health.packet_capture", title: "start.skipped", body: healthPacketCaptureStatus)
+      completion?(false)
+      return
+    }
+    guard !healthPacketCaptureStartInProgress else {
+      healthPacketCaptureStatus = "Capture start already in progress"
       ble.record(level: .debug, source: "health.packet_capture", title: "start.skipped", body: healthPacketCaptureStatus)
       completion?(false)
       return
@@ -130,12 +139,14 @@ extension OpenVitalsAppModel {
     }
 
     healthPacketCaptureStatus = "Starting \(mode.statusPrefix.lowercased())..."
+    healthPacketCaptureStartInProgress = true
     OpenVitalsRustBridge.performInBackground(qos: .userInitiated, {
       try OpenVitalsRustBridge().request(method: "capture.start_session", args: args)
     }) { [weak self] result in
       guard let self else {
         return
       }
+      healthPacketCaptureStartInProgress = false
       switch result {
       case .success:
         healthPacketCaptureTimeoutWorkItem?.cancel()
@@ -179,7 +190,7 @@ extension OpenVitalsAppModel {
     }
   }
 
-  func stopHealthPacketCapture(reason: String = "manual_stop", completion: (() -> Void)? = nil) {
+  func stopHealthPacketCapture(reason: String = "manual_stop", completion: ((Bool) -> Void)? = nil) {
     healthPacketCaptureTimeoutWorkItem?.cancel()
     healthPacketCaptureStreamRetryWorkItem?.cancel()
     temperatureHistorySyncWorkItem?.cancel()
@@ -187,7 +198,7 @@ extension OpenVitalsAppModel {
     guard let capture = activeHealthPacketCapture else {
       healthPacketCaptureStatus = "No active health packet capture"
       ble.record(level: .debug, source: "health.packet_capture", title: "stop.skipped", body: reason)
-      completion?()
+      completion?(true)
       return
     }
 
@@ -202,7 +213,7 @@ extension OpenVitalsAppModel {
         title: "finish.deferred_active_activity",
         body: "\(capture.sessionID) reason=\(reason)"
       )
-      completion?()
+      completion?(false)
       return
     }
 
@@ -255,11 +266,11 @@ extension OpenVitalsAppModel {
         } else if capture.requestedStreams, capture.mode == .physiology || capture.mode == .diagnostic {
           ble.stopPhysiologySignalCapture()
         }
-        completion?()
+        completion?(true)
       case .failure(let error):
         healthPacketCaptureStatus = "Finish failed: \(String(describing: error))"
         ble.record(level: .error, source: "health.packet_capture", title: "finish.failed", body: String(describing: error))
-        completion?()
+        completion?(false)
       }
     }
   }
@@ -317,8 +328,14 @@ extension OpenVitalsAppModel {
     }
 
     dailyMetricSyncStatus = "Finishing packet import..."
-    stopHealthPacketCapture(reason: "home_daily_scores_sync_complete") { [weak self] in
-      self?.dailyMetricSyncStatus = "Packet import finished"
+    stopHealthPacketCapture(reason: "home_daily_scores_sync_complete") { [weak self] stopped in
+      guard let self else {
+        completion()
+        return
+      }
+      self.dailyMetricSyncStatus = stopped
+        ? "Packet import finished"
+        : "Packet import finish failed: \(self.healthPacketCaptureStatus)"
       completion()
     }
   }

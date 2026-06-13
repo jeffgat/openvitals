@@ -92,6 +92,8 @@ MVP rule: More owns operational surfaces: device, connection lab, capture/import
 - [ ] Show bundle validation, zip validation, privacy lint, and sanitized privacy statuses.
 - [x] Add a manual Supabase debug upload action that creates the local data bundle, uploads bundle/manifest objects, and records a queryable metadata row.
 - [x] Show Supabase debug upload states with explicit settings, object upload, manifest upload, metadata row, skipped, and failed labels instead of generic pending/ready badges.
+- [x] Snapshot the app SQLite database during local data export and skip live SQLite sidecars so exported bundles contain an internally consistent database copy.
+- [x] Show staged local-data export progress for database snapshot, bundle writing, validation, manifest hashing, and completion.
 
 ## Stream Probe Plan
 
@@ -99,6 +101,10 @@ MVP rule: More owns operational surfaces: device, connection lab, capture/import
 - [x] Show editable probe and baseline windows, expected packet families, ordered probe steps, safety gates, and expected evidence deltas.
 - [x] Add a packet-family delta analyzer that compares baseline/probe evidence and supports optional capture-session filters.
 - [x] Add a K20 optical-channel scanner that ranks channel peak-spacing candidates against nearby trusted heart-rate evidence while keeping results diagnostic-only.
+- [x] Add a K20 scalar/byte-field discovery report that ranks sampled K20 fields against nearby trusted heart-rate evidence while keeping results diagnostic-only.
+- [x] Add a K20 waveform transform scanner that sweeps channel, polarity, sample-rate, spacing, smoothing, and threshold parameters against nearby trusted HR and optional RR reference evidence.
+- [x] Add a combined Beat Evidence Report that runs packet delta, K20 waveform/channel/field scans, and K26 field scan from one button while keeping all outputs diagnostic-only.
+- [x] Add a guided RR + automatic probe action that scans/selects the reference strap, waits for live RR samples, starts the band probe, stops RR capture after the probe, and waits for RR storage before export.
 - [x] Keep the route analysis-only; live device command sends remain blocked behind command validation, explicit user intent, dry-run bytes, and rollback expectations.
 - [ ] Add a validated command execution flow only after command evidence and UI confirmations are ready.
 

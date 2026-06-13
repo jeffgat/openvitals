@@ -152,7 +152,10 @@ fn run() -> open_vitals_core::OpenVitalsResult<()> {
         ("--min-matching-segments", "min_matching_segments"),
         ("--max-ranked-candidates", "max_ranked_candidates"),
         ("--max-ranked-channels", "max_ranked_channels"),
+        ("--max-ranked-fields", "max_ranked_fields"),
+        ("--max-ranked-transforms", "max_ranked_transforms"),
         ("--max-segment-summaries", "max_segment_summaries"),
+        ("--max-analyzed-frames", "max_analyzed_frames"),
     ] {
         insert_usize_arg(&mut request_args, &args, arg, field)?;
     }
@@ -362,6 +365,25 @@ fn metric_bridge_method(value: &str) -> open_vitals_core::OpenVitalsResult<&'sta
         | "k20-optical-channel-scan"
         | "k20_optical_channel_scan"
         | "metrics.k20_optical_channel_scan" => Ok("metrics.k20_optical_channel_scan"),
+        "k20-waveform-transform-scan"
+        | "k20_waveform_transform_scan"
+        | "k20-waveform-scan"
+        | "k20_waveform_scan"
+        | "k20-transform-scan"
+        | "k20_transform_scan"
+        | "metrics.k20_waveform_transform_scan" => Ok("metrics.k20_waveform_transform_scan"),
+        "k20-field-discovery"
+        | "k20_field_discovery"
+        | "k20-field-scan"
+        | "k20_field_scan"
+        | "k20-byte-field-scan"
+        | "k20_byte_field_scan"
+        | "metrics.k20_field_discovery" => Ok("metrics.k20_field_discovery"),
+        "beat-evidence"
+        | "beat_evidence"
+        | "beat-evidence-report"
+        | "beat_evidence_report"
+        | "metrics.beat_evidence_report" => Ok("metrics.beat_evidence_report"),
         "hrv-validation"
         | "hrv_capture_validation"
         | "hrv-capture-validation"

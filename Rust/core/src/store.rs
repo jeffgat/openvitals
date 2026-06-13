@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, path::Path};
+use std::{collections::BTreeSet, path::Path, time::Duration};
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params, params_from_iter};
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,7 @@ use crate::{
 
 pub const CURRENT_SCHEMA_VERSION: i64 = 15;
 pub const DEFAULT_RAW_EVIDENCE_PAYLOAD_RETENTION_LIMIT_BYTES: i64 = 512 * 1024 * 1024;
+const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(15);
 
 const ALLOWED_METRIC_SOURCE_KINDS: [&str; 4] = [
     "device_counter",
@@ -953,6 +954,7 @@ pub struct DebugEventRow {
 impl OpenVitalsStore {
     pub fn open(path: &Path) -> OpenVitalsResult<Self> {
         let conn = Connection::open(path)?;
+        configure_connection(&conn)?;
         let store = Self { conn };
         store.migrate()?;
         Ok(store)
@@ -960,12 +962,14 @@ impl OpenVitalsStore {
 
     pub fn open_read_only(path: &Path) -> OpenVitalsResult<Self> {
         let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        configure_connection(&conn)?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         Ok(Self { conn })
     }
 
     pub fn open_in_memory() -> OpenVitalsResult<Self> {
         let conn = Connection::open_in_memory()?;
+        configure_connection(&conn)?;
         let store = Self { conn };
         store.migrate()?;
         Ok(store)
@@ -6315,6 +6319,11 @@ impl OpenVitalsStore {
             .query_row("PRAGMA integrity_check", [], |row| row.get(0))
             .map_err(OpenVitalsError::from)
     }
+}
+
+fn configure_connection(conn: &Connection) -> OpenVitalsResult<()> {
+    conn.busy_timeout(SQLITE_BUSY_TIMEOUT)?;
+    Ok(())
 }
 
 impl OpenVitalsStore {

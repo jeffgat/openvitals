@@ -78,11 +78,21 @@ final class MoreDataStore: ObservableObject {
   @Published var k20ChannelScanInProgress = false
   @Published var k20ChannelCandidates: [MoreK20ChannelCandidate] = []
   @Published var k20ChannelNextActions: [String] = []
+  @Published var k20WaveformScanStatus = "No K20 waveform transform scan"
+  @Published var k20WaveformScanInProgress = false
+  @Published var k20WaveformCandidates: [MoreK20WaveformCandidate] = []
+  @Published var k20WaveformNextActions: [String] = []
+  @Published var beatEvidenceStatus = "No beat evidence report"
+  @Published var beatEvidenceInProgress = false
+  @Published var beatEvidenceNextActions: [String] = []
+  @Published var guidedReferenceProbeStatus = "No guided reference probe run"
+  @Published var guidedReferenceProbeInProgress = false
   @Published var automaticStreamProbeStatus = "No automatic stream probe run"
   @Published var automaticStreamProbeInProgress = false
   @Published var automaticStreamProbeStartedAt: Date?
   @Published var localExportStatus = "No local export"
   @Published var localExportInProgress = false
+  @Published var localExportProgress: OpenVitalsLocalDataExportProgress?
   @Published var localExportURL: URL?
   @Published var localExportManifestURL: URL?
   @Published var supabaseProjectURL: String
@@ -151,6 +161,7 @@ final class MoreDataStore: ObservableObject {
   }
   var debugSessionID = "swift-more-\(UUID().uuidString)"
   var automaticStreamProbeStopWorkItem: DispatchWorkItem?
+  var guidedReferenceProbeWorkItem: DispatchWorkItem?
   lazy var rrReferenceCapture = OpenVitalsRRReferenceCapture(databasePath: databasePath)
 
   init(databasePath: String? = nil) {
@@ -224,19 +235,23 @@ final class MoreDataStore: ObservableObject {
   }
 
   private var streamProbeRouteStatus: MoreStatusKind {
-    if automaticStreamProbeInProgress || streamProbePlanInProgress || streamProbeDeltaInProgress || k20ChannelScanInProgress {
+    if guidedReferenceProbeInProgress || automaticStreamProbeInProgress || streamProbePlanInProgress || streamProbeDeltaInProgress || k20ChannelScanInProgress || k20WaveformScanInProgress || beatEvidenceInProgress {
       return .inProgress
     }
     if streamProbePlanStatus.localizedCaseInsensitiveContains("blocked")
       || streamProbeDeltaStatus.localizedCaseInsensitiveContains("blocked")
       || k20ChannelScanStatus.localizedCaseInsensitiveContains("blocked")
+      || k20WaveformScanStatus.localizedCaseInsensitiveContains("blocked")
+      || beatEvidenceStatus.localizedCaseInsensitiveContains("blocked")
       || streamProbePlanStatus.localizedCaseInsensitiveContains("failed")
       || streamProbeDeltaStatus.localizedCaseInsensitiveContains("failed")
       || k20ChannelScanStatus.localizedCaseInsensitiveContains("failed")
+      || k20WaveformScanStatus.localizedCaseInsensitiveContains("failed")
+      || beatEvidenceStatus.localizedCaseInsensitiveContains("failed")
     {
       return .blocked
     }
-    if !streamProbePacketDeltas.isEmpty || !k20ChannelCandidates.isEmpty {
+    if !streamProbePacketDeltas.isEmpty || !k20ChannelCandidates.isEmpty || !k20WaveformCandidates.isEmpty || !beatEvidenceNextActions.isEmpty {
       return .ready
     }
     return streamProbeSteps.isEmpty ? .notRun : .pending
@@ -523,7 +538,12 @@ final class MoreDataStore: ObservableObject {
     automaticStreamProbeStartedAt = nil
     automaticStreamProbeStopWorkItem?.cancel()
     automaticStreamProbeStopWorkItem = nil
+    guidedReferenceProbeStatus = "No guided reference probe run"
+    guidedReferenceProbeInProgress = false
+    guidedReferenceProbeWorkItem?.cancel()
+    guidedReferenceProbeWorkItem = nil
     localExportStatus = "No local export"
+    localExportProgress = nil
     localExportURL = nil
     localExportManifestURL = nil
     supabaseUploadStatus = supabaseUploadIsConfigured ? "Ready to upload debug bundle" : "Not configured"

@@ -36,6 +36,9 @@ pub const BEAT_INTERVAL_HR_VALIDATION_REPORT_SCHEMA: &str =
 pub const K26_BEAT_FIELD_SCAN_REPORT_SCHEMA: &str = "open_vitals.k26-beat-field-scan-report.v1";
 pub const K20_OPTICAL_CHANNEL_SCAN_REPORT_SCHEMA: &str =
     "open_vitals.k20-optical-channel-scan-report.v1";
+pub const K20_WAVEFORM_TRANSFORM_SCAN_REPORT_SCHEMA: &str =
+    "open_vitals.k20-waveform-transform-scan-report.v1";
+pub const K20_FIELD_DISCOVERY_REPORT_SCHEMA: &str = "open_vitals.k20-field-discovery-report.v1";
 pub const HRV_CAPTURE_VALIDATION_REPORT_SCHEMA: &str =
     "open_vitals.hrv-capture-validation-report.v1";
 pub const VITAL_EVENT_FEATURE_REPORT_SCHEMA: &str = "open_vitals.vital-event-feature-report.v1";
@@ -129,6 +132,30 @@ pub struct K20OpticalChannelScanOptions {
     pub min_matching_segments: usize,
     pub max_ranked_channels: usize,
     pub max_segment_summaries: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct K20WaveformTransformScanOptions {
+    pub min_owned_captures_per_summary: usize,
+    pub sample_rate_hz_values: Vec<f64>,
+    pub min_peak_spacing_samples_values: Vec<usize>,
+    pub smoothing_window_samples_values: Vec<usize>,
+    pub threshold_stddev_multipliers: Vec<f64>,
+    pub max_hr_match_lag_seconds: f64,
+    pub hr_tolerance_bpm: f64,
+    pub min_matching_segments: usize,
+    pub max_ranked_transforms: usize,
+    pub max_segment_summaries: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct K20FieldDiscoveryOptions {
+    pub min_owned_captures_per_summary: usize,
+    pub max_hr_match_lag_seconds: f64,
+    pub min_matching_frames: usize,
+    pub max_ranked_fields: usize,
+    pub max_frame_summaries: usize,
+    pub max_analyzed_frames: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -282,6 +309,36 @@ impl Default for K20OpticalChannelScanOptions {
             min_matching_segments: 2,
             max_ranked_channels: 12,
             max_segment_summaries: 12,
+        }
+    }
+}
+
+impl Default for K20WaveformTransformScanOptions {
+    fn default() -> Self {
+        Self {
+            min_owned_captures_per_summary: DEFAULT_MIN_OWNED_CAPTURES_PER_SUMMARY,
+            sample_rate_hz_values: vec![20.0, 25.0, 30.0, 50.0],
+            min_peak_spacing_samples_values: vec![6, 8, 10, 12],
+            smoothing_window_samples_values: vec![5, 13, 25, 50],
+            threshold_stddev_multipliers: vec![0.25, 0.35, 0.45, 0.65, 0.85],
+            max_hr_match_lag_seconds: 10.0,
+            hr_tolerance_bpm: 8.0,
+            min_matching_segments: 2,
+            max_ranked_transforms: 16,
+            max_segment_summaries: 16,
+        }
+    }
+}
+
+impl Default for K20FieldDiscoveryOptions {
+    fn default() -> Self {
+        Self {
+            min_owned_captures_per_summary: DEFAULT_MIN_OWNED_CAPTURES_PER_SUMMARY,
+            max_hr_match_lag_seconds: 10.0,
+            min_matching_frames: 20,
+            max_ranked_fields: 24,
+            max_frame_summaries: 24,
+            max_analyzed_frames: 600,
         }
     }
 }
@@ -1080,6 +1137,162 @@ pub struct K20OpticalChannelSegmentSummary {
     pub rr_within_tolerance: Option<bool>,
     pub quality_flags: Vec<String>,
     pub provenance: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct K20WaveformTransformScanReport {
+    pub schema: String,
+    pub generated_by: String,
+    pub pass: bool,
+    pub validation_status: String,
+    pub start_time: String,
+    pub end_time: String,
+    pub decoded_frame_count: usize,
+    pub k20_frame_count: usize,
+    pub realtime_k20_frame_count: usize,
+    pub candidate_segment_count: usize,
+    pub matched_segment_count: usize,
+    pub rr_reference_sample_count: usize,
+    pub rr_reference_matched_segment_count: usize,
+    pub rr_reference_tolerance_ms: f64,
+    pub heart_rate_feature_count: usize,
+    pub trusted_heart_rate_feature_count: usize,
+    pub tested_transform_count: usize,
+    pub sample_rate_hz_values: Vec<f64>,
+    pub min_peak_spacing_samples_values: Vec<usize>,
+    pub smoothing_window_samples_values: Vec<usize>,
+    pub threshold_stddev_multipliers: Vec<f64>,
+    pub max_hr_match_lag_seconds: f64,
+    pub hr_tolerance_bpm: f64,
+    pub ranked_transforms: Vec<K20WaveformTransformCandidateSummary>,
+    pub segment_summaries: Vec<K20WaveformTransformSegmentSummary>,
+    pub issues: Vec<String>,
+    #[serde(default)]
+    pub next_actions: Vec<MetricFeatureNextAction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct K20WaveformTransformCandidateSummary {
+    pub rank: usize,
+    pub channel_id: String,
+    pub offset: usize,
+    pub polarity: String,
+    pub sample_rate_hz: f64,
+    pub min_peak_spacing_samples: usize,
+    pub smoothing_window_samples: usize,
+    pub threshold_stddev_multiplier: f64,
+    pub matched_segment_count: usize,
+    pub usable_segment_count: usize,
+    pub within_tolerance_count: usize,
+    pub within_tolerance_fraction: Option<f64>,
+    pub mean_absolute_error_bpm: Option<f64>,
+    pub median_absolute_error_bpm: Option<f64>,
+    pub mean_candidate_hr_bpm: Option<f64>,
+    pub mean_reference_hr_bpm: Option<f64>,
+    pub median_candidate_rr_ms: Option<f64>,
+    pub rr_reference_matched_segment_count: usize,
+    pub rr_reference_within_tolerance_count: usize,
+    pub rr_reference_within_tolerance_fraction: Option<f64>,
+    pub mean_absolute_error_rr_ms: Option<f64>,
+    pub median_absolute_error_rr_ms: Option<f64>,
+    pub mean_reference_rr_ms: Option<f64>,
+    pub median_rmssd_ms: Option<f64>,
+    pub median_sdnn_ms: Option<f64>,
+    pub median_interval_count: Option<f64>,
+    pub quality_flags: Vec<String>,
+    pub provenance: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct K20WaveformTransformSegmentSummary {
+    pub capture_session_id: Option<String>,
+    pub segment_index: usize,
+    pub start_time: String,
+    pub end_time: String,
+    pub frame_count: usize,
+    pub channel_id: String,
+    pub offset: usize,
+    pub polarity: String,
+    pub sample_rate_hz: f64,
+    pub min_peak_spacing_samples: usize,
+    pub smoothing_window_samples: usize,
+    pub threshold_stddev_multiplier: f64,
+    pub interval_count: usize,
+    pub rr_intervals_ms_preview: Vec<f64>,
+    pub candidate_hr_bpm: Option<f64>,
+    pub candidate_rmssd_ms: Option<f64>,
+    pub candidate_sdnn_ms: Option<f64>,
+    pub matched_hr_bpm: Option<f64>,
+    pub matched_hr_sample_count: usize,
+    pub absolute_error_bpm: Option<f64>,
+    pub within_tolerance: Option<bool>,
+    pub matched_reference_rr_ms: Option<f64>,
+    pub matched_reference_rr_sample_count: usize,
+    pub absolute_error_rr_ms: Option<f64>,
+    pub rr_within_tolerance: Option<bool>,
+    pub quality_flags: Vec<String>,
+    pub provenance: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct K20FieldDiscoveryReport {
+    pub schema: String,
+    pub generated_by: String,
+    pub pass: bool,
+    pub validation_status: String,
+    pub start_time: String,
+    pub end_time: String,
+    pub decoded_frame_count: usize,
+    pub k20_frame_count: usize,
+    pub realtime_k20_frame_count: usize,
+    pub matched_k20_frame_count: usize,
+    pub analyzed_k20_frame_count: usize,
+    pub max_analyzed_frames: usize,
+    pub max_body_len: usize,
+    pub heart_rate_feature_count: usize,
+    pub trusted_heart_rate_feature_count: usize,
+    pub max_hr_match_lag_seconds: f64,
+    pub min_matching_frames: usize,
+    pub ranked_fields: Vec<K20FieldCorrelationSummary>,
+    pub frame_summaries: Vec<K20FieldFrameSummary>,
+    pub issues: Vec<String>,
+    #[serde(default)]
+    pub next_actions: Vec<MetricFeatureNextAction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct K20FieldCorrelationSummary {
+    pub rank: usize,
+    pub offset: usize,
+    pub width: usize,
+    pub endian: String,
+    pub signed: bool,
+    pub region: String,
+    pub matched_frame_count: usize,
+    pub distinct_raw_value_count: usize,
+    pub min_raw_value: Option<f64>,
+    pub median_raw_value: Option<f64>,
+    pub max_raw_value: Option<f64>,
+    pub pearson_correlation_to_hr_bpm: Option<f64>,
+    pub pearson_correlation_to_rr_ms: Option<f64>,
+    pub absolute_correlation_score: Option<f64>,
+    pub quality_flags: Vec<String>,
+    pub provenance: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct K20FieldFrameSummary {
+    pub frame_id: String,
+    pub evidence_id: String,
+    pub captured_at: String,
+    pub packet_type_name: Option<String>,
+    pub sample_time: String,
+    pub sample_time_source: String,
+    pub body_byte_count: usize,
+    pub matched_hr_bpm: Option<f64>,
+    pub matched_hr_sample_time: Option<String>,
+    pub match_lag_seconds: Option<f64>,
+    pub quality_flags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -3357,6 +3570,607 @@ pub fn run_k20_optical_channel_scan(
     })
 }
 
+pub fn run_k20_waveform_transform_scan_for_store(
+    store: &OpenVitalsStore,
+    database_path: &str,
+    start: &str,
+    end: &str,
+    options: K20WaveformTransformScanOptions,
+) -> OpenVitalsResult<K20WaveformTransformScanReport> {
+    let decoded_rows = store.decoded_frames_between(start, end)?;
+    let correlation = run_capture_correlation_for_store(
+        store,
+        database_path,
+        start,
+        end,
+        CaptureCorrelationOptions {
+            min_owned_captures_per_summary: options.min_owned_captures_per_summary,
+            require_owned_captures: false,
+        },
+    )?;
+    let heart_rate_report = run_heart_rate_feature_report(
+        &decoded_rows,
+        &correlation,
+        HeartRateFeatureOptions {
+            min_owned_captures_per_summary: options.min_owned_captures_per_summary,
+            require_trusted_evidence: false,
+        },
+    )?;
+    let rr_reference_samples = store.rr_reference_samples_between(start, end)?;
+    run_k20_waveform_transform_scan(
+        &decoded_rows,
+        &heart_rate_report,
+        &rr_reference_samples,
+        start,
+        end,
+        options,
+    )
+}
+
+pub fn run_k20_waveform_transform_scan(
+    decoded_rows: &[DecodedFrameRow],
+    heart_rate_report: &HeartRateFeatureReport,
+    rr_reference_samples: &[RrReferenceSampleRow],
+    start: &str,
+    end: &str,
+    options: K20WaveformTransformScanOptions,
+) -> OpenVitalsResult<K20WaveformTransformScanReport> {
+    let default_options = K20WaveformTransformScanOptions::default();
+    let sample_rate_hz_values = sanitize_f64_grid(
+        &options.sample_rate_hz_values,
+        &default_options.sample_rate_hz_values,
+        1.0,
+        250.0,
+    );
+    let min_peak_spacing_samples_values = sanitize_usize_grid(
+        &options.min_peak_spacing_samples_values,
+        &default_options.min_peak_spacing_samples_values,
+        1,
+        250,
+    );
+    let smoothing_window_samples_values = sanitize_usize_grid(
+        &options.smoothing_window_samples_values,
+        &default_options.smoothing_window_samples_values,
+        1,
+        500,
+    );
+    let threshold_stddev_multipliers = sanitize_f64_grid(
+        &options.threshold_stddev_multipliers,
+        &default_options.threshold_stddev_multipliers,
+        0.01,
+        10.0,
+    );
+    let max_hr_match_lag_seconds =
+        if options.max_hr_match_lag_seconds.is_finite() && options.max_hr_match_lag_seconds > 0.0 {
+            options.max_hr_match_lag_seconds
+        } else {
+            10.0
+        };
+    let hr_tolerance_bpm = if options.hr_tolerance_bpm.is_finite() && options.hr_tolerance_bpm > 0.0
+    {
+        options.hr_tolerance_bpm
+    } else {
+        8.0
+    };
+    let min_matching_segments = options.min_matching_segments.max(1);
+    let max_ranked_transforms = options.max_ranked_transforms.max(1);
+    let max_segment_summaries = options.max_segment_summaries;
+    let max_hr_match_lag_ms = (max_hr_match_lag_seconds * 1_000.0).round() as i64;
+
+    let trusted_heart_rates = heart_rate_report
+        .features
+        .iter()
+        .filter(|feature| feature.trusted_metric_input)
+        .filter_map(|feature| {
+            heart_rate_feature_time_unix_ms(feature).map(|unix_ms| (unix_ms, feature))
+        })
+        .collect::<Vec<_>>();
+    let trusted_heart_rate_feature_count = trusted_heart_rates.len();
+    let rr_reference_points = rr_reference_samples
+        .iter()
+        .filter_map(|sample| {
+            parse_rfc3339_utc_unix_ms(&sample.captured_at)
+                .map(|unix_ms| (unix_ms, sample.rr_interval_ms))
+        })
+        .collect::<Vec<_>>();
+    let rr_reference_sample_count = rr_reference_points.len();
+
+    let mut k20_frame_count = 0usize;
+    let mut realtime_k20_frames = Vec::new();
+    for row in decoded_rows {
+        let parsed_payload = parsed_payload_from_row(row)?;
+        let Some(ParsedPayload::DataPacket {
+            packet_k: Some(20),
+            body_hex,
+            timestamp_seconds,
+            timestamp_subseconds,
+            ..
+        }) = parsed_payload
+        else {
+            continue;
+        };
+        k20_frame_count += 1;
+        if row.packet_type_name.as_deref() != Some("REALTIME_RAW_DATA") {
+            continue;
+        }
+        let body = decode_hex_with_whitespace(&body_hex)?;
+        if !k20_body_has_any_channel(&body) {
+            continue;
+        }
+        let mut sample_time_flags = BTreeSet::new();
+        let sample_time = normalized_sample_time(
+            row,
+            timestamp_seconds,
+            timestamp_subseconds,
+            &mut sample_time_flags,
+        );
+        let sample_time_unix_ms = sample_time
+            .unix_ms
+            .or_else(|| parse_rfc3339_utc_unix_ms(&sample_time.time));
+        realtime_k20_frames.push(K20OpticalFrameData {
+            body,
+            sample_time,
+            sample_time_flags,
+            sample_time_unix_ms,
+        });
+    }
+
+    let realtime_k20_frame_count = realtime_k20_frames.len();
+    let mut segments = k20_segments(realtime_k20_frames);
+    let mut candidate_segments = Vec::new();
+    let mut tested_transform_count = 0usize;
+    for segment in &mut segments {
+        let Some(start_ms) = segment.start_unix_ms() else {
+            continue;
+        };
+        let Some(end_ms) = segment.end_unix_ms() else {
+            continue;
+        };
+        let reference_hrs = heart_rate_features_in_window(
+            start_ms,
+            end_ms,
+            &trusted_heart_rates,
+            max_hr_match_lag_ms,
+        )
+        .into_iter()
+        .map(|feature| feature.heart_rate_bpm)
+        .collect::<Vec<_>>();
+        let matched_hr_bpm = median_f64(reference_hrs.clone()).map(round_1);
+        let reference_rr_intervals = rr_reference_intervals_in_window(
+            start_ms,
+            end_ms,
+            &rr_reference_points,
+            K20_RR_REFERENCE_MAX_LAG_MS,
+        );
+        let matched_reference_rr_ms = median_f64(reference_rr_intervals.clone()).map(round_1);
+
+        for channel in k20_channel_specs() {
+            let Some(samples) = segment.channel_values(channel.offset) else {
+                continue;
+            };
+            for polarity in [K20PeakPolarity::Positive, K20PeakPolarity::Negative] {
+                for sample_rate_hz in &sample_rate_hz_values {
+                    for min_peak_spacing_samples in &min_peak_spacing_samples_values {
+                        for smoothing_window_samples in &smoothing_window_samples_values {
+                            for threshold_stddev_multiplier in &threshold_stddev_multipliers {
+                                tested_transform_count += 1;
+                                let intervals_ms = k20_channel_peak_intervals_ms_with_transform(
+                                    &samples,
+                                    *sample_rate_hz,
+                                    *min_peak_spacing_samples,
+                                    polarity,
+                                    *smoothing_window_samples,
+                                    *threshold_stddev_multiplier,
+                                );
+                                if intervals_ms.len() < 3 {
+                                    continue;
+                                }
+                                let candidate_hr_bpm = median_f64(
+                                    intervals_ms
+                                        .iter()
+                                        .filter_map(|interval| {
+                                            (*interval > 0.0).then_some(60_000.0 / *interval)
+                                        })
+                                        .collect(),
+                                )
+                                .map(round_1);
+                                let candidate_rmssd_ms = rmssd_ms(&intervals_ms).map(round_1);
+                                let candidate_sdnn_ms = sdnn_ms(&intervals_ms).map(round_1);
+                                let candidate_rr_ms = median_f64(intervals_ms.clone()).map(round_1);
+                                let absolute_error_bpm = candidate_hr_bpm.zip(matched_hr_bpm).map(
+                                    |(candidate, reference)| round_1((candidate - reference).abs()),
+                                );
+                                let within_tolerance =
+                                    absolute_error_bpm.map(|error| error <= hr_tolerance_bpm);
+                                let absolute_error_rr_ms = candidate_rr_ms
+                                    .zip(matched_reference_rr_ms)
+                                    .map(|(candidate, reference)| {
+                                        round_1((candidate - reference).abs())
+                                    });
+                                let rr_within_tolerance = absolute_error_rr_ms
+                                    .map(|error| error <= K20_RR_REFERENCE_TOLERANCE_MS);
+                                let mut quality_flags = segment.sample_time_flags();
+                                quality_flags.insert("diagnostic_only_not_score_input".to_string());
+                                quality_flags
+                                    .insert("k20_waveform_transform_candidate".to_string());
+                                quality_flags.insert("time_sliced_validation_segment".to_string());
+                                quality_flags.insert("parameter_sweep_heuristic_only".to_string());
+                                if matched_hr_bpm.is_none() {
+                                    quality_flags
+                                        .insert("no_nearby_trusted_hr_reference".to_string());
+                                }
+                                if within_tolerance == Some(true) {
+                                    quality_flags
+                                        .insert("hr_alignment_within_tolerance".to_string());
+                                } else if absolute_error_bpm.is_some() {
+                                    quality_flags
+                                        .insert("hr_alignment_outside_tolerance".to_string());
+                                }
+                                if matched_reference_rr_ms.is_none() {
+                                    quality_flags.insert("no_nearby_rr_reference".to_string());
+                                } else if rr_within_tolerance == Some(true) {
+                                    quality_flags.insert(
+                                        "rr_reference_alignment_within_tolerance".to_string(),
+                                    );
+                                } else if absolute_error_rr_ms.is_some() {
+                                    quality_flags.insert(
+                                        "rr_reference_alignment_outside_tolerance".to_string(),
+                                    );
+                                }
+
+                                candidate_segments.push(K20WaveformTransformSegmentSummary {
+                                    capture_session_id: None,
+                                    segment_index: segment.index,
+                                    start_time: segment.start_time().unwrap_or_default(),
+                                    end_time: segment.end_time().unwrap_or_default(),
+                                    frame_count: segment.frames.len(),
+                                    channel_id: channel.id.to_string(),
+                                    offset: channel.offset,
+                                    polarity: polarity.as_str().to_string(),
+                                    sample_rate_hz: round_3(*sample_rate_hz),
+                                    min_peak_spacing_samples: *min_peak_spacing_samples,
+                                    smoothing_window_samples: *smoothing_window_samples,
+                                    threshold_stddev_multiplier: round_3(
+                                        *threshold_stddev_multiplier,
+                                    ),
+                                    interval_count: intervals_ms.len(),
+                                    rr_intervals_ms_preview: intervals_ms
+                                        .iter()
+                                        .take(12)
+                                        .copied()
+                                        .collect(),
+                                    candidate_hr_bpm,
+                                    candidate_rmssd_ms,
+                                    candidate_sdnn_ms,
+                                    matched_hr_bpm,
+                                    matched_hr_sample_count: reference_hrs.len(),
+                                    absolute_error_bpm,
+                                    within_tolerance,
+                                    matched_reference_rr_ms,
+                                    matched_reference_rr_sample_count: reference_rr_intervals.len(),
+                                    absolute_error_rr_ms,
+                                    rr_within_tolerance,
+                                    quality_flags: quality_flags.into_iter().collect(),
+                                    provenance: json!({
+                                        "input_source": "decoded_frame",
+                                        "packet_k": 20,
+                                        "domain": "raw_or_research_counted",
+                                        "channel_offset": channel.offset,
+                                        "sample_rate_hz": round_3(*sample_rate_hz),
+                                        "min_peak_spacing_samples": min_peak_spacing_samples,
+                                        "smoothing_window_samples": smoothing_window_samples,
+                                        "threshold_stddev_multiplier": round_3(*threshold_stddev_multiplier),
+                                        "segment_max_duration_ms": K20_SEGMENT_MAX_DURATION_MS,
+                                        "promotion_policy": "diagnostic_only_requires_external_rr_reference_before_hrv",
+                                        "validation_policy": "K20 channel waveform parameter sweep ranked against nearby trusted HR and optional RR reference",
+                                        "rr_reference_tolerance_ms": K20_RR_REFERENCE_TOLERANCE_MS,
+                                    }),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let matched_segment_count = candidate_segments
+        .iter()
+        .filter(|segment| segment.absolute_error_bpm.is_some())
+        .count();
+    let rr_reference_matched_segment_count = candidate_segments
+        .iter()
+        .filter(|segment| segment.absolute_error_rr_ms.is_some())
+        .count();
+    let mut ranked_transforms = k20_ranked_waveform_transform_candidates(
+        &candidate_segments,
+        hr_tolerance_bpm,
+        max_ranked_transforms,
+    );
+    let best = ranked_transforms.first();
+    let has_enough_candidate =
+        best.is_some_and(|candidate| candidate.matched_segment_count >= min_matching_segments);
+    let has_enough_rr_reference_candidate = best.is_some_and(|candidate| {
+        candidate.rr_reference_matched_segment_count >= min_matching_segments
+    });
+
+    let mut issues = Vec::new();
+    if k20_frame_count == 0 {
+        issues.push("no_k20_candidate_frames".to_string());
+    }
+    if realtime_k20_frame_count == 0 {
+        issues.push("no_realtime_k20_frames_with_channel_bodies".to_string());
+    }
+    if trusted_heart_rate_feature_count == 0 {
+        issues.push("no_trusted_heart_rate_reference_features".to_string());
+    }
+    if candidate_segments.is_empty() {
+        issues.push("no_k20_waveform_transform_candidates".to_string());
+    }
+    if !ranked_transforms.is_empty() && !has_enough_candidate {
+        issues.push("not_enough_k20_waveform_hr_matches".to_string());
+    }
+    if has_enough_candidate
+        && best
+            .and_then(|candidate| candidate.within_tolerance_fraction)
+            .is_some_and(|fraction| fraction < 0.8)
+    {
+        issues.push("best_k20_waveform_alignment_below_threshold".to_string());
+    }
+    if rr_reference_sample_count == 0 {
+        issues.push("no_rr_reference_samples".to_string());
+    } else if !ranked_transforms.is_empty() && !has_enough_rr_reference_candidate {
+        issues.push("not_enough_k20_waveform_rr_reference_matches".to_string());
+    } else if has_enough_rr_reference_candidate
+        && best
+            .and_then(|candidate| candidate.rr_reference_within_tolerance_fraction)
+            .is_some_and(|fraction| fraction < 0.8)
+    {
+        issues.push("best_k20_waveform_rr_reference_alignment_below_threshold".to_string());
+    }
+
+    let validation_status =
+        k20_waveform_transform_scan_status(best, &issues, min_matching_segments);
+    let next_actions = k20_waveform_transform_scan_next_actions(&issues, &validation_status);
+    let segment_summaries = best
+        .map(|candidate| {
+            candidate_segments
+                .iter()
+                .filter(|segment| k20_waveform_segment_matches_candidate(segment, candidate))
+                .take(max_segment_summaries)
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    ranked_transforms.truncate(max_ranked_transforms);
+
+    Ok(K20WaveformTransformScanReport {
+        schema: K20_WAVEFORM_TRANSFORM_SCAN_REPORT_SCHEMA.to_string(),
+        generated_by: "open-vitals-k20-waveform-transform-scanner".to_string(),
+        pass: issues.is_empty(),
+        validation_status,
+        start_time: start.to_string(),
+        end_time: end.to_string(),
+        decoded_frame_count: decoded_rows.len(),
+        k20_frame_count,
+        realtime_k20_frame_count,
+        candidate_segment_count: candidate_segments.len(),
+        matched_segment_count,
+        rr_reference_sample_count,
+        rr_reference_matched_segment_count,
+        rr_reference_tolerance_ms: K20_RR_REFERENCE_TOLERANCE_MS,
+        heart_rate_feature_count: heart_rate_report.features.len(),
+        trusted_heart_rate_feature_count,
+        tested_transform_count,
+        sample_rate_hz_values,
+        min_peak_spacing_samples_values,
+        smoothing_window_samples_values,
+        threshold_stddev_multipliers,
+        max_hr_match_lag_seconds,
+        hr_tolerance_bpm,
+        ranked_transforms,
+        segment_summaries,
+        issues,
+        next_actions,
+    })
+}
+
+pub fn run_k20_field_discovery_for_store(
+    store: &OpenVitalsStore,
+    database_path: &str,
+    start: &str,
+    end: &str,
+    options: K20FieldDiscoveryOptions,
+) -> OpenVitalsResult<K20FieldDiscoveryReport> {
+    let decoded_rows = store.decoded_frames_between(start, end)?;
+    let correlation = run_capture_correlation_for_store(
+        store,
+        database_path,
+        start,
+        end,
+        CaptureCorrelationOptions {
+            min_owned_captures_per_summary: options.min_owned_captures_per_summary,
+            require_owned_captures: false,
+        },
+    )?;
+    let heart_rate_report = run_heart_rate_feature_report(
+        &decoded_rows,
+        &correlation,
+        HeartRateFeatureOptions {
+            min_owned_captures_per_summary: options.min_owned_captures_per_summary,
+            require_trusted_evidence: false,
+        },
+    )?;
+    run_k20_field_discovery(&decoded_rows, &heart_rate_report, start, end, options)
+}
+
+pub fn run_k20_field_discovery(
+    decoded_rows: &[DecodedFrameRow],
+    heart_rate_report: &HeartRateFeatureReport,
+    start: &str,
+    end: &str,
+    options: K20FieldDiscoveryOptions,
+) -> OpenVitalsResult<K20FieldDiscoveryReport> {
+    let max_hr_match_lag_seconds =
+        if options.max_hr_match_lag_seconds.is_finite() && options.max_hr_match_lag_seconds > 0.0 {
+            options.max_hr_match_lag_seconds
+        } else {
+            10.0
+        };
+    let min_matching_frames = options.min_matching_frames.max(1);
+    let max_ranked_fields = options.max_ranked_fields.max(1);
+    let max_frame_summaries = options.max_frame_summaries;
+    let max_analyzed_frames = options.max_analyzed_frames.max(min_matching_frames).max(1);
+    let max_hr_match_lag_ms = (max_hr_match_lag_seconds * 1_000.0).round() as i64;
+
+    let trusted_heart_rates = heart_rate_report
+        .features
+        .iter()
+        .filter(|feature| feature.trusted_metric_input)
+        .filter_map(|feature| {
+            heart_rate_feature_time_unix_ms(feature).map(|unix_ms| (unix_ms, feature))
+        })
+        .collect::<Vec<_>>();
+    let trusted_heart_rate_feature_count = trusted_heart_rates.len();
+
+    let mut k20_frame_count = 0usize;
+    let mut realtime_k20_frame_count = 0usize;
+    let mut k20_frames = Vec::new();
+    for row in decoded_rows {
+        let parsed_payload = parsed_payload_from_row(row)?;
+        let Some(ParsedPayload::DataPacket {
+            packet_k: Some(20),
+            body_hex,
+            timestamp_seconds,
+            timestamp_subseconds,
+            ..
+        }) = parsed_payload
+        else {
+            continue;
+        };
+        k20_frame_count += 1;
+        if row.packet_type_name.as_deref() == Some("REALTIME_RAW_DATA") {
+            realtime_k20_frame_count += 1;
+        }
+        let body = decode_hex_with_whitespace(&body_hex)?;
+        let mut sample_time_flags = BTreeSet::new();
+        let sample_time = normalized_sample_time(
+            row,
+            timestamp_seconds,
+            timestamp_subseconds,
+            &mut sample_time_flags,
+        );
+        let sample_time_unix_ms = sample_time
+            .unix_ms
+            .or_else(|| parse_rfc3339_utc_unix_ms(&sample_time.time));
+        let matched = sample_time_unix_ms.and_then(|unix_ms| {
+            nearest_heart_rate_feature(unix_ms, &trusted_heart_rates, max_hr_match_lag_ms)
+        });
+        let (matched_hr_bpm, matched_hr_sample_time, match_lag_ms) = matched
+            .map(|(lag_ms, feature)| {
+                (
+                    Some(round_1(feature.heart_rate_bpm)),
+                    Some(feature.sample_time.clone()),
+                    Some(lag_ms),
+                )
+            })
+            .unwrap_or((None, None, None));
+        k20_frames.push(K20FieldFrameData {
+            frame_id: row.frame_id.clone(),
+            evidence_id: row.evidence_id.clone(),
+            captured_at: row.captured_at.clone(),
+            packet_type_name: row.packet_type_name.clone(),
+            body,
+            sample_time,
+            sample_time_flags,
+            matched_hr_bpm,
+            matched_hr_sample_time,
+            match_lag_ms,
+        });
+    }
+
+    let max_body_len = k20_frames
+        .iter()
+        .map(|frame| frame.body.len())
+        .max()
+        .unwrap_or(0);
+    let matched_k20_frame_count = k20_frames
+        .iter()
+        .filter(|frame| frame.matched_hr_bpm.is_some())
+        .count();
+    let analysis_frames = sampled_k20_field_frames(&k20_frames, max_analyzed_frames);
+    let analyzed_k20_frame_count = analysis_frames.len();
+    let mut ranked_fields = k20_field_correlations(
+        &analysis_frames,
+        max_body_len,
+        min_matching_frames,
+        max_ranked_fields,
+        max_hr_match_lag_ms,
+    );
+    let has_enough_candidate = ranked_fields
+        .iter()
+        .any(|candidate| candidate.matched_frame_count >= min_matching_frames);
+
+    let mut issues = Vec::new();
+    if k20_frame_count == 0 {
+        issues.push("no_k20_candidate_frames".to_string());
+    }
+    if trusted_heart_rate_feature_count == 0 {
+        issues.push("no_trusted_heart_rate_reference_features".to_string());
+    }
+    if analyzed_k20_frame_count == 0 && matched_k20_frame_count > 0 {
+        issues.push("no_k20_frames_selected_for_analysis".to_string());
+    }
+    if ranked_fields.is_empty() {
+        issues.push("no_k20_variable_fields_ranked".to_string());
+    }
+    if !ranked_fields.is_empty() && !has_enough_candidate {
+        issues.push("not_enough_k20_field_matches".to_string());
+    }
+    if matches!(
+        ranked_fields
+            .first()
+            .and_then(|candidate| candidate.absolute_correlation_score),
+        Some(score) if score < 0.7
+    ) {
+        issues.push("best_k20_field_correlation_below_threshold".to_string());
+    }
+    let validation_status = k20_field_discovery_status(&ranked_fields, &issues);
+    let next_actions = k20_field_discovery_next_actions(&issues, &validation_status);
+
+    let frame_summaries = k20_frames
+        .iter()
+        .filter(|frame| frame.matched_hr_bpm.is_some())
+        .take(max_frame_summaries)
+        .map(k20_field_frame_summary)
+        .collect();
+    ranked_fields.truncate(max_ranked_fields);
+
+    Ok(K20FieldDiscoveryReport {
+        schema: K20_FIELD_DISCOVERY_REPORT_SCHEMA.to_string(),
+        generated_by: "open-vitals-k20-field-discovery-scanner".to_string(),
+        pass: issues.is_empty(),
+        validation_status,
+        start_time: start.to_string(),
+        end_time: end.to_string(),
+        decoded_frame_count: decoded_rows.len(),
+        k20_frame_count,
+        realtime_k20_frame_count,
+        matched_k20_frame_count,
+        analyzed_k20_frame_count,
+        max_analyzed_frames,
+        max_body_len,
+        heart_rate_feature_count: heart_rate_report.features.len(),
+        trusted_heart_rate_feature_count,
+        max_hr_match_lag_seconds,
+        min_matching_frames,
+        ranked_fields,
+        frame_summaries,
+        issues,
+        next_actions,
+    })
+}
+
 #[derive(Debug, Clone, Default)]
 struct BeatIntervalPeakSpacing {
     peak_count: usize,
@@ -3589,10 +4403,29 @@ fn k20_channel_peak_intervals_ms(
     min_peak_spacing_samples: usize,
     polarity: K20PeakPolarity,
 ) -> Vec<f64> {
+    let smoothing_window_samples = ((sample_rate_hz * 2.0).round() as usize).max(3);
+    k20_channel_peak_intervals_ms_with_transform(
+        samples,
+        sample_rate_hz,
+        min_peak_spacing_samples,
+        polarity,
+        smoothing_window_samples,
+        0.45,
+    )
+}
+
+fn k20_channel_peak_intervals_ms_with_transform(
+    samples: &[f64],
+    sample_rate_hz: f64,
+    min_peak_spacing_samples: usize,
+    polarity: K20PeakPolarity,
+    smoothing_window_samples: usize,
+    threshold_stddev_multiplier: f64,
+) -> Vec<f64> {
     if samples.len() < 3 || !(sample_rate_hz.is_finite() && sample_rate_hz > 0.0) {
         return Vec::new();
     }
-    let window = ((sample_rate_hz * 2.0).round() as usize).max(3);
+    let window = smoothing_window_samples.max(1);
     let smoothed = rolling_mean(samples, window);
     let centered = samples
         .iter()
@@ -3603,7 +4436,13 @@ fn k20_channel_peak_intervals_ms(
     if stddev <= f64::EPSILON {
         return Vec::new();
     }
-    let threshold = (stddev * 0.45).max(1.0);
+    let threshold_multiplier =
+        if threshold_stddev_multiplier.is_finite() && threshold_stddev_multiplier > 0.0 {
+            threshold_stddev_multiplier
+        } else {
+            0.45
+        };
+    let threshold = (stddev * threshold_multiplier).max(1.0);
     let min_spacing = min_peak_spacing_samples.max(1);
     let mut peaks = Vec::new();
     for index in 1..centered.len() - 1 {
@@ -3856,6 +4695,279 @@ fn k20_ranked_channel_candidates(
     candidates
 }
 
+fn k20_ranked_waveform_transform_candidates(
+    segments: &[K20WaveformTransformSegmentSummary],
+    hr_tolerance_bpm: f64,
+    max_ranked_transforms: usize,
+) -> Vec<K20WaveformTransformCandidateSummary> {
+    let mut grouped = BTreeMap::<
+        (String, usize, String, i64, usize, usize, i64),
+        Vec<&K20WaveformTransformSegmentSummary>,
+    >::new();
+    for segment in segments {
+        grouped
+            .entry((
+                segment.channel_id.clone(),
+                segment.offset,
+                segment.polarity.clone(),
+                scaled_f64_key(segment.sample_rate_hz),
+                segment.min_peak_spacing_samples,
+                segment.smoothing_window_samples,
+                scaled_f64_key(segment.threshold_stddev_multiplier),
+            ))
+            .or_default()
+            .push(segment);
+    }
+
+    let mut candidates = grouped
+        .into_iter()
+        .filter_map(
+            |(
+                (
+                    channel_id,
+                    offset,
+                    polarity,
+                    _sample_rate_key,
+                    min_peak_spacing_samples,
+                    smoothing_window_samples,
+                    _threshold_key,
+                ),
+                rows,
+            )| {
+                let first = rows.first().copied()?;
+                let usable_segment_count = rows.len();
+                let matched_rows = rows
+                    .iter()
+                    .copied()
+                    .filter(|row| row.absolute_error_bpm.is_some())
+                    .collect::<Vec<_>>();
+                if matched_rows.is_empty() {
+                    return None;
+                }
+                let within_tolerance_count = matched_rows
+                    .iter()
+                    .filter(|row| row.within_tolerance == Some(true))
+                    .count();
+                let matched_segment_count = matched_rows.len();
+                let rr_matched_rows = rows
+                    .iter()
+                    .copied()
+                    .filter(|row| row.absolute_error_rr_ms.is_some())
+                    .collect::<Vec<_>>();
+                let rr_reference_matched_segment_count = rr_matched_rows.len();
+                let rr_reference_within_tolerance_count = rr_matched_rows
+                    .iter()
+                    .filter(|row| row.rr_within_tolerance == Some(true))
+                    .count();
+                let errors = matched_rows
+                    .iter()
+                    .filter_map(|row| row.absolute_error_bpm)
+                    .collect::<Vec<_>>();
+                let rr_errors = rr_matched_rows
+                    .iter()
+                    .filter_map(|row| row.absolute_error_rr_ms)
+                    .collect::<Vec<_>>();
+                let candidate_hrs = matched_rows
+                    .iter()
+                    .filter_map(|row| row.candidate_hr_bpm)
+                    .collect::<Vec<_>>();
+                let reference_hrs = matched_rows
+                    .iter()
+                    .filter_map(|row| row.matched_hr_bpm)
+                    .collect::<Vec<_>>();
+                let reference_rr = rr_matched_rows
+                    .iter()
+                    .filter_map(|row| row.matched_reference_rr_ms)
+                    .collect::<Vec<_>>();
+                let candidate_rr = rows
+                    .iter()
+                    .flat_map(|row| row.rr_intervals_ms_preview.iter().copied())
+                    .collect::<Vec<_>>();
+                let rmssd_values = rows
+                    .iter()
+                    .filter_map(|row| row.candidate_rmssd_ms)
+                    .collect::<Vec<_>>();
+                let sdnn_values = rows
+                    .iter()
+                    .filter_map(|row| row.candidate_sdnn_ms)
+                    .collect::<Vec<_>>();
+                let interval_counts = rows
+                    .iter()
+                    .map(|row| row.interval_count as f64)
+                    .collect::<Vec<_>>();
+                let within_tolerance_fraction =
+                    round_3(within_tolerance_count as f64 / matched_segment_count as f64);
+                let rr_reference_within_tolerance_fraction =
+                    (rr_reference_matched_segment_count > 0).then(|| {
+                        round_3(
+                            rr_reference_within_tolerance_count as f64
+                                / rr_reference_matched_segment_count as f64,
+                        )
+                    });
+                let mut quality_flags = BTreeSet::new();
+                quality_flags.insert("diagnostic_only_not_score_input".to_string());
+                quality_flags.insert("k20_waveform_transform_candidate".to_string());
+                if within_tolerance_fraction >= 0.8 {
+                    quality_flags.insert("hr_alignment_candidate".to_string());
+                } else {
+                    quality_flags.insert("hr_alignment_below_threshold".to_string());
+                }
+                if rr_reference_matched_segment_count == 0 {
+                    quality_flags.insert("no_rr_reference_segments".to_string());
+                } else if rr_reference_within_tolerance_fraction.unwrap_or(0.0) >= 0.8 {
+                    quality_flags.insert("rr_reference_alignment_candidate".to_string());
+                } else {
+                    quality_flags.insert("rr_reference_alignment_below_threshold".to_string());
+                }
+                if median_f64(interval_counts.clone()).unwrap_or(0.0) < 5.0 {
+                    quality_flags.insert("low_interval_count".to_string());
+                }
+                Some(K20WaveformTransformCandidateSummary {
+                    rank: 0,
+                    channel_id: channel_id.clone(),
+                    offset,
+                    polarity: polarity.clone(),
+                    sample_rate_hz: first.sample_rate_hz,
+                    min_peak_spacing_samples,
+                    smoothing_window_samples,
+                    threshold_stddev_multiplier: first.threshold_stddev_multiplier,
+                    matched_segment_count,
+                    usable_segment_count,
+                    within_tolerance_count,
+                    within_tolerance_fraction: Some(within_tolerance_fraction),
+                    mean_absolute_error_bpm: mean_f64(&errors).map(round_1),
+                    median_absolute_error_bpm: median_f64(errors).map(round_1),
+                    mean_candidate_hr_bpm: mean_f64(&candidate_hrs).map(round_1),
+                    mean_reference_hr_bpm: mean_f64(&reference_hrs).map(round_1),
+                    median_candidate_rr_ms: median_f64(candidate_rr).map(round_1),
+                    rr_reference_matched_segment_count,
+                    rr_reference_within_tolerance_count,
+                    rr_reference_within_tolerance_fraction,
+                    mean_absolute_error_rr_ms: mean_f64(&rr_errors).map(round_1),
+                    median_absolute_error_rr_ms: median_f64(rr_errors).map(round_1),
+                    mean_reference_rr_ms: mean_f64(&reference_rr).map(round_1),
+                    median_rmssd_ms: median_f64(rmssd_values).map(round_1),
+                    median_sdnn_ms: median_f64(sdnn_values).map(round_1),
+                    median_interval_count: median_f64(interval_counts).map(round_1),
+                    quality_flags: quality_flags.into_iter().collect(),
+                    provenance: json!({
+                        "input_source": "decoded_frame",
+                        "packet_k": 20,
+                        "domain": "raw_or_research_counted",
+                        "channel_offset": offset,
+                        "polarity": polarity,
+                        "sample_rate_hz": first.sample_rate_hz,
+                        "min_peak_spacing_samples": min_peak_spacing_samples,
+                        "smoothing_window_samples": smoothing_window_samples,
+                        "threshold_stddev_multiplier": first.threshold_stddev_multiplier,
+                        "hr_tolerance_bpm": hr_tolerance_bpm,
+                        "promotion_policy": "diagnostic_only_requires_external_rr_reference_before_hrv",
+                        "validation_policy": "rank K20 waveform transform candidates against nearby trusted HR and optional RR reference",
+                    }),
+                })
+            },
+        )
+        .collect::<Vec<_>>();
+
+    candidates.sort_by(|left, right| {
+        let left_rr_fraction = left.rr_reference_within_tolerance_fraction.unwrap_or(0.0);
+        let right_rr_fraction = right.rr_reference_within_tolerance_fraction.unwrap_or(0.0);
+        right
+            .rr_reference_matched_segment_count
+            .cmp(&left.rr_reference_matched_segment_count)
+            .then_with(|| right_rr_fraction.total_cmp(&left_rr_fraction))
+            .then_with(|| right.matched_segment_count.cmp(&left.matched_segment_count))
+            .then_with(|| {
+                right
+                    .within_tolerance_fraction
+                    .unwrap_or(0.0)
+                    .total_cmp(&left.within_tolerance_fraction.unwrap_or(0.0))
+            })
+            .then_with(|| {
+                left.mean_absolute_error_bpm
+                    .unwrap_or(f64::MAX)
+                    .total_cmp(&right.mean_absolute_error_bpm.unwrap_or(f64::MAX))
+            })
+            .then_with(|| left.offset.cmp(&right.offset))
+            .then_with(|| left.polarity.cmp(&right.polarity))
+            .then_with(|| left.sample_rate_hz.total_cmp(&right.sample_rate_hz))
+            .then_with(|| {
+                left.threshold_stddev_multiplier
+                    .total_cmp(&right.threshold_stddev_multiplier)
+            })
+    });
+    for (index, candidate) in candidates.iter_mut().enumerate() {
+        candidate.rank = index + 1;
+    }
+    candidates.truncate(max_ranked_transforms);
+    candidates
+}
+
+fn k20_waveform_segment_matches_candidate(
+    segment: &K20WaveformTransformSegmentSummary,
+    candidate: &K20WaveformTransformCandidateSummary,
+) -> bool {
+    segment.channel_id == candidate.channel_id
+        && segment.offset == candidate.offset
+        && segment.polarity == candidate.polarity
+        && scaled_f64_key(segment.sample_rate_hz) == scaled_f64_key(candidate.sample_rate_hz)
+        && segment.min_peak_spacing_samples == candidate.min_peak_spacing_samples
+        && segment.smoothing_window_samples == candidate.smoothing_window_samples
+        && scaled_f64_key(segment.threshold_stddev_multiplier)
+            == scaled_f64_key(candidate.threshold_stddev_multiplier)
+}
+
+fn scaled_f64_key(value: f64) -> i64 {
+    (value * 1_000.0).round() as i64
+}
+
+fn sanitize_f64_grid(values: &[f64], defaults: &[f64], min: f64, max: f64) -> Vec<f64> {
+    let mut sanitized = values
+        .iter()
+        .copied()
+        .chain(
+            defaults
+                .iter()
+                .copied()
+                .take(values.is_empty() as usize * defaults.len()),
+        )
+        .filter(|value| value.is_finite() && *value >= min && *value <= max)
+        .map(round_3)
+        .collect::<Vec<_>>();
+    sanitized.sort_by(f64::total_cmp);
+    sanitized.dedup_by(|left, right| scaled_f64_key(*left) == scaled_f64_key(*right));
+    if sanitized.is_empty() {
+        defaults
+            .iter()
+            .copied()
+            .filter(|value| value.is_finite() && *value >= min && *value <= max)
+            .map(round_3)
+            .collect()
+    } else {
+        sanitized
+    }
+}
+
+fn sanitize_usize_grid(values: &[usize], defaults: &[usize], min: usize, max: usize) -> Vec<usize> {
+    let mut sanitized = if values.is_empty() {
+        defaults.to_vec()
+    } else {
+        values.to_vec()
+    };
+    sanitized.retain(|value| *value >= min && *value <= max);
+    sanitized.sort_unstable();
+    sanitized.dedup();
+    if sanitized.is_empty() {
+        defaults
+            .iter()
+            .copied()
+            .filter(|value| *value >= min && *value <= max)
+            .collect()
+    } else {
+        sanitized
+    }
+}
+
 fn k20_channel_scan_status(
     best: Option<&K20OpticalChannelCandidateSummary>,
     issues: &[String],
@@ -3899,6 +5011,56 @@ fn k20_channel_scan_status(
     if issues
         .iter()
         .any(|issue| issue == "best_k20_channel_rr_reference_alignment_below_threshold")
+    {
+        return "candidate_rr_alignment_below_threshold".to_string();
+    }
+    "candidate_not_hr_aligned".to_string()
+}
+
+fn k20_waveform_transform_scan_status(
+    best: Option<&K20WaveformTransformCandidateSummary>,
+    issues: &[String],
+    min_matching_segments: usize,
+) -> String {
+    if issues.is_empty() {
+        return "candidate_hr_and_rr_aligned".to_string();
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "no_k20_candidate_frames")
+    {
+        return "no_k20_frames".to_string();
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "no_realtime_k20_frames_with_channel_bodies")
+    {
+        return "no_realtime_channel_bodies".to_string();
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "no_trusted_heart_rate_reference_features")
+    {
+        return "missing_hr_reference".to_string();
+    }
+    if best.is_some_and(|candidate| candidate.matched_segment_count < min_matching_segments) {
+        return "not_enough_hr_matches".to_string();
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "best_k20_waveform_alignment_below_threshold")
+    {
+        return "candidate_not_hr_aligned".to_string();
+    }
+    if issues.iter().any(|issue| {
+        issue == "no_rr_reference_samples"
+            || issue == "not_enough_k20_waveform_rr_reference_matches"
+    }) {
+        return "candidate_hr_aligned_needs_rr_reference".to_string();
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "best_k20_waveform_rr_reference_alignment_below_threshold")
     {
         return "candidate_rr_alignment_below_threshold".to_string();
     }
@@ -3988,6 +5150,393 @@ fn k20_channel_scan_next_actions(
             scope: "beat_interval.external_reference".to_string(),
             reason: "hr_alignment_is_not_rr_validation".to_string(),
             action: "Compare the top K20 channel against the RR Reference capture before using it for HRV.".to_string(),
+        });
+    }
+    actions.sort();
+    actions.dedup();
+    actions
+}
+
+fn k20_waveform_transform_scan_next_actions(
+    issues: &[String],
+    validation_status: &str,
+) -> Vec<MetricFeatureNextAction> {
+    let mut actions = Vec::new();
+    if issues
+        .iter()
+        .any(|issue| issue == "no_k20_candidate_frames")
+        || issues
+            .iter()
+            .any(|issue| issue == "no_realtime_k20_frames_with_channel_bodies")
+    {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.capture".to_string(),
+            reason: validation_status.to_string(),
+            action: "Run automatic Stream Probe while the device is on-body so realtime K20 waveform frames are captured in the same window.".to_string(),
+        });
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "no_trusted_heart_rate_reference_features")
+    {
+        actions.push(MetricFeatureNextAction {
+            scope: "heart_rate.reference".to_string(),
+            reason: "no_trusted_heart_rate_reference_features".to_string(),
+            action: "Capture trusted heart-rate reference frames in the same window as K20 waveform frames.".to_string(),
+        });
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "not_enough_k20_waveform_hr_matches")
+    {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.capture".to_string(),
+            reason: "not_enough_k20_waveform_hr_matches".to_string(),
+            action: "Use a longer quiet Stream Probe window so the transform sweep has enough HR-matched time slices.".to_string(),
+        });
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "best_k20_waveform_alignment_below_threshold")
+    {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.decoder".to_string(),
+            reason: "best_k20_waveform_alignment_below_threshold".to_string(),
+            action: "Keep K20 diagnostic-only; compare adjacent channels, scalar field hints, and command-gated stream variants before promoting any transform.".to_string(),
+        });
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "no_rr_reference_samples")
+    {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.external_reference".to_string(),
+            reason: "no_rr_reference_samples".to_string(),
+            action: "Collect overlapping RR Reference samples from a standard BLE heart-rate reference device during the same Stream Probe window.".to_string(),
+        });
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "not_enough_k20_waveform_rr_reference_matches")
+    {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.external_reference".to_string(),
+            reason: "not_enough_k20_waveform_rr_reference_matches".to_string(),
+            action: "Collect a longer overlapping RR Reference capture so each K20 waveform slice can be compared to true beat intervals.".to_string(),
+        });
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "best_k20_waveform_rr_reference_alignment_below_threshold")
+    {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.decoder".to_string(),
+            reason: "best_k20_waveform_rr_reference_alignment_below_threshold".to_string(),
+            action: "Keep K20 diagnostic-only; the best waveform transform does not yet match RR reference intervals closely enough for HRV.".to_string(),
+        });
+    }
+    if validation_status == "candidate_hr_aligned_needs_rr_reference" {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.external_reference".to_string(),
+            reason: "hr_alignment_is_not_rr_validation".to_string(),
+            action: "Treat the K20 waveform winner as a lead only until it is compared against overlapping RR Reference samples.".to_string(),
+        });
+    }
+    actions.sort();
+    actions.dedup();
+    actions
+}
+
+#[derive(Debug, Clone)]
+struct K20FieldFrameData {
+    frame_id: String,
+    evidence_id: String,
+    captured_at: String,
+    packet_type_name: Option<String>,
+    body: Vec<u8>,
+    sample_time: NormalizedSampleTime,
+    sample_time_flags: BTreeSet<String>,
+    matched_hr_bpm: Option<f64>,
+    matched_hr_sample_time: Option<String>,
+    match_lag_ms: Option<i64>,
+}
+
+fn sampled_k20_field_frames(
+    frames: &[K20FieldFrameData],
+    max_analyzed_frames: usize,
+) -> Vec<&K20FieldFrameData> {
+    let matched = frames
+        .iter()
+        .filter(|frame| frame.matched_hr_bpm.is_some())
+        .collect::<Vec<_>>();
+    if matched.len() <= max_analyzed_frames {
+        return matched;
+    }
+    let stride = matched.len().div_ceil(max_analyzed_frames).max(1);
+    matched
+        .into_iter()
+        .step_by(stride)
+        .take(max_analyzed_frames)
+        .collect()
+}
+
+fn k20_field_correlations(
+    frames: &[&K20FieldFrameData],
+    max_body_len: usize,
+    min_matching_frames: usize,
+    max_ranked_fields: usize,
+    max_hr_match_lag_ms: i64,
+) -> Vec<K20FieldCorrelationSummary> {
+    let mut correlations = Vec::new();
+    for spec in k26_raw_field_specs(max_body_len) {
+        let mut raw_values = Vec::new();
+        let mut reference_hrs = Vec::new();
+        let mut reference_rr_ms = Vec::new();
+        for frame in frames {
+            let Some(reference_hr) = frame.matched_hr_bpm else {
+                continue;
+            };
+            if reference_hr <= 0.0 {
+                continue;
+            }
+            let Some(raw_value) = k26_raw_field_value(&frame.body, &spec) else {
+                continue;
+            };
+            if !raw_value.is_finite() {
+                continue;
+            }
+            raw_values.push(raw_value);
+            reference_hrs.push(reference_hr);
+            reference_rr_ms.push(60_000.0 / reference_hr);
+        }
+        if raw_values.len() < min_matching_frames {
+            continue;
+        }
+
+        let distinct_raw_value_count = distinct_rounded_value_count(&raw_values);
+        if distinct_raw_value_count <= 1 {
+            continue;
+        }
+        let hr_correlation = pearson_correlation(&raw_values, &reference_hrs).map(round_3);
+        let rr_correlation = pearson_correlation(&raw_values, &reference_rr_ms).map(round_3);
+        let absolute_correlation_score = hr_correlation
+            .zip(rr_correlation)
+            .map(|(hr, rr)| round_3(hr.abs().max(rr.abs())));
+        let region = k20_field_region(&spec);
+        let mut quality_flags = BTreeSet::new();
+        quality_flags.insert("diagnostic_only_not_score_input".to_string());
+        quality_flags.insert("raw_field_correlation_not_rr_validation".to_string());
+        quality_flags.insert("k20_scalar_field_discovery".to_string());
+        match region.as_str() {
+            "packet_header_or_pre_channel" => {
+                quality_flags.insert("header_or_pre_channel_field_suspected".to_string());
+            }
+            "inter_channel_gap_or_metadata" => {
+                quality_flags.insert("inter_channel_metadata_candidate".to_string());
+            }
+            "tail_metadata_or_padding" => {
+                quality_flags.insert("tail_metadata_or_padding_field_suspected".to_string());
+            }
+            value if value.starts_with("channel:") => {
+                quality_flags.insert("inside_optical_channel_block".to_string());
+            }
+            _ => {}
+        }
+        if distinct_raw_value_count <= 3 {
+            quality_flags.insert("low_raw_value_variability".to_string());
+        }
+        if absolute_correlation_score.unwrap_or(0.0) >= 0.7 {
+            quality_flags.insert("strong_raw_correlation".to_string());
+        } else {
+            quality_flags.insert("weak_raw_correlation".to_string());
+        }
+
+        correlations.push(K20FieldCorrelationSummary {
+            rank: 0,
+            offset: spec.offset,
+            width: spec.width,
+            endian: spec.endian.to_string(),
+            signed: spec.signed,
+            region,
+            matched_frame_count: raw_values.len(),
+            distinct_raw_value_count,
+            min_raw_value: raw_values.iter().copied().reduce(f64::min).map(round_1),
+            median_raw_value: median_f64(raw_values.clone()).map(round_1),
+            max_raw_value: raw_values.iter().copied().reduce(f64::max).map(round_1),
+            pearson_correlation_to_hr_bpm: hr_correlation,
+            pearson_correlation_to_rr_ms: rr_correlation,
+            absolute_correlation_score,
+            quality_flags: quality_flags.into_iter().collect(),
+            provenance: json!({
+                "input_source": "decoded_frame",
+                "packet_k": 20,
+                "domain": "raw_or_research_counted",
+                "validation_policy": "raw K20 fields correlated against nearby trusted HR for discovery only",
+                "promotion_policy": "diagnostic_only_requires_external_rr_reference_before_hrv",
+                "max_hr_match_lag_ms": max_hr_match_lag_ms,
+            }),
+        });
+    }
+
+    correlations.sort_by(|left, right| {
+        let left_variable = left.distinct_raw_value_count > 3;
+        let right_variable = right.distinct_raw_value_count > 3;
+        right_variable
+            .cmp(&left_variable)
+            .then_with(|| {
+                right
+                    .absolute_correlation_score
+                    .unwrap_or(0.0)
+                    .total_cmp(&left.absolute_correlation_score.unwrap_or(0.0))
+            })
+            .then_with(|| {
+                right
+                    .distinct_raw_value_count
+                    .cmp(&left.distinct_raw_value_count)
+            })
+            .then_with(|| left.offset.cmp(&right.offset))
+            .then_with(|| left.width.cmp(&right.width))
+            .then_with(|| left.endian.cmp(&right.endian))
+            .then_with(|| left.signed.cmp(&right.signed))
+    });
+    for (index, correlation) in correlations.iter_mut().enumerate() {
+        correlation.rank = index + 1;
+    }
+    correlations.truncate(max_ranked_fields);
+    correlations
+}
+
+fn k20_field_region(spec: &K26RawFieldSpec) -> String {
+    let spec_start = spec.offset;
+    let spec_end = spec.offset.saturating_add(spec.width);
+    for channel in k20_channel_specs() {
+        let channel_start = channel.offset;
+        let channel_end = channel.offset + 25 * 4;
+        if spec_start < channel_end && spec_end > channel_start {
+            return format!("channel:{}", channel.id);
+        }
+    }
+    if spec_end <= 26 {
+        "packet_header_or_pre_channel".to_string()
+    } else if spec_start >= 2014 {
+        "tail_metadata_or_padding".to_string()
+    } else {
+        "inter_channel_gap_or_metadata".to_string()
+    }
+}
+
+fn k20_field_frame_summary(frame: &K20FieldFrameData) -> K20FieldFrameSummary {
+    let mut quality_flags = frame.sample_time_flags.clone();
+    quality_flags.insert("diagnostic_only_not_score_input".to_string());
+    if frame.matched_hr_bpm.is_some() {
+        quality_flags.insert("nearby_trusted_hr_reference".to_string());
+    } else {
+        quality_flags.insert("no_nearby_trusted_hr_reference".to_string());
+    }
+
+    K20FieldFrameSummary {
+        frame_id: frame.frame_id.clone(),
+        evidence_id: frame.evidence_id.clone(),
+        captured_at: frame.captured_at.clone(),
+        packet_type_name: frame.packet_type_name.clone(),
+        sample_time: frame.sample_time.time.clone(),
+        sample_time_source: frame.sample_time.source.clone(),
+        body_byte_count: frame.body.len(),
+        matched_hr_bpm: frame.matched_hr_bpm,
+        matched_hr_sample_time: frame.matched_hr_sample_time.clone(),
+        match_lag_seconds: frame
+            .match_lag_ms
+            .map(|lag_ms| round_1(lag_ms as f64 / 1_000.0)),
+        quality_flags: quality_flags.into_iter().collect(),
+    }
+}
+
+fn k20_field_discovery_status(
+    ranked_fields: &[K20FieldCorrelationSummary],
+    issues: &[String],
+) -> String {
+    if issues.is_empty() {
+        return "field_candidates_ranked".to_string();
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "no_k20_candidate_frames")
+    {
+        return "no_k20_frames".to_string();
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "no_trusted_heart_rate_reference_features")
+    {
+        return "missing_hr_reference".to_string();
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "not_enough_k20_field_matches")
+    {
+        return "not_enough_matches".to_string();
+    }
+    if ranked_fields.is_empty() {
+        return "no_fields_ranked".to_string();
+    }
+    "field_candidates_need_review".to_string()
+}
+
+fn k20_field_discovery_next_actions(
+    issues: &[String],
+    validation_status: &str,
+) -> Vec<MetricFeatureNextAction> {
+    let mut actions = Vec::new();
+    if issues
+        .iter()
+        .any(|issue| issue == "no_k20_candidate_frames")
+    {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.capture".to_string(),
+            reason: "no_k20_candidate_frames".to_string(),
+            action: "Run Automatic Stream Probe or a quiet on-body capture that emits K20 raw/research frames, then rerun K20 field discovery.".to_string(),
+        });
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "no_trusted_heart_rate_reference_features")
+    {
+        actions.push(MetricFeatureNextAction {
+            scope: "heart_rate.reference".to_string(),
+            reason: "no_trusted_heart_rate_reference_features".to_string(),
+            action: "Include trusted K18 heart-rate history in the same window so K20 field changes can be ranked against HR.".to_string(),
+        });
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "not_enough_k20_field_matches")
+    {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.capture".to_string(),
+            reason: "not_enough_k20_field_matches".to_string(),
+            action: "Use a longer overlapping K20 and heart-rate window so scalar field ranking has enough matched frames.".to_string(),
+        });
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "best_k20_field_correlation_below_threshold")
+    {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.decoder".to_string(),
+            reason: "best_k20_field_correlation_below_threshold".to_string(),
+            action: "Treat the ranked K20 fields as weak hints only; prioritize K20 channel scan and command-gated stream deltas.".to_string(),
+        });
+    }
+    if validation_status == "field_candidates_ranked" {
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.external_reference".to_string(),
+            reason: "field_candidates_are_not_rr_validation".to_string(),
+            action: "Compare top K20 field candidates against overlapping RR Reference samples before using any field for HRV.".to_string(),
+        });
+        actions.push(MetricFeatureNextAction {
+            scope: "beat_interval.decoder".to_string(),
+            reason: "compare_scalar_and_waveform_candidates".to_string(),
+            action: "Compare top K20 scalar offsets with K20 optical channel scan winners and command-stream packet deltas.".to_string(),
         });
     }
     actions.sort();

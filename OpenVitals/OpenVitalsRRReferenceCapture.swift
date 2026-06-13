@@ -52,6 +52,26 @@ final class OpenVitalsRRReferenceCapture: NSObject, ObservableObject {
   private var notificationSequence = 0
   private var insertedSampleCount = 0
   private var flushInProgress = false
+  private var captureSessionStarted = false
+  private var captureSessionStartInProgress = false
+  private var captureSessionStartAttempts = 0
+  private var pendingFinishAfterStorage = false
+  private var pendingFinishEndedAt: Date?
+
+  private static let maxSessionStartAttempts = 4
+
+  var hasLiveRRSamples: Bool {
+    isCapturing && sampleCount > 0
+  }
+
+  var storageReadyForExport: Bool {
+    sampleCount > 0
+      && insertedSampleCount >= sampleCount
+      && pendingSamples.isEmpty
+      && !flushInProgress
+      && !captureSessionStartInProgress
+      && captureSessionStarted
+  }
 
   init(databasePath: String) {
     self.databasePath = databasePath
@@ -106,36 +126,41 @@ final class OpenVitalsRRReferenceCapture: NSObject, ObservableObject {
     notificationCount = 0
     insertedSampleCount = 0
     notificationSequence = 0
+    captureSessionStarted = false
+    captureSessionStartInProgress = false
+    captureSessionStartAttempts = 0
+    pendingFinishAfterStorage = false
+    pendingFinishEndedAt = nil
     lastHeartRateBPM = nil
     lastRRIntervalMS = nil
     lastCapturedAt = nil
-    lastFlushStatus = "Waiting for RR samples"
+    lastFlushStatus = "Starting local RR session..."
     summaryStatus = "No RR reference summary"
     pendingSamples = []
     isCapturing = true
-    status = "Starting RR reference session..."
+    status = "Connecting to \(activeDeviceName)..."
 
-    startReferenceCaptureSession(
+    central?.stopScan()
+    isScanning = false
+    activePeripheral = peripheral
+    peripheral.delegate = self
+    central?.connect(peripheral)
+
+    startOrRetryReferenceCaptureSession(
       sessionID: sessionID,
       startedAt: startedAt,
       deviceName: activeDeviceName,
       deviceID: activeDeviceID
-    ) { [weak self] success in
-      guard let self else {
-        return
-      }
-      guard success else {
-        self.isCapturing = false
-        self.sessionID = nil
-        return
-      }
-      self.central?.stopScan()
-      self.isScanning = false
-      self.activePeripheral = peripheral
-      peripheral.delegate = self
-      self.status = "Connecting to \(self.activeDeviceName)..."
-      self.central?.connect(peripheral)
+    )
+  }
+
+  func startCaptureFromBestDevice() -> Bool {
+    guard let device = discoveredDevices.first else {
+      status = "No RR reference devices found"
+      return false
     }
+    startCapture(deviceID: device.id)
+    return true
   }
 
   func stopCapture() {
@@ -189,12 +214,82 @@ final class OpenVitalsRRReferenceCapture: NSObject, ObservableObject {
     }
   }
 
+  private func startOrRetryReferenceCaptureSession(
+    sessionID: String,
+    startedAt: Date,
+    deviceName: String,
+    deviceID: String
+  ) {
+    guard (isCapturing || pendingFinishAfterStorage), self.sessionID == sessionID, !captureSessionStarted else {
+      return
+    }
+    captureSessionStartInProgress = true
+    captureSessionStartAttempts += 1
+    let attempt = captureSessionStartAttempts
+    lastFlushStatus = pendingSamples.isEmpty
+      ? "Starting local RR session..."
+      : "Queued \(pendingSamples.count) RR samples; starting local session"
+
+    startReferenceCaptureSession(
+      sessionID: sessionID,
+      startedAt: startedAt,
+      deviceName: deviceName,
+      deviceID: deviceID
+    ) { [weak self] result in
+      guard let self, self.sessionID == sessionID else {
+        return
+      }
+      self.captureSessionStartInProgress = false
+      switch result {
+      case .success:
+        self.captureSessionStarted = true
+        self.lastFlushStatus = self.pendingSamples.isEmpty
+          ? "Local RR session ready"
+          : "Local RR session ready; storing queued samples"
+        if self.isCapturing,
+           self.sampleCount == 0,
+           self.status.hasPrefix("Connecting")
+            || self.status.hasPrefix("Discovering")
+            || self.status.hasPrefix("Subscribing") {
+          self.status = "RR reference capture listening"
+        }
+        self.flushPendingSamples()
+        self.finishCaptureSessionRecordIfReady()
+      case .failure(let error):
+        let summary = MoreDataStore.errorSummary(error)
+        if (self.isCapturing || self.pendingFinishAfterStorage), attempt < Self.maxSessionStartAttempts {
+          self.lastFlushStatus = "Local session start failed: \(summary). Retrying..."
+          let delay = min(8.0, Double(attempt * 2))
+          DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.startOrRetryReferenceCaptureSession(
+              sessionID: sessionID,
+              startedAt: startedAt,
+              deviceName: deviceName,
+              deviceID: deviceID
+            )
+          }
+        } else {
+          self.lastFlushStatus = "Local session start failed: \(summary)"
+          if self.pendingFinishAfterStorage {
+            self.status = self.sampleCount > 0
+              ? "RR reference stopped | \(self.sampleCount) samples not stored; local session failed"
+              : "RR reference stopped; local session failed"
+          } else {
+            self.status = self.sampleCount > 0
+              ? "Capturing RR reference | \(self.sampleCount) samples | storage blocked"
+              : "RR reference listening | storage blocked"
+          }
+        }
+      }
+    }
+  }
+
   private func startReferenceCaptureSession(
     sessionID: String,
     startedAt: Date,
     deviceName: String,
     deviceID: String,
-    completion: @escaping (Bool) -> Void
+    completion: @escaping (Result<Void, Error>) -> Void
   ) {
     OpenVitalsRustBridge.performInBackground(qos: .utility, {
       try OpenVitalsRustBridge().request(
@@ -218,10 +313,12 @@ final class OpenVitalsRRReferenceCapture: NSObject, ObservableObject {
     }) { [weak self] result in
       switch result {
       case .success:
-        completion(true)
+        completion(.success(()))
       case .failure(let error):
-        self?.status = "Could not start RR reference session: \(MoreDataStore.errorSummary(error))"
-        completion(false)
+        if self?.sampleCount == 0 {
+          self?.status = "RR reference local session failed: \(MoreDataStore.errorSummary(error))"
+        }
+        completion(.failure(error))
       }
     }
   }
@@ -229,15 +326,49 @@ final class OpenVitalsRRReferenceCapture: NSObject, ObservableObject {
   private func finishCaptureSession() {
     let endedAt = Date()
     let sessionID = sessionID
-    flushPendingSamples()
     isCapturing = false
-    status = "RR reference capture stopped"
+    pendingFinishAfterStorage = true
+    pendingFinishEndedAt = endedAt
     heartRateCharacteristic = nil
     activePeripheral = nil
     guard let sessionID else {
       return
     }
+    guard captureSessionStarted else {
+      status = sampleCount > 0
+        ? "RR reference stopped | waiting to store \(sampleCount) samples"
+        : "RR reference stopped | waiting for local session"
+      lastFlushStatus = pendingSamples.isEmpty
+        ? "Waiting for local RR session"
+        : "Queued \(pendingSamples.count) RR samples; waiting for local session"
+      if !captureSessionStartInProgress, let startedAt {
+        startOrRetryReferenceCaptureSession(
+          sessionID: sessionID,
+          startedAt: startedAt,
+          deviceName: activeDeviceName,
+          deviceID: activeDeviceID
+        )
+      }
+      return
+    }
 
+    status = sampleCount > 0
+      ? "RR reference stopped | storing \(sampleCount) samples"
+      : "RR reference stopped | closing local session"
+    flushPendingSamples()
+    finishCaptureSessionRecordIfReady()
+  }
+
+  private func finishCaptureSessionRecordIfReady() {
+    guard pendingFinishAfterStorage,
+          !flushInProgress,
+          pendingSamples.isEmpty,
+          captureSessionStarted,
+          let sessionID,
+          let endedAt = pendingFinishEndedAt else {
+      return
+    }
+    pendingFinishAfterStorage = false
     OpenVitalsRustBridge.performInBackground(qos: .utility, {
       try OpenVitalsRustBridge().request(
         method: "capture.finish_session",
@@ -298,12 +429,23 @@ final class OpenVitalsRRReferenceCapture: NSObject, ObservableObject {
     pendingSamples.append(contentsOf: newSamples)
     sampleCount += newSamples.count
     lastRRIntervalMS = measurement.rrIntervalsMS.last
-    status = "Capturing RR reference | \(sampleCount) samples"
+    if captureSessionStarted {
+      status = "Capturing RR reference | \(sampleCount) samples"
+    } else {
+      status = "Capturing RR reference | \(sampleCount) samples | waiting for local session"
+      lastFlushStatus = "Queued \(pendingSamples.count) RR samples; waiting for local session"
+    }
     flushPendingSamples()
   }
 
   private func flushPendingSamples() {
     guard !flushInProgress, !pendingSamples.isEmpty else {
+      return
+    }
+    guard captureSessionStarted else {
+      lastFlushStatus = captureSessionStartInProgress
+        ? "Queued \(pendingSamples.count) RR samples; starting local session"
+        : "Queued \(pendingSamples.count) RR samples; local session not ready"
       return
     }
     flushInProgress = true
@@ -330,9 +472,15 @@ final class OpenVitalsRRReferenceCapture: NSObject, ObservableObject {
       case .failure(let error):
         self.pendingSamples.insert(contentsOf: samples, at: 0)
         self.lastFlushStatus = "Store failed: \(MoreDataStore.errorSummary(error))"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+          self?.flushPendingSamples()
+        }
+        return
       }
       if !self.pendingSamples.isEmpty {
         self.flushPendingSamples()
+      } else {
+        self.finishCaptureSessionRecordIfReady()
       }
     }
   }

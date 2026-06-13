@@ -90,16 +90,30 @@ extension MoreDataStore {
       return
     }
     localExportInProgress = true
-    localExportStatus = "Saving local data file..."
+    localExportProgress = OpenVitalsLocalDataExportProgress(
+      title: "Preparing export",
+      detail: "Collecting local files",
+      fractionCompleted: nil
+    )
+    localExportStatus = localExportProgress?.statusText ?? "Preparing export..."
     localExportURL = nil
     localExportManifestURL = nil
 
     DispatchQueue.global(qos: .userInitiated).async {
       do {
-        let result = try OpenVitalsLocalDataExporter.createBundle()
+        let result = try OpenVitalsLocalDataExporter.createBundle { progress in
+          DispatchQueue.main.async {
+            self.applyLocalDataExportProgress(progress)
+          }
+        }
         DispatchQueue.main.async {
           self.localExportInProgress = false
           self.localExportStatus = "Saved \(result.fileCount) files, \(Self.byteCountText(result.byteCount))\(result.manifestStatusSuffix) | \(result.validation.summary)"
+          self.localExportProgress = OpenVitalsLocalDataExportProgress(
+            title: "Done",
+            detail: "Saved \(result.fileCount) files, \(Self.byteCountText(result.byteCount))",
+            fractionCompleted: 1
+          )
           self.localExportURL = result.url
           self.localExportManifestURL = result.manifestURL
         }
@@ -107,9 +121,15 @@ extension MoreDataStore {
         DispatchQueue.main.async {
           self.localExportInProgress = false
           self.localExportStatus = "Local export failed: \(Self.errorSummary(error))"
+          self.localExportProgress = nil
         }
       }
     }
+  }
+
+  func applyLocalDataExportProgress(_ progress: OpenVitalsLocalDataExportProgress) {
+    localExportProgress = progress
+    localExportStatus = progress.statusText
   }
 
   func validateExportArtifacts() {

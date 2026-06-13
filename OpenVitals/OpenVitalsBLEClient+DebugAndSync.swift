@@ -433,6 +433,9 @@ extension OpenVitalsBLEClient {
     pendingHistoricalCommand = nil
     historicalCommandTimeoutWorkItem?.cancel()
     guard historicalRangeRetryCount < historicalRangeMaxRetries else {
+      if continueHistoricalTransferAfterRangeFailure(reason: reason) {
+        return
+      }
       failHistoricalSync("GET_DATA_RANGE did not return a final range after \(historicalRangeRetryCount) retries: \(reason).")
       return
     }
@@ -468,6 +471,31 @@ extension OpenVitalsBLEClient {
     }
     historicalRangeRetryWorkItem = workItem
     DispatchQueue.main.asyncAfter(deadline: .now() + historicalRangeRetryDelay, execute: workItem)
+  }
+
+  func continueHistoricalTransferAfterRangeFailure(reason: String) -> Bool {
+    guard !historicalRangePollOnly else {
+      return false
+    }
+
+    historicalSyncStatus = "syncing"
+    let detail = "Range unavailable; requesting packets"
+    updateHistoricalRangeDebugStatus("fallback_to_transfer after \(historicalRangeRetryCount) retries: \(reason)")
+    publishSyncToast(phase: .syncing, detail: detail)
+    notifyHistoricalSyncProgress(
+      status: "syncing",
+      detail: detail,
+      terminal: false,
+      failed: false
+    )
+    record(
+      level: .warn,
+      source: "ble.sync",
+      title: "historical_sync.range.fallback",
+      body: "GET_DATA_RANGE did not return a final range after \(historicalRangeRetryCount) retries; continuing with SEND_HISTORICAL_DATA. reason=\(reason)"
+    )
+    writeHistoricalCommand(.sendHistoricalData)
+    return true
   }
 
 }

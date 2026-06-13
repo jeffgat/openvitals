@@ -140,7 +140,10 @@ struct MoreSupportView: View {
         .disabled(store.localExportInProgress)
 
         if store.localExportInProgress {
-          ProgressView("Saving local data file")
+          MoreLocalExportProgressView(
+            progress: store.localExportProgress,
+            fallback: store.localExportStatus
+          )
         }
 
         if let localExportURL = store.localExportURL {
@@ -275,6 +278,42 @@ struct MoreActionRow: View {
     }
     .buttonStyle(.plain)
     .disabled(disabled)
+  }
+}
+
+struct MoreLocalExportProgressView: View {
+  let progress: OpenVitalsLocalDataExportProgress?
+  let fallback: String
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      HStack(alignment: .firstTextBaseline) {
+        Text(progress?.title ?? "Saving local data file")
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(OpenVitalsTheme.textPrimary)
+        Spacer(minLength: 8)
+        if let percentText = progress?.percentText {
+          Text(percentText)
+            .font(.caption.monospacedDigit().weight(.semibold))
+            .foregroundStyle(OpenVitalsTheme.textSecondary)
+        }
+      }
+
+      if let fraction = progress?.boundedFractionCompleted {
+        ProgressView(value: fraction)
+          .progressViewStyle(.linear)
+      } else {
+        ProgressView()
+      }
+
+      Text(progress?.detail ?? fallback)
+        .font(.caption)
+        .foregroundStyle(OpenVitalsTheme.textSecondary)
+        .lineLimit(3)
+        .textSelection(.enabled)
+    }
+    .padding(.vertical, 4)
+    .accessibilityElement(children: .combine)
   }
 }
 

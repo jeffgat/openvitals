@@ -75,17 +75,19 @@ use crate::{
     },
     metric_features::{
         BeatIntervalCandidateScanOptions, BeatIntervalHrValidationOptions, HeartRateFeatureOptions,
-        HrvCaptureValidationOptions, HrvFeatureOptions, K20OpticalChannelScanOptions,
-        K26BeatFieldScanOptions, MetricFeatureNextAction, MetricWindowFeatureOptions,
-        MotionFeatureOptions, OxygenSaturationCaptureValidationOptions,
-        RecoveryFeatureScoreOptions, RecoveryProvidedVitalsFeature, RecoverySensorDiscoveryOptions,
+        HrvCaptureValidationOptions, HrvFeatureOptions, K20FieldDiscoveryOptions,
+        K20OpticalChannelScanOptions, K20WaveformTransformScanOptions, K26BeatFieldScanOptions,
+        MetricFeatureNextAction, MetricWindowFeatureOptions, MotionFeatureOptions,
+        OxygenSaturationCaptureValidationOptions, RecoveryFeatureScoreOptions,
+        RecoveryProvidedVitalsFeature, RecoverySensorDiscoveryOptions,
         RecoverySensorDiscoveryReport, RespiratoryRateCaptureValidationOptions,
         RestingHeartRateFeatureOptions, SleepFeatureScoreOptions, SleepFeatureScoreReport,
         SleepStageKind, StrainFeatureScoreOptions, StressFeatureScoreOptions,
         TemperatureCaptureValidationOptions, VitalEventFeatureOptions,
         run_beat_interval_candidate_scan_for_store, run_beat_interval_hr_validation_for_store,
         run_heart_rate_feature_report_for_store, run_hrv_capture_validation_for_store,
-        run_hrv_feature_report_for_store, run_k20_optical_channel_scan_for_store,
+        run_hrv_feature_report_for_store, run_k20_field_discovery_for_store,
+        run_k20_optical_channel_scan_for_store, run_k20_waveform_transform_scan_for_store,
         run_k26_beat_field_scan_for_store, run_metric_window_feature_report_for_store,
         run_motion_feature_report_for_store, run_oxygen_saturation_capture_validation_for_store,
         run_recovery_feature_score_report_for_store,
@@ -972,6 +974,97 @@ struct K20OpticalChannelScanArgs {
     max_ranked_channels: Option<usize>,
     #[serde(default)]
     max_segment_summaries: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct K20WaveformTransformScanArgs {
+    database_path: String,
+    #[serde(default = "default_correlation_start")]
+    start: String,
+    #[serde(default = "default_correlation_end")]
+    end: String,
+    #[serde(default)]
+    min_owned_captures: Option<usize>,
+    #[serde(default)]
+    sample_rate_hz_values: Vec<f64>,
+    #[serde(default)]
+    min_peak_spacing_samples_values: Vec<usize>,
+    #[serde(default)]
+    smoothing_window_samples_values: Vec<usize>,
+    #[serde(default)]
+    threshold_stddev_multipliers: Vec<f64>,
+    #[serde(default)]
+    max_hr_match_lag_seconds: Option<f64>,
+    #[serde(default)]
+    hr_tolerance_bpm: Option<f64>,
+    #[serde(default)]
+    min_matching_segments: Option<usize>,
+    #[serde(default)]
+    max_ranked_transforms: Option<usize>,
+    #[serde(default)]
+    max_segment_summaries: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct K20FieldDiscoveryArgs {
+    database_path: String,
+    #[serde(default = "default_correlation_start")]
+    start: String,
+    #[serde(default = "default_correlation_end")]
+    end: String,
+    #[serde(default)]
+    min_owned_captures: Option<usize>,
+    #[serde(default)]
+    max_hr_match_lag_seconds: Option<f64>,
+    #[serde(default)]
+    min_matching_frames: Option<usize>,
+    #[serde(default)]
+    max_ranked_fields: Option<usize>,
+    #[serde(default)]
+    max_frame_summaries: Option<usize>,
+    #[serde(default)]
+    max_analyzed_frames: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BeatEvidenceReportArgs {
+    database_path: String,
+    #[serde(default = "default_correlation_start")]
+    start: String,
+    #[serde(default = "default_correlation_end")]
+    end: String,
+    #[serde(default)]
+    baseline_start: Option<String>,
+    #[serde(default)]
+    baseline_end: Option<String>,
+    #[serde(default)]
+    capture_session_ids: Vec<String>,
+    #[serde(default)]
+    expected_packet_families: Vec<String>,
+    #[serde(default)]
+    min_owned_captures: Option<usize>,
+    #[serde(default)]
+    max_hr_match_lag_seconds: Option<f64>,
+    #[serde(default)]
+    hr_tolerance_bpm: Option<f64>,
+    #[serde(default)]
+    min_matching_segments: Option<usize>,
+    #[serde(default)]
+    min_matching_frames: Option<usize>,
+    #[serde(default)]
+    max_ranked_transforms: Option<usize>,
+    #[serde(default)]
+    max_ranked_channels: Option<usize>,
+    #[serde(default)]
+    max_ranked_fields: Option<usize>,
+    #[serde(default)]
+    max_ranked_candidates: Option<usize>,
+    #[serde(default)]
+    max_segment_summaries: Option<usize>,
+    #[serde(default)]
+    max_frame_summaries: Option<usize>,
+    #[serde(default)]
+    max_analyzed_frames: Option<usize>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2319,6 +2412,20 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "metrics.k20_optical_channel_scan" => request_args::<K20OpticalChannelScanArgs>(&request)
             .and_then(k20_optical_channel_scan_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "metrics.k20_waveform_transform_scan" => {
+            request_args::<K20WaveformTransformScanArgs>(&request)
+                .and_then(k20_waveform_transform_scan_bridge)
+                .map(|value| bridge_ok(&request.request_id, value))
+                .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error))
+        }
+        "metrics.k20_field_discovery" => request_args::<K20FieldDiscoveryArgs>(&request)
+            .and_then(k20_field_discovery_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "metrics.beat_evidence_report" => request_args::<BeatEvidenceReportArgs>(&request)
+            .and_then(beat_evidence_report_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "metrics.hrv_capture_validation" => request_args::<HrvCaptureValidationArgs>(&request)
@@ -4966,6 +5073,359 @@ fn k20_optical_channel_scan_bridge(
             "cannot serialize K20 optical channel scan report: {error}"
         ))
     })
+}
+
+fn k20_waveform_transform_scan_bridge(
+    args: K20WaveformTransformScanArgs,
+) -> OpenVitalsResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let defaults = K20WaveformTransformScanOptions::default();
+    let report = run_k20_waveform_transform_scan_for_store(
+        &store,
+        &args.database_path,
+        &args.start,
+        &args.end,
+        K20WaveformTransformScanOptions {
+            min_owned_captures_per_summary: args
+                .min_owned_captures
+                .unwrap_or(DEFAULT_MIN_OWNED_CAPTURES_PER_SUMMARY),
+            sample_rate_hz_values: if args.sample_rate_hz_values.is_empty() {
+                defaults.sample_rate_hz_values.clone()
+            } else {
+                args.sample_rate_hz_values
+            },
+            min_peak_spacing_samples_values: if args.min_peak_spacing_samples_values.is_empty() {
+                defaults.min_peak_spacing_samples_values.clone()
+            } else {
+                args.min_peak_spacing_samples_values
+            },
+            smoothing_window_samples_values: if args.smoothing_window_samples_values.is_empty() {
+                defaults.smoothing_window_samples_values.clone()
+            } else {
+                args.smoothing_window_samples_values
+            },
+            threshold_stddev_multipliers: if args.threshold_stddev_multipliers.is_empty() {
+                defaults.threshold_stddev_multipliers.clone()
+            } else {
+                args.threshold_stddev_multipliers
+            },
+            max_hr_match_lag_seconds: args.max_hr_match_lag_seconds.unwrap_or(10.0),
+            hr_tolerance_bpm: args.hr_tolerance_bpm.unwrap_or(8.0),
+            min_matching_segments: args.min_matching_segments.unwrap_or(2),
+            max_ranked_transforms: args.max_ranked_transforms.unwrap_or(16),
+            max_segment_summaries: args.max_segment_summaries.unwrap_or(16),
+        },
+    )?;
+    serde_json::to_value(report).map_err(|error| {
+        OpenVitalsError::message(format!(
+            "cannot serialize K20 waveform transform scan report: {error}"
+        ))
+    })
+}
+
+fn k20_field_discovery_bridge(args: K20FieldDiscoveryArgs) -> OpenVitalsResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let report = run_k20_field_discovery_for_store(
+        &store,
+        &args.database_path,
+        &args.start,
+        &args.end,
+        K20FieldDiscoveryOptions {
+            min_owned_captures_per_summary: args
+                .min_owned_captures
+                .unwrap_or(DEFAULT_MIN_OWNED_CAPTURES_PER_SUMMARY),
+            max_hr_match_lag_seconds: args.max_hr_match_lag_seconds.unwrap_or(10.0),
+            min_matching_frames: args.min_matching_frames.unwrap_or(20),
+            max_ranked_fields: args.max_ranked_fields.unwrap_or(24),
+            max_frame_summaries: args.max_frame_summaries.unwrap_or(24),
+            max_analyzed_frames: args.max_analyzed_frames.unwrap_or(600),
+        },
+    )?;
+    serde_json::to_value(report).map_err(|error| {
+        OpenVitalsError::message(format!(
+            "cannot serialize K20 field discovery report: {error}"
+        ))
+    })
+}
+
+fn beat_evidence_report_bridge(
+    args: BeatEvidenceReportArgs,
+) -> OpenVitalsResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let min_owned_captures = args
+        .min_owned_captures
+        .unwrap_or(DEFAULT_MIN_OWNED_CAPTURES_PER_SUMMARY);
+    let max_hr_match_lag_seconds = args.max_hr_match_lag_seconds.unwrap_or(10.0);
+    let hr_tolerance_bpm = args.hr_tolerance_bpm.unwrap_or(8.0);
+    let min_matching_segments = args.min_matching_segments.unwrap_or(2);
+    let min_matching_frames = args.min_matching_frames.unwrap_or(20);
+    let max_segment_summaries = args.max_segment_summaries.unwrap_or(8);
+    let max_frame_summaries = args.max_frame_summaries.unwrap_or(8);
+    let expected_packet_families = if args.expected_packet_families.is_empty() {
+        vec![
+            "K10_raw_stream".to_string(),
+            "K11_raw_stream".to_string(),
+            "K16_raw_ecg_labrador".to_string(),
+            "K17_R17_optical_or_filtered".to_string(),
+            "K18_trusted_heart_rate".to_string(),
+            "K20_raw_or_research_stream".to_string(),
+            "K21_raw_motion_stream".to_string(),
+            "K26_pulse_information".to_string(),
+        ]
+    } else {
+        args.expected_packet_families.clone()
+    };
+
+    let packet_delta = run_command_stream_packet_delta_for_store(
+        &store,
+        CommandStreamPacketDeltaOptions {
+            start: args.start.clone(),
+            end: args.end.clone(),
+            baseline_start: args.baseline_start.clone(),
+            baseline_end: args.baseline_end.clone(),
+            capture_session_ids: args.capture_session_ids.clone(),
+            expected_packet_families,
+        },
+    )?;
+    let waveform = run_k20_waveform_transform_scan_for_store(
+        &store,
+        &args.database_path,
+        &args.start,
+        &args.end,
+        K20WaveformTransformScanOptions {
+            min_owned_captures_per_summary: min_owned_captures,
+            min_matching_segments,
+            max_ranked_transforms: args.max_ranked_transforms.unwrap_or(12),
+            max_segment_summaries,
+            max_hr_match_lag_seconds,
+            hr_tolerance_bpm,
+            ..K20WaveformTransformScanOptions::default()
+        },
+    )?;
+    let channel = run_k20_optical_channel_scan_for_store(
+        &store,
+        &args.database_path,
+        &args.start,
+        &args.end,
+        K20OpticalChannelScanOptions {
+            min_owned_captures_per_summary: min_owned_captures,
+            max_hr_match_lag_seconds,
+            hr_tolerance_bpm,
+            min_matching_segments,
+            max_ranked_channels: args.max_ranked_channels.unwrap_or(8),
+            max_segment_summaries,
+            ..K20OpticalChannelScanOptions::default()
+        },
+    )?;
+    let field = run_k20_field_discovery_for_store(
+        &store,
+        &args.database_path,
+        &args.start,
+        &args.end,
+        K20FieldDiscoveryOptions {
+            min_owned_captures_per_summary: min_owned_captures,
+            max_hr_match_lag_seconds,
+            min_matching_frames,
+            max_ranked_fields: args.max_ranked_fields.unwrap_or(12),
+            max_frame_summaries,
+            max_analyzed_frames: args.max_analyzed_frames.unwrap_or(600),
+        },
+    )?;
+    let k26 = run_k26_beat_field_scan_for_store(
+        &store,
+        &args.database_path,
+        &args.start,
+        &args.end,
+        K26BeatFieldScanOptions {
+            min_owned_captures_per_summary: min_owned_captures,
+            max_hr_match_lag_seconds,
+            hr_tolerance_bpm,
+            min_matching_frames,
+            max_ranked_candidates: args.max_ranked_candidates.unwrap_or(12),
+            max_frame_summaries,
+        },
+    )?;
+
+    let packet_delta_value = serde_json::to_value(packet_delta).map_err(|error| {
+        OpenVitalsError::message(format!(
+            "cannot serialize beat evidence packet delta report: {error}"
+        ))
+    })?;
+    let waveform_value = serde_json::to_value(waveform).map_err(|error| {
+        OpenVitalsError::message(format!(
+            "cannot serialize beat evidence K20 waveform report: {error}"
+        ))
+    })?;
+    let channel_value = serde_json::to_value(channel).map_err(|error| {
+        OpenVitalsError::message(format!(
+            "cannot serialize beat evidence K20 channel report: {error}"
+        ))
+    })?;
+    let field_value = serde_json::to_value(field).map_err(|error| {
+        OpenVitalsError::message(format!(
+            "cannot serialize beat evidence K20 field report: {error}"
+        ))
+    })?;
+    let k26_value = serde_json::to_value(k26).map_err(|error| {
+        OpenVitalsError::message(format!(
+            "cannot serialize beat evidence K26 field report: {error}"
+        ))
+    })?;
+    let waveform_best = waveform_value
+        .get("ranked_transforms")
+        .and_then(Value::as_array)
+        .and_then(|rows| rows.first())
+        .cloned();
+    let channel_best = channel_value
+        .get("ranked_channels")
+        .and_then(Value::as_array)
+        .and_then(|rows| rows.first())
+        .cloned();
+    let field_best = field_value
+        .get("ranked_fields")
+        .and_then(Value::as_array)
+        .and_then(|rows| rows.first())
+        .cloned();
+    let k26_best = k26_value
+        .get("ranked_candidates")
+        .and_then(Value::as_array)
+        .and_then(|rows| rows.first())
+        .cloned();
+    let rr_reference_sample_count = json_usize(&waveform_value, "rr_reference_sample_count")
+        .max(json_usize(&channel_value, "rr_reference_sample_count"));
+    let waveform_pass = json_bool(&waveform_value, "pass");
+    let channel_pass = json_bool(&channel_value, "pass");
+    let k20_present = json_usize(&waveform_value, "k20_frame_count")
+        .max(json_usize(&channel_value, "k20_frame_count"))
+        > 0;
+    let k26_present = json_usize(&k26_value, "k26_frame_count") > 0;
+    let mut issues = Vec::new();
+    if !k20_present && !k26_present {
+        issues.push("no_k20_or_k26_beat_evidence_frames".to_string());
+    }
+    if rr_reference_sample_count == 0 {
+        issues.push("missing_rr_reference_samples".to_string());
+    }
+    if !waveform_pass && !channel_pass {
+        issues.push("no_rr_validated_k20_candidate".to_string());
+    }
+    let validation_status = if waveform_pass || channel_pass {
+        "candidate_hr_and_rr_aligned"
+    } else if rr_reference_sample_count == 0
+        && json_string(&waveform_value, "validation_status")
+            == Some("candidate_hr_aligned_needs_rr_reference".to_string())
+    {
+        "candidate_hr_aligned_needs_rr_reference"
+    } else if k20_present || k26_present {
+        "diagnostic_candidates_need_more_validation"
+    } else {
+        "blocked"
+    };
+    let pass = issues.is_empty();
+    let next_actions = beat_evidence_next_actions(
+        &issues,
+        &validation_status,
+        &[
+            &packet_delta_value,
+            &waveform_value,
+            &channel_value,
+            &field_value,
+            &k26_value,
+        ],
+    );
+
+    Ok(json!({
+        "schema": "open_vitals.beat-evidence-report.v1",
+        "generated_by": "open-vitals-beat-evidence-report",
+        "pass": pass,
+        "validation_status": validation_status,
+        "start_time": args.start,
+        "end_time": args.end,
+        "baseline_start": args.baseline_start,
+        "baseline_end": args.baseline_end,
+        "capture_session_ids": args.capture_session_ids,
+        "rr_reference_sample_count": rr_reference_sample_count,
+        "summary": {
+            "packet_delta_pass": json_bool(&packet_delta_value, "pass"),
+            "waveform_transform_pass": waveform_pass,
+            "k20_channel_pass": channel_pass,
+            "k20_field_discovery_pass": json_bool(&field_value, "pass"),
+            "k26_field_scan_pass": json_bool(&k26_value, "pass"),
+            "k20_frame_count": json_usize(&waveform_value, "k20_frame_count").max(json_usize(&channel_value, "k20_frame_count")),
+            "k26_frame_count": json_usize(&k26_value, "k26_frame_count"),
+            "best_waveform_transform": waveform_best,
+            "best_k20_channel": channel_best,
+            "best_k20_field": field_best,
+            "best_k26_field": k26_best
+        },
+        "packet_delta": packet_delta_value,
+        "k20_waveform_transform_scan": waveform_value,
+        "k20_optical_channel_scan": channel_value,
+        "k20_field_discovery": field_value,
+        "k26_beat_field_scan": k26_value,
+        "issues": issues,
+        "next_actions": next_actions,
+    }))
+}
+
+fn json_bool(value: &Value, key: &str) -> bool {
+    value.get(key).and_then(Value::as_bool).unwrap_or(false)
+}
+
+fn json_usize(value: &Value, key: &str) -> usize {
+    value
+        .get(key)
+        .and_then(Value::as_u64)
+        .map(|value| value as usize)
+        .unwrap_or(0)
+}
+
+fn json_string(value: &Value, key: &str) -> Option<String> {
+    value.get(key).and_then(Value::as_str).map(str::to_string)
+}
+
+fn beat_evidence_next_actions(
+    issues: &[String],
+    validation_status: &str,
+    nested_reports: &[&Value],
+) -> Vec<Value> {
+    let mut actions = Vec::new();
+    if issues
+        .iter()
+        .any(|issue| issue == "no_k20_or_k26_beat_evidence_frames")
+    {
+        actions.push(json!({
+            "scope": "beat_interval.capture",
+            "reason": "no_k20_or_k26_beat_evidence_frames",
+            "action": "Run automatic Stream Probe while the device is on-body and connected, then export the local data bundle."
+        }));
+    }
+    if issues
+        .iter()
+        .any(|issue| issue == "missing_rr_reference_samples")
+    {
+        actions.push(json!({
+            "scope": "beat_interval.external_reference",
+            "reason": "missing_rr_reference_samples",
+            "action": "Collect overlapping RR Reference samples from a standard BLE heart-rate reference device during the same Stream Probe window."
+        }));
+    }
+    if validation_status == "candidate_hr_aligned_needs_rr_reference" {
+        actions.push(json!({
+            "scope": "beat_interval.validation",
+            "reason": "hr_alignment_is_not_rr_validation",
+            "action": "Use the best K20 waveform/channel candidate as a lead only; compare it against true RR intervals before using it for HRV."
+        }));
+    }
+    for report in nested_reports {
+        let Some(rows) = report.get("next_actions").and_then(Value::as_array) else {
+            continue;
+        };
+        actions.extend(rows.iter().cloned());
+    }
+    let mut seen = BTreeSet::new();
+    actions.retain(|action| seen.insert(action.to_string()));
+    actions
 }
 
 fn hrv_capture_validation_bridge(

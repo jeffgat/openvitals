@@ -573,7 +573,12 @@ extension MoreDataStore {
     supabaseLastManifestPath = "Waiting for local manifest..."
     supabaseLastDatabaseRow = "Waiting for object uploads to finish"
     localExportInProgress = true
-    localExportStatus = "Saving local data file..."
+    localExportProgress = OpenVitalsLocalDataExportProgress(
+      title: "Preparing export",
+      detail: "Collecting local files",
+      fractionCompleted: nil
+    )
+    localExportStatus = localExportProgress?.statusText ?? "Preparing export..."
     localExportURL = nil
     localExportManifestURL = nil
 
@@ -589,11 +594,20 @@ extension MoreDataStore {
     DispatchQueue.global(qos: .userInitiated).async {
       var bundleCreated = false
       do {
-        let bundle = try OpenVitalsLocalDataExporter.createBundle()
+        let bundle = try OpenVitalsLocalDataExporter.createBundle { progress in
+          DispatchQueue.main.async {
+            self.applyLocalDataExportProgress(progress)
+          }
+        }
         bundleCreated = true
         DispatchQueue.main.async {
           self.localExportInProgress = false
           self.localExportStatus = "Saved \(bundle.fileCount) files, \(Self.byteCountText(bundle.byteCount))\(bundle.manifestStatusSuffix) | \(bundle.validation.summary)"
+          self.localExportProgress = OpenVitalsLocalDataExportProgress(
+            title: "Done",
+            detail: "Saved \(bundle.fileCount) files, \(Self.byteCountText(bundle.byteCount))",
+            fractionCompleted: 1
+          )
           self.localExportURL = bundle.url
           self.localExportManifestURL = bundle.manifestURL
           self.supabaseUploadStatus = "Uploading debug bundle objects..."
@@ -617,6 +631,7 @@ extension MoreDataStore {
           let message = Self.supabaseDebugUploadFailureSummary(error)
           if !bundleCreated {
             self.localExportStatus = "Local export failed: \(message)"
+            self.localExportProgress = nil
             self.supabaseLastBundlePath = "Not uploaded because local bundle creation failed"
             self.supabaseLastManifestPath = "Not uploaded because local bundle creation failed"
             self.supabaseLastDatabaseRow = "Not inserted because local bundle creation failed"

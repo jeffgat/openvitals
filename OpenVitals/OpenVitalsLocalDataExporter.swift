@@ -26,6 +26,33 @@ struct OpenVitalsLocalDataExportResult {
   }
 }
 
+struct OpenVitalsLocalDataExportProgress {
+  let title: String
+  let detail: String
+  let fractionCompleted: Double?
+
+  var boundedFractionCompleted: Double? {
+    guard let fractionCompleted else {
+      return nil
+    }
+    return min(max(fractionCompleted, 0), 1)
+  }
+
+  var percentText: String? {
+    guard let boundedFractionCompleted else {
+      return nil
+    }
+    return "\(Int((boundedFractionCompleted * 100).rounded()))%"
+  }
+
+  var statusText: String {
+    if let percentText {
+      return "\(title): \(detail) | \(percentText)"
+    }
+    return "\(title): \(detail)"
+  }
+}
+
 enum OpenVitalsLocalDataExportError: LocalizedError, CustomStringConvertible {
   case invalidBundleJSON(String)
   case outputAlreadyExists(String)
@@ -429,7 +456,10 @@ enum OpenVitalsLocalDataExporter {
     return formatter
   }()
 
-  static func createBundle(requiredOvernightSessionID: String? = nil) throws -> OpenVitalsLocalDataExportResult {
+  static func createBundle(
+    requiredOvernightSessionID: String? = nil,
+    progress: ((OpenVitalsLocalDataExportProgress) -> Void)? = nil
+  ) throws -> OpenVitalsLocalDataExportResult {
     let fileManager = FileManager.default
     let now = Date()
     let createdAt = ISO8601DateFormatter().string(from: now)
@@ -461,6 +491,51 @@ enum OpenVitalsLocalDataExporter {
     var exportedFileSummaries: [[String: Any]] = []
     var sourceReadFailureCount = 0
     var sourceReadFailureIssues: [String] = []
+    var completedValidation: OpenVitalsLocalDataExportValidation?
+
+    func report(_ title: String, _ detail: String, _ fractionCompleted: Double? = nil) {
+      progress?(OpenVitalsLocalDataExportProgress(
+        title: title,
+        detail: detail,
+        fractionCompleted: fractionCompleted
+      ))
+    }
+
+    report("Preparing export", "Collecting local files", 0.02)
+
+    let selectedFiles = roots.flatMap { root in
+      filesUnder(
+        root.url,
+        label: root.label,
+        outputDirectory: exportsDirectory,
+        requiredOvernightSessionID: requiredOvernightSessionID,
+        fileManager: fileManager
+      )
+      .filter { !shouldSkipFileDuringExport($0.relativePath) }
+      .map { file in
+        (source: root.label, url: file.url, relativePath: file.relativePath)
+      }
+    }
+    let totalSourceBytes = selectedFiles.reduce(UInt64(0)) { total, file in
+      total + fileByteCount(at: file.url, fileManager: fileManager)
+    }
+    var completedSourceBytes: UInt64 = 0
+    var lastReportedWritingFraction = 0.0
+
+    func reportWritingProgress(fileName: String, currentFileBytes: UInt64 = 0, force: Bool = false) {
+      let detail = "Writing \(fileName)"
+      guard totalSourceBytes > 0 else {
+        report("Writing bundle", detail, nil)
+        return
+      }
+      let currentBytes = min(completedSourceBytes + currentFileBytes, totalSourceBytes)
+      let writingFraction = Double(currentBytes) / Double(totalSourceBytes)
+      let overallFraction = 0.15 + (writingFraction * 0.60)
+      if force || overallFraction - lastReportedWritingFraction >= 0.005 {
+        lastReportedWritingFraction = overallFraction
+        report("Writing bundle", detail, overallFraction)
+      }
+    }
 
     do {
       try writeString("{", to: handle)
@@ -473,19 +548,52 @@ enum OpenVitalsLocalDataExporter {
       ], to: handle)
       try writeString(",\"files\":[", to: handle)
 
-      for root in roots {
-        let files = filesUnder(
-          root.url,
-          label: root.label,
-          outputDirectory: exportsDirectory,
-          requiredOvernightSessionID: requiredOvernightSessionID,
-          fileManager: fileManager
-        )
-        for file in files {
+      for file in selectedFiles {
+          let fileName = file.url.lastPathComponent
+          let preparedReadURL: URL
+          let cleanupURL: URL?
+          do {
+            if file.relativePath == "Application Support/OpenVitals/open_vitals.sqlite" {
+              report("Snapshotting database", "Creating a consistent SQLite copy", 0.08)
+            }
+            let prepared = try preparedReadURLForExport(
+              sourceURL: file.url,
+              relativePath: file.relativePath,
+              exportID: exportID,
+              fileManager: fileManager
+            )
+            preparedReadURL = prepared.url
+            cleanupURL = prepared.cleanupURL
+          } catch {
+            sourceReadFailureCount += 1
+            if sourceReadFailureIssues.count < 5 {
+              sourceReadFailureIssues.append("failed to snapshot selected export file \(file.relativePath): \(String(describing: error))")
+            }
+            if !firstFile {
+              try writeString(",", to: handle)
+            }
+            firstFile = false
+            try writeJSONObject([
+              "source": file.source,
+              "relative_path": file.relativePath,
+              "error": String(describing: error),
+            ], to: handle)
+            exportedFileSummaries.append([
+              "source": file.source,
+              "relative_path": file.relativePath,
+              "exported": false,
+              "error": String(describing: error),
+            ])
+            continue
+          }
+
           let inputHandle: FileHandle
           do {
-            inputHandle = try FileHandle(forReadingFrom: file.url)
+            inputHandle = try FileHandle(forReadingFrom: preparedReadURL)
           } catch {
+            if let cleanupURL {
+              try? fileManager.removeItem(at: cleanupURL)
+            }
             sourceReadFailureCount += 1
             if sourceReadFailureIssues.count < 5 {
               sourceReadFailureIssues.append("failed to read selected export file \(file.relativePath): \(String(describing: error))")
@@ -495,12 +603,12 @@ enum OpenVitalsLocalDataExporter {
             }
             firstFile = false
             try writeJSONObject([
-              "source": root.label,
+              "source": file.source,
               "relative_path": file.relativePath,
               "error": String(describing: error),
             ], to: handle)
             exportedFileSummaries.append([
-              "source": root.label,
+              "source": file.source,
               "relative_path": file.relativePath,
               "exported": false,
               "error": String(describing: error),
@@ -514,17 +622,26 @@ enum OpenVitalsLocalDataExporter {
           firstFile = false
 
           do {
+            reportWritingProgress(fileName: fileName, force: true)
             let exportedFileDigest = try writeFileRecord(
-              source: root.label,
+              source: file.source,
               relativePath: file.relativePath,
               inputHandle: inputHandle,
-              to: handle
-            )
+              to: handle,
+              progress: { bytesWritten in
+                reportWritingProgress(fileName: fileName, currentFileBytes: bytesWritten)
+              }
+          )
+            if let cleanupURL {
+              try? fileManager.removeItem(at: cleanupURL)
+            }
             byteCount += exportedFileDigest.byteCount
+            completedSourceBytes += exportedFileDigest.byteCount
+            reportWritingProgress(fileName: fileName, force: true)
             fileCount += 1
             exportedRelativePaths.append(file.relativePath)
             exportedFileSummaries.append([
-              "source": root.label,
+              "source": file.source,
               "relative_path": file.relativePath,
               "exported": true,
               "byte_count": Int64(exportedFileDigest.byteCount),
@@ -532,14 +649,17 @@ enum OpenVitalsLocalDataExporter {
             ])
           } catch {
             try? inputHandle.close()
+            if let cleanupURL {
+              try? fileManager.removeItem(at: cleanupURL)
+            }
             throw error
           }
-        }
       }
 
       if sourceReadFailureCount > sourceReadFailureIssues.count {
         sourceReadFailureIssues.append("failed to read \(sourceReadFailureCount - sourceReadFailureIssues.count) additional selected export files")
       }
+      report("Validating bundle", "Checking included files and storage", 0.78)
       let validation = sourceReadFailureIssues.reduce(
         validate(
           exportedRelativePaths: exportedRelativePaths,
@@ -550,6 +670,7 @@ enum OpenVitalsLocalDataExporter {
       ) { validation, issue in
         validation.withAdditionalIssue(issue)
       }
+      completedValidation = validation
       try writeString("],\"summary\":", to: handle)
       try writeJSONObject([
         "export_id": exportID,
@@ -561,7 +682,9 @@ enum OpenVitalsLocalDataExporter {
         "validation": validation.jsonObject,
       ], to: handle)
       try writeString("}\n", to: handle)
+      report("Writing bundle", "Flushing local data file", 0.84)
       try synchronizeAndClose(handle)
+      report("Validating bundle", "Checking JSON structure", 0.86)
       if let validationError = bundleJSONStructureIssue(at: temporaryURL) {
         throw OpenVitalsLocalDataExportError.invalidBundleJSON(validationError)
       }
@@ -575,19 +698,13 @@ enum OpenVitalsLocalDataExporter {
       try? fileManager.removeItem(at: temporaryURL)
       throw error
     }
-    let validation = sourceReadFailureIssues.reduce(
-      validate(
-        exportedRelativePaths: exportedRelativePaths,
-        requiredOvernightSessionID: requiredOvernightSessionID,
-        documentsDirectory: documentsDirectory,
-        fileManager: fileManager
-      ).withBundleJSONValidation(valid: true, error: nil)
-    ) { validation, issue in
-      validation.withAdditionalIssue(issue)
+    guard let validation = completedValidation else {
+      throw OpenVitalsLocalDataExportError.invalidBundleJSON("Local export validation did not complete")
     }
     let manifestURL: URL?
     let manifestError: String?
     do {
+      report("Hashing manifest", "Hashing final bundle", 0.88)
       manifestURL = try writeExportManifest(
         for: outputURL,
         createdAt: createdAt,
@@ -596,7 +713,10 @@ enum OpenVitalsLocalDataExporter {
         fileCount: fileCount,
         byteCount: byteCount,
         files: exportedFileSummaries,
-        validation: validation
+        validation: validation,
+        progress: { digestFraction in
+          report("Hashing manifest", "Hashing final bundle", 0.88 + (digestFraction * 0.10))
+        }
       )
       manifestError = nil
     } catch {
@@ -609,6 +729,7 @@ enum OpenVitalsLocalDataExporter {
     } else {
       resultValidation = validation
     }
+    report("Done", "Local data file saved", 1)
     return OpenVitalsLocalDataExportResult(
       url: outputURL,
       manifestURL: manifestURL,
@@ -627,12 +748,13 @@ enum OpenVitalsLocalDataExporter {
     fileCount: Int,
     byteCount: UInt64,
     files: [[String: Any]],
-    validation: OpenVitalsLocalDataExportValidation
+    validation: OpenVitalsLocalDataExportValidation,
+    progress: ((Double) -> Void)? = nil
   ) throws -> URL {
     let manifestURL = bundleURL
       .deletingPathExtension()
       .appendingPathExtension("manifest.json")
-    let bundleDigest = try fileDigest(at: bundleURL)
+    let bundleDigest = try fileDigest(at: bundleURL, progress: progress)
     let object: [String: Any] = [
       "schema": "open_vitals.local-data-export-manifest.v1",
       "bundle_file": bundleURL.lastPathComponent,

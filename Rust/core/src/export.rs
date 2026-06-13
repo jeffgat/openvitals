@@ -4,6 +4,7 @@ use std::{
     fs::File,
     io::{Read, Write},
     path::{Component, Path, PathBuf},
+    time::Duration,
 };
 
 use rusqlite::Connection;
@@ -34,6 +35,8 @@ use crate::{
     },
     timeline::{PacketTimelineRow, packet_timeline_from_decoded_frames},
 };
+
+const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(15);
 
 const ALLOWED_ACTIVITY_SYNC_STATUSES: &[&str] = &[
     "candidate",
@@ -1628,6 +1631,7 @@ fn snapshot_sqlite_database(source_path: &Path, target_path: &Path) -> OpenVital
             "cannot open SQLite source for raw export snapshot: {error}"
         ))
     })?;
+    connection.busy_timeout(SQLITE_BUSY_TIMEOUT)?;
     let target_literal = sql_string_literal(&target_path.display().to_string());
     connection
         .execute_batch(&format!("VACUUM INTO {target_literal};"))

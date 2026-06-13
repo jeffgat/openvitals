@@ -79,7 +79,10 @@ struct MoreRawExportView: View {
         }
 
         if store.localExportInProgress {
-          ProgressView("Saving local data file")
+          MoreLocalExportProgressView(
+            progress: store.localExportProgress,
+            fallback: store.localExportStatus
+          )
         }
 
         if let localExportURL = store.localExportURL {
@@ -178,7 +181,14 @@ struct MoreRawExportView: View {
         .disabled(store.supabaseUploadInProgress)
 
         if store.supabaseUploadInProgress {
-          ProgressView(store.supabaseUploadStatus)
+          if store.localExportInProgress {
+            MoreLocalExportProgressView(
+              progress: store.localExportProgress,
+              fallback: store.localExportStatus
+            )
+          } else {
+            ProgressView(store.supabaseUploadStatus)
+          }
         }
 
         MoreInfoRow(

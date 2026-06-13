@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import SQLite3
 import SwiftUI
 import UIKit
 
@@ -293,6 +294,102 @@ extension OpenVitalsLocalDataExporter {
     })
   }
 
+  static func shouldSkipFileDuringExport(_ relativePath: String) -> Bool {
+    relativePath == "Application Support/OpenVitals/open_vitals.sqlite-wal"
+      || relativePath == "Application Support/OpenVitals/open_vitals.sqlite-shm"
+  }
+
+  static func preparedReadURLForExport(
+    sourceURL: URL,
+    relativePath: String,
+    exportID: String,
+    fileManager: FileManager
+  ) throws -> (url: URL, cleanupURL: URL?) {
+    guard relativePath == "Application Support/OpenVitals/open_vitals.sqlite" else {
+      return (sourceURL, nil)
+    }
+
+    let snapshotURL = fileManager.temporaryDirectory
+      .appendingPathComponent("open-vitals-sqlite-snapshot-\(exportID)-\(UUID().uuidString).sqlite")
+    try? fileManager.removeItem(at: snapshotURL)
+    try snapshotSQLiteDatabase(from: sourceURL, to: snapshotURL)
+    try applyExportProtection(to: snapshotURL)
+    return (snapshotURL, snapshotURL)
+  }
+
+  static func snapshotSQLiteDatabase(from sourceURL: URL, to targetURL: URL) throws {
+    var sourceDB: OpaquePointer?
+    var targetDB: OpaquePointer?
+
+    let sourceFlags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
+    var rc = sqlite3_open_v2(sourceURL.path, &sourceDB, sourceFlags, nil)
+    guard rc == SQLITE_OK, let sourceDB else {
+      let message = sqliteErrorMessage(db: sourceDB, fallback: "open source sqlite", code: rc)
+      if sourceDB != nil {
+        sqlite3_close(sourceDB)
+      }
+      throw sqliteSnapshotError(message)
+    }
+    defer {
+      sqlite3_close(sourceDB)
+    }
+    sqlite3_busy_timeout(sourceDB, 15_000)
+
+    let targetFlags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
+    rc = sqlite3_open_v2(targetURL.path, &targetDB, targetFlags, nil)
+    guard rc == SQLITE_OK, let targetDB else {
+      let message = sqliteErrorMessage(db: targetDB, fallback: "open target sqlite snapshot", code: rc)
+      if targetDB != nil {
+        sqlite3_close(targetDB)
+      }
+      throw sqliteSnapshotError(message)
+    }
+    defer {
+      sqlite3_close(targetDB)
+    }
+    sqlite3_busy_timeout(targetDB, 15_000)
+
+    guard let backup = sqlite3_backup_init(targetDB, "main", sourceDB, "main") else {
+      throw sqliteSnapshotError(sqliteErrorMessage(db: targetDB, fallback: "start sqlite backup", code: sqlite3_errcode(targetDB)))
+    }
+
+    while true {
+      rc = sqlite3_backup_step(backup, 256)
+      if rc == SQLITE_DONE {
+        break
+      }
+      if rc == SQLITE_OK {
+        continue
+      }
+      if rc == SQLITE_BUSY || rc == SQLITE_LOCKED {
+        Thread.sleep(forTimeInterval: 0.05)
+        continue
+      }
+      break
+    }
+
+    let finishRC = sqlite3_backup_finish(backup)
+    guard rc == SQLITE_DONE, finishRC == SQLITE_OK else {
+      let code = rc == SQLITE_DONE ? finishRC : rc
+      throw sqliteSnapshotError(sqliteErrorMessage(db: targetDB, fallback: "finish sqlite backup", code: code))
+    }
+  }
+
+  static func sqliteErrorMessage(db: OpaquePointer?, fallback: String, code: Int32) -> String {
+    if let db, let message = sqlite3_errmsg(db) {
+      return "\(fallback): \(String(cString: message))"
+    }
+    return "\(fallback): SQLite code \(code)"
+  }
+
+  static func sqliteSnapshotError(_ message: String) -> NSError {
+    NSError(
+      domain: "OpenVitalsLocalDataExporter.SQLiteSnapshot",
+      code: 1,
+      userInfo: [NSLocalizedDescriptionKey: message]
+    )
+  }
+
   static func shouldIncludeFile(
     label: String,
     relativePath: String,
@@ -386,7 +483,8 @@ extension OpenVitalsLocalDataExporter {
     source: String,
     relativePath: String,
     inputHandle: FileHandle,
-    to outputHandle: FileHandle
+    to outputHandle: FileHandle,
+    progress: ((UInt64) -> Void)? = nil
   ) throws -> FileContentDigest {
     defer {
       try? inputHandle.close()
@@ -398,12 +496,16 @@ extension OpenVitalsLocalDataExporter {
       "relative_path": relativePath,
     ], to: outputHandle)
     try writeString(",\"base64\":\"", to: outputHandle)
-    let digest = try writeBase64Contents(from: inputHandle, to: outputHandle)
+    let digest = try writeBase64Contents(from: inputHandle, to: outputHandle, progress: progress)
     try writeString("\",\"byte_count\":\(digest.byteCount),\"sha256\":\"\(digest.sha256)\"}", to: outputHandle)
     return digest
   }
 
-  static func writeBase64Contents(from inputHandle: FileHandle, to outputHandle: FileHandle) throws -> FileContentDigest {
+  static func writeBase64Contents(
+    from inputHandle: FileHandle,
+    to outputHandle: FileHandle,
+    progress: ((UInt64) -> Void)? = nil
+  ) throws -> FileContentDigest {
     var byteCount: UInt64 = 0
     var carry = Data()
     var hasher = SHA256()
@@ -416,6 +518,7 @@ extension OpenVitalsLocalDataExporter {
       }
 
       byteCount += UInt64(chunk.count)
+      progress?(byteCount)
       hasher.update(data: chunk)
       var pending = carry
       pending.append(chunk)
@@ -437,7 +540,7 @@ extension OpenVitalsLocalDataExporter {
     return FileContentDigest(byteCount: byteCount, sha256: hexString(for: hasher.finalize()))
   }
 
-  static func fileDigest(at url: URL) throws -> FileContentDigest {
+  static func fileDigest(at url: URL, progress: ((Double) -> Void)? = nil) throws -> FileContentDigest {
     let handle = try FileHandle(forReadingFrom: url)
     defer {
       try? handle.close()
@@ -445,14 +548,19 @@ extension OpenVitalsLocalDataExporter {
 
     var byteCount: UInt64 = 0
     var hasher = SHA256()
+    let totalBytes = fileByteCount(at: url, fileManager: .default)
     while true {
       let chunk = try handle.read(upToCount: 256 * 1024) ?? Data()
       if chunk.isEmpty {
         break
       }
       byteCount += UInt64(chunk.count)
+      if totalBytes > 0 {
+        progress?(Double(byteCount) / Double(totalBytes))
+      }
       hasher.update(data: chunk)
     }
+    progress?(1)
     return FileContentDigest(byteCount: byteCount, sha256: hexString(for: hasher.finalize()))
   }
 

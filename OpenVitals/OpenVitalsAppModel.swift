@@ -95,6 +95,7 @@ final class OpenVitalsAppModel: ObservableObject {
   var activeActivityOwnsCaptureSession = false
   var activityRequestedHighFrequencyHistorySync = false
   var activeHealthPacketCapture: ActiveHealthPacketCapture?
+  var healthPacketCaptureStartInProgress = false
   let overnightRawSpool = OvernightRawNotificationSpool()
   var overnightGuardSession: OvernightGuardSession?
   var overnightGuardHeartbeatWorkItem: DispatchWorkItem?

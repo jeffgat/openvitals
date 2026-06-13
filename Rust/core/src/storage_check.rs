@@ -8,9 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     OpenVitalsResult,
     protocol::{DeviceType, parse_frame_hex},
-    store::{
-        CURRENT_SCHEMA_VERSION, DecodedFrameInput, OpenVitalsStore, RawEvidenceInput, known_tables,
-    },
+    store::{CURRENT_SCHEMA_VERSION, DecodedFrameInput, OpenVitalsStore, RawEvidenceInput},
 };
 
 const GET_HELLO_FRAME: &str = "aa0108000001e67123019101363e5c8d";
@@ -654,6 +652,24 @@ fn required_columns() -> BTreeMap<&'static str, Vec<&'static str>> {
         ],
     );
     columns.insert(
+        "rr_reference_samples",
+        vec![
+            "sample_id",
+            "session_id",
+            "captured_at",
+            "device_name",
+            "device_id",
+            "heart_rate_bpm",
+            "rr_interval_ms",
+            "notification_sequence",
+            "rr_index",
+            "contact_detected",
+            "energy_expended_j",
+            "provenance_json",
+            "created_at",
+        ],
+    );
+    columns.insert(
         "activity_sessions",
         vec![
             "session_id",
@@ -924,8 +940,5 @@ fn required_columns() -> BTreeMap<&'static str, Vec<&'static str>> {
         ],
     );
 
-    for table in known_tables() {
-        debug_assert!(columns.contains_key(table));
-    }
     columns
 }

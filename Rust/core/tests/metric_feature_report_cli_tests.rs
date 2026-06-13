@@ -810,6 +810,159 @@ fn metric_feature_report_cli_runs_k20_optical_channel_scan_alias() {
 }
 
 #[test]
+fn metric_feature_report_cli_runs_k20_field_discovery_alias() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let db = tempdir.path().join("open_vitals.sqlite");
+    let store = OpenVitalsStore::open(&db).unwrap();
+    import_k20_field_discovery_sequence_with_hr_reference(&store, 16);
+
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("k20-field-discovery")
+            .arg("--database")
+            .arg(&db)
+            .arg("--start")
+            .arg("2026-06-11T12:00:00Z")
+            .arg("--end")
+            .arg("2026-06-11T12:01:00Z")
+            .arg("--min-owned-captures")
+            .arg("1")
+            .arg("--min-matching-frames")
+            .arg("8")
+            .arg("--max-ranked-fields")
+            .arg("20")
+            .arg("--max-frame-summaries")
+            .arg("4")
+            .arg("--max-analyzed-frames")
+            .arg("16")
+            .output()
+            .unwrap();
+
+    assert_success(&output);
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["schema"],
+        "open_vitals.k20-field-discovery-report.v1"
+    );
+    assert_eq!(report["pass"], true);
+    assert_eq!(report["validation_status"], "field_candidates_ranked");
+    assert_eq!(report["k20_frame_count"], 16);
+    assert_eq!(report["matched_k20_frame_count"], 16);
+    assert_eq!(report["analyzed_k20_frame_count"], 16);
+
+    let ranked_fields = report["ranked_fields"].as_array().unwrap();
+    assert!(ranked_fields.iter().any(|field| {
+        field["offset"] == 180
+            && field["width"] == 1
+            && field["pearson_correlation_to_hr_bpm"]
+                .as_f64()
+                .is_some_and(|correlation| correlation >= 0.99)
+    }));
+    assert!(
+        report["next_actions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|action| action["reason"] == "field_candidates_are_not_rr_validation")
+    );
+}
+
+#[test]
+fn metric_feature_report_cli_runs_k20_waveform_transform_scan_alias() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let db = tempdir.path().join("open_vitals.sqlite");
+    let store = OpenVitalsStore::open(&db).unwrap();
+    import_k20_optical_sequence_with_hr_reference(&store, 12);
+    import_rr_reference_sequence(&store, 12);
+
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("k20-waveform-transform-scan")
+            .arg("--database")
+            .arg(&db)
+            .arg("--start")
+            .arg("2026-06-11T12:00:00Z")
+            .arg("--end")
+            .arg("2026-06-11T12:01:00Z")
+            .arg("--min-owned-captures")
+            .arg("1")
+            .arg("--min-matching-segments")
+            .arg("1")
+            .arg("--max-ranked-transforms")
+            .arg("6")
+            .arg("--max-segment-summaries")
+            .arg("4")
+            .output()
+            .unwrap();
+
+    assert_success(&output);
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["schema"],
+        "open_vitals.k20-waveform-transform-scan-report.v1"
+    );
+    assert_eq!(report["pass"], true);
+    assert_eq!(report["validation_status"], "candidate_hr_and_rr_aligned");
+    assert_eq!(report["k20_frame_count"], 12);
+    assert_eq!(report["rr_reference_sample_count"], 12);
+    let best = &report["ranked_transforms"].as_array().unwrap()[0];
+    assert_eq!(best["offset"], 26);
+    assert_eq!(best["sample_rate_hz"], 25.0);
+    assert_eq!(best["within_tolerance_fraction"], 1.0);
+    assert_eq!(best["rr_reference_within_tolerance_fraction"], 1.0);
+}
+
+#[test]
+fn metric_feature_report_cli_runs_beat_evidence_report_alias() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let db = tempdir.path().join("open_vitals.sqlite");
+    let store = OpenVitalsStore::open(&db).unwrap();
+    import_k20_optical_sequence_with_hr_reference(&store, 12);
+    import_rr_reference_sequence(&store, 12);
+
+    let output =
+        std::process::Command::new(env!("CARGO_BIN_EXE_open-vitals-metric-feature-report"))
+            .arg("--method")
+            .arg("beat-evidence")
+            .arg("--database")
+            .arg(&db)
+            .arg("--start")
+            .arg("2026-06-11T12:00:00Z")
+            .arg("--end")
+            .arg("2026-06-11T12:01:00Z")
+            .arg("--min-owned-captures")
+            .arg("1")
+            .arg("--min-matching-segments")
+            .arg("1")
+            .arg("--min-matching-frames")
+            .arg("1")
+            .arg("--max-ranked-transforms")
+            .arg("6")
+            .arg("--max-ranked-channels")
+            .arg("4")
+            .arg("--max-ranked-fields")
+            .arg("4")
+            .arg("--max-ranked-candidates")
+            .arg("4")
+            .output()
+            .unwrap();
+
+    assert_success(&output);
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["schema"], "open_vitals.beat-evidence-report.v1");
+    assert_eq!(report["pass"], true);
+    assert_eq!(report["validation_status"], "candidate_hr_and_rr_aligned");
+    assert_eq!(report["rr_reference_sample_count"], 12);
+    assert_eq!(
+        report["k20_waveform_transform_scan"]["schema"],
+        "open_vitals.k20-waveform-transform-scan-report.v1"
+    );
+    assert_eq!(report["summary"]["best_waveform_transform"]["offset"], 26);
+}
+
+#[test]
 fn metric_feature_report_cli_compares_k20_channel_scan_to_rr_reference() {
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");
@@ -1375,6 +1528,47 @@ fn import_k20_optical_sequence_with_hr_reference(store: &OpenVitalsStore, second
     assert!(report.pass, "{:?}", report.issues);
 }
 
+fn import_k20_field_discovery_sequence_with_hr_reference(store: &OpenVitalsStore, seconds: usize) {
+    let mut frames = Vec::new();
+    for second in 0..seconds {
+        let minute = second / 60;
+        let second_in_minute = second % 60;
+        let captured_at = format!("2026-06-11T12:{minute:02}:{second_in_minute:02}Z");
+        let heart_rate = 55 + (second % 12) as u8;
+        frames.push(CapturedFrameInput {
+            evidence_id: format!("metric-feature-cli-k20-field.{second}"),
+            frame_id: Some(format!("metric-feature-cli-k20-field.{second}.frame.0")),
+            source: "ios.corebluetooth.notification".to_string(),
+            captured_at: captured_at.clone(),
+            device_model: "WHOOP 5.0 OpenVitals".to_string(),
+            frame_hex: k20_field_discovery_frame_hex(second, heart_rate),
+            sensitivity: "user-owned-capture".to_string(),
+            capture_session_id: None,
+            device_type: DeviceType::OpenVitals,
+        });
+        frames.push(CapturedFrameInput {
+            evidence_id: format!("metric-feature-cli-k18-field.{second}"),
+            frame_id: Some(format!("metric-feature-cli-k18-field.{second}.frame.0")),
+            source: "ios.corebluetooth.notification".to_string(),
+            captured_at,
+            device_model: "WHOOP 5.0 OpenVitals".to_string(),
+            frame_hex: k18_history_frame_hex(heart_rate),
+            sensitivity: "user-owned-capture".to_string(),
+            capture_session_id: None,
+            device_type: DeviceType::OpenVitals,
+        });
+    }
+    let report = import_captured_frame_batch(
+        store,
+        &frames,
+        CapturedFrameBatchOptions {
+            parser_version: "open-vitals-core/metric-feature-cli-test",
+        },
+    )
+    .unwrap();
+    assert!(report.pass, "{:?}", report.issues);
+}
+
 fn import_rr_reference_sequence(store: &OpenVitalsStore, seconds: usize) {
     store
         .start_capture_session(CaptureSessionInput {
@@ -1445,6 +1639,24 @@ fn k20_optical_frame_hex(frame_index: usize) -> String {
             put_u32(&mut payload, body_offset + offset + sample_index * 4, value);
         }
     }
+    hex::encode(build_v5_payload_frame(&payload))
+}
+
+fn k20_field_discovery_frame_hex(frame_index: usize, heart_rate: u8) -> String {
+    let mut payload = vec![0; 2128];
+    payload[0] = PACKET_TYPE_REALTIME_RAW_DATA;
+    payload[1] = 20;
+    payload[2] = 129;
+    put_u32(&mut payload, 3, frame_index as u32);
+    let body_offset = 13;
+    payload[body_offset + 180] = heart_rate;
+    for offset in [26, 226, 1292, 1492, 1714, 1914] {
+        for sample_index in 0..25 {
+            let value = 50_000 + offset as u32 + sample_index as u32;
+            put_u32(&mut payload, body_offset + offset + sample_index * 4, value);
+        }
+    }
+    payload[body_offset + 180] = heart_rate;
     hex::encode(build_v5_payload_frame(&payload))
 }
 

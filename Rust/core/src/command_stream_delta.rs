@@ -67,6 +67,15 @@ pub struct CommandStreamPacketFamilyDelta {
     pub first_seen: Option<String>,
     #[serde(default)]
     pub last_seen: Option<String>,
+    #[serde(default)]
+    pub probe_first_seen: Option<String>,
+    #[serde(default)]
+    pub probe_last_seen: Option<String>,
+    #[serde(default)]
+    pub baseline_first_seen: Option<String>,
+    #[serde(default)]
+    pub baseline_last_seen: Option<String>,
+    pub presence_attribution: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -149,6 +158,8 @@ pub fn run_command_stream_packet_delta_for_store(
         } else {
             delta_count > 0
         };
+        let presence_attribution =
+            packet_family_presence_attribution(probe_count, baseline_count, delta_count);
         if expected && present {
             present_expected_count += 1;
         }
@@ -185,6 +196,11 @@ pub fn run_command_stream_packet_delta_for_store(
                 probe.and_then(|count| count.last_seen.clone()),
                 baseline.and_then(|count| count.last_seen.clone()),
             ),
+            probe_first_seen: probe.and_then(|count| count.first_seen.clone()),
+            probe_last_seen: probe.and_then(|count| count.last_seen.clone()),
+            baseline_first_seen: baseline.and_then(|count| count.first_seen.clone()),
+            baseline_last_seen: baseline.and_then(|count| count.last_seen.clone()),
+            presence_attribution,
         });
     }
 
@@ -385,6 +401,21 @@ fn normalize_capture_session_ids(values: &[String]) -> Vec<String> {
         }
     }
     ids.into_iter().collect()
+}
+
+fn packet_family_presence_attribution(
+    probe_count: i64,
+    baseline_count: i64,
+    delta_count: i64,
+) -> String {
+    match (probe_count, baseline_count, delta_count) {
+        (0, 0, _) => "not_seen".to_string(),
+        (probe, 0, _) if probe > 0 => "probe_only".to_string(),
+        (0, baseline, _) if baseline > 0 => "baseline_only".to_string(),
+        (_, _, delta) if delta > 0 => "increased_over_baseline".to_string(),
+        (_, _, 0) => "unchanged_from_baseline".to_string(),
+        _ => "decreased_from_baseline".to_string(),
+    }
 }
 
 fn earliest_time(left: Option<String>, right: Option<String>) -> Option<String> {
