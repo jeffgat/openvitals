@@ -22,6 +22,8 @@ Current product cut 2026-06-10: Home keeps the Sleep, Recovery, and Strain top s
 - [ ] Add date picker route/sheet equivalent to Flutter `TodayView._pickDate`.
 - [ ] Show busy/sync indicator when device or metric refresh is running.
 - [x] Keep Home score sync in a packet import session so historical packets can be persisted before score refresh.
+- [x] Deduplicate repeated historical packet imports by stable device packet identity instead of BLE receive timestamp.
+- [x] Keep device-side timestamp cursor sync gated in Rust dry-run until command 33 read-pointer payload evidence is validated; current Home sync uses transfer plus local dedupe.
 - [ ] Add device toolbar button with connected/disconnected color state.
 - [ ] Tapping the device button opens `DeviceView`.
 - [ ] Define one shared relative-time formatter for `lastSyncAt`, battery, HR, and metric refreshes.

@@ -16,90 +16,54 @@ extension OpenVitalsLocalDataExporter {
       try? handle.close()
     }
 
-    var stack: [UInt8] = []
-    var inString = false
-    var escaped = false
-    var firstNonWhitespace: UInt8?
-    var lastNonWhitespace: UInt8?
-    var sawFilesKey = false
-    var sawSummaryKey = false
-    var recent = [UInt8]()
-    let filesPattern = Array("\"files\"".utf8)
-    let summaryPattern = Array("\"summary\"".utf8)
-
-    while true {
-      let chunk = handle.readData(ofLength: 64 * 1024)
-      if chunk.isEmpty {
-        break
-      }
-      for byte in chunk {
-        if byte > 0x20 {
-          if firstNonWhitespace == nil {
-            firstNonWhitespace = byte
-          }
-          lastNonWhitespace = byte
-        }
-
-        recent.append(byte)
-        if recent.count > summaryPattern.count {
-          recent.removeFirst(recent.count - summaryPattern.count)
-        }
-        if recent.suffix(filesPattern.count) == filesPattern[...] {
-          sawFilesKey = true
-        }
-        if recent.suffix(summaryPattern.count) == summaryPattern[...] {
-          sawSummaryKey = true
-        }
-
-        if inString {
-          if escaped {
-            escaped = false
-          } else if byte == 0x5c {
-            escaped = true
-          } else if byte == 0x22 {
-            inString = false
-          } else if byte < 0x20 {
-            return "control character inside JSON string"
-          }
-          continue
-        }
-
-        switch byte {
-        case 0x09, 0x0a, 0x0d, 0x20:
-          continue
-        case 0x22:
-          inString = true
-        case 0x7b, 0x5b:
-          stack.append(byte)
-        case 0x7d:
-          guard stack.popLast() == 0x7b else {
-            return "unbalanced JSON object delimiter"
-          }
-        case 0x5d:
-          guard stack.popLast() == 0x5b else {
-            return "unbalanced JSON array delimiter"
-          }
-        default:
-          continue
-        }
-      }
+    let validationWindowBytes = 256 * 1024
+    let fileSize = fileByteCount(at: url, fileManager: .default)
+    guard fileSize > 0 else {
+      return "bundle JSON is empty"
     }
 
-    if inString || escaped {
-      return "bundle JSON ended inside a string"
-    }
-    if !stack.isEmpty {
-      return "bundle JSON ended with unclosed containers"
-    }
-    guard firstNonWhitespace == 0x7b, lastNonWhitespace == 0x7d else {
+    let prefix = handle.readData(ofLength: validationWindowBytes)
+    guard let firstNonWhitespace = prefix.first(where: { $0 > 0x20 }),
+          firstNonWhitespace == 0x7b else {
       return "bundle JSON does not start and end as an object"
     }
-    guard sawFilesKey else {
+    guard prefix.range(of: Data("\"files\"".utf8)) != nil else {
       return "bundle JSON is missing files array"
     }
-    guard sawSummaryKey else {
+
+    let suffixLength = min(UInt64(validationWindowBytes), fileSize)
+    do {
+      try handle.seek(toOffset: fileSize - suffixLength)
+    } catch {
+      return "could not seek bundle tail for JSON validation"
+    }
+    let suffix = handle.readData(ofLength: Int(suffixLength))
+    guard let lastNonWhitespace = suffix.reversed().first(where: { $0 > 0x20 }),
+          lastNonWhitespace == 0x7d else {
+      return "bundle JSON does not start and end as an object"
+    }
+    guard suffix.range(of: Data("\"summary\"".utf8)) != nil else {
       return "bundle JSON is missing summary object"
     }
+
+    guard let summaryMarker = suffix.range(of: Data("],\"summary\":".utf8)) else {
+      return "bundle JSON is missing summary object"
+    }
+    var summaryBytes = Array(suffix[summaryMarker.upperBound...])
+    while let last = summaryBytes.last, last == 0x09 || last == 0x0a || last == 0x0d || last == 0x20 {
+      summaryBytes.removeLast()
+    }
+    guard summaryBytes.last == 0x7d else {
+      return "bundle JSON does not start and end as an object"
+    }
+    summaryBytes.removeLast()
+    let summaryData = Data(summaryBytes)
+    do {
+      _ = try JSONSerialization.jsonObject(with: summaryData)
+    } catch {
+      return "bundle summary JSON is invalid"
+    }
+
     return nil
   }
 

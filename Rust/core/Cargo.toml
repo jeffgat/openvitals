@@ -120,6 +120,10 @@ name = "open-vitals-debug-ws-serve"
 path = "src/bin/open-vitals-debug-ws-serve.rs"
 
 [[bin]]
+name = "open-vitals-bridge"
+path = "src/bin/open-vitals-bridge.rs"
+
+[[bin]]
 name = "open-vitals-ui-coverage-audit"
 path = "src/bin/open-vitals-ui-coverage-audit.rs"
 

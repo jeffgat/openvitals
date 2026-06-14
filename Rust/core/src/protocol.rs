@@ -138,6 +138,14 @@ pub enum DataPacketBodySummary {
         hr_present: Option<bool>,
         marker_offset: Option<usize>,
         marker_value: Option<u8>,
+        #[serde(default)]
+        heart_rate_bpm: Option<u8>,
+        #[serde(default)]
+        rr_count: Option<u8>,
+        #[serde(default)]
+        rr_intervals_ms: Vec<u16>,
+        #[serde(default)]
+        warnings: Vec<String>,
     },
     R17OpticalOrLabradorFiltered {
         flags: Option<u16>,
@@ -526,19 +534,90 @@ fn parse_data_packet_body_summary(
     };
 
     match packet_k {
-        7 | 9 | 12 | 18 | 24 => (
-            Some(DataPacketBodySummary::NormalHistory {
-                hr_present: hr_present_marker.map(|marker| marker != 0),
-                marker_offset: hr_marker_offset,
-                marker_value: hr_present_marker,
-            }),
-            Vec::new(),
+        7 | 9 | 12 | 18 | 24 => parse_normal_history_body_summary(
+            payload,
+            packet_k,
+            hr_marker_offset,
+            hr_present_marker,
         ),
         17 => parse_r17_body_summary(payload),
         10 => parse_k10_raw_motion_summary(payload),
         21 => parse_k21_raw_motion_summary(payload),
         _ => (None, Vec::new()),
     }
+}
+
+fn parse_normal_history_body_summary(
+    payload: &[u8],
+    packet_k: u8,
+    hr_marker_offset: Option<usize>,
+    hr_present_marker: Option<u8>,
+) -> (Option<DataPacketBodySummary>, Vec<String>) {
+    let mut warnings = Vec::new();
+    let mut rr_count = None;
+    let mut rr_intervals_ms = Vec::new();
+
+    if packet_k == 18 {
+        rr_count = payload.get(15).copied();
+        match rr_count {
+            Some(count) => {
+                if count > 4 {
+                    warnings.push("normal_history_k18_rr_count_above_v18_limit".to_string());
+                }
+                let capped_count = usize::from(count.min(4));
+                for index in 0..capped_count {
+                    let offset = 16 + index * 2;
+                    match read_u16_le(payload, offset) {
+                        Some(value) if (300..=2000).contains(&value) => {
+                            rr_intervals_ms.push(value);
+                        }
+                        Some(_) => {
+                            warnings.push(
+                                "normal_history_k18_rr_interval_outside_plausible_range"
+                                    .to_string(),
+                            );
+                        }
+                        None => {
+                            warnings.push("normal_history_k18_rr_interval_missing".to_string());
+                            break;
+                        }
+                    }
+                }
+            }
+            None => warnings.push("normal_history_k18_rr_count_missing".to_string()),
+        }
+
+        if let (Some(heart_rate_bpm), true) = (
+            hr_present_marker.filter(|heart_rate| *heart_rate > 0),
+            rr_intervals_ms.is_empty(),
+        ) {
+            if heart_rate_bpm > 0 && rr_count.is_some_and(|count| count > 0) {
+                warnings.push("normal_history_k18_no_plausible_rr_intervals".to_string());
+            }
+        }
+        if let Some(heart_rate_bpm) = hr_present_marker.filter(|heart_rate| *heart_rate > 0) {
+            let rr_mean = mean_u16(&rr_intervals_ms);
+            if let Some(mean) = rr_mean {
+                let rr_derived_hr = 60_000.0 / mean;
+                if (rr_derived_hr - f64::from(heart_rate_bpm)).abs() > 10.0 {
+                    warnings.push("normal_history_k18_rr_heart_rate_mismatch".to_string());
+                }
+            }
+        }
+    }
+
+    (
+        Some(DataPacketBodySummary::NormalHistory {
+            hr_present: hr_present_marker.map(|marker| marker != 0),
+            marker_offset: hr_marker_offset,
+            marker_value: hr_present_marker,
+            heart_rate_bpm: hr_present_marker.filter(|marker| *marker > 0),
+            rr_count,
+            rr_intervals_ms,
+            warnings: warnings.clone(),
+        }),
+        warnings,
+    )
 }
 
 fn parse_r17_body_summary(payload: &[u8]) -> (Option<DataPacketBodySummary>, Vec<String>) {
@@ -777,6 +856,14 @@ fn read_u16_le(bytes: &[u8], offset: usize) -> Option<u16> {
         *bytes.get(offset)?,
         *bytes.get(offset + 1)?,
     ]))
+}
+
+fn mean_u16(values: &[u16]) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    let sum = values.iter().map(|value| u64::from(*value)).sum::<u64>();
+    Some(sum as f64 / values.len() as f64)
 }
 
 fn read_u32_le(bytes: &[u8], offset: usize) -> Option<u32> {

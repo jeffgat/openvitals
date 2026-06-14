@@ -36,3 +36,26 @@ This file names the scriptable tools that gate local metric readiness, capture i
 - `open-vitals-metric-feature-report recovery-score` / `metrics.recovery_score_from_features`
 - `open-vitals-metric-feature-report strain-score` / `metrics.strain_score_from_features`
 - `open-vitals-metric-feature-report stress-score` / `metrics.stress_score_from_features`
+
+## Desktop Capture Tool
+
+`Tools/ble-packet-debugger` is the preferred manual capture workbench when an experiment needs direct Mac-side BLE access instead of phone capture/export/import loops.
+
+Use it for:
+
+- Scanning and filtering nearby BLE devices by supported, near, or all.
+- Connecting to compatible bands and standard Heart Rate Service straps.
+- Capturing custom notify/read/write frames into local SQLite through Rust `capture.import_frame_batch`.
+- Collecting standard `180D/2A37` HR/RR reference samples for validation-only comparisons.
+- Running iOS-parity hello and physiology probe actions while preserving packet/write evidence.
+- Checking local debugger database health with Rust `storage.check`.
+
+Validate debugger changes with:
+
+```sh
+cd Tools/ble-packet-debugger
+npm run typecheck
+npm run build
+```
+
+For protocol findings, follow a desktop capture with the relevant Rust report or validation tool from the immediate order above, then export and privacy-lint any bundle before sharing it.

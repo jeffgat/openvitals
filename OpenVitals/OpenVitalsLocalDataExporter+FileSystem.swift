@@ -303,7 +303,8 @@ extension OpenVitalsLocalDataExporter {
     sourceURL: URL,
     relativePath: String,
     exportID: String,
-    fileManager: FileManager
+    fileManager: FileManager,
+    progress: ((String, Double?) -> Void)? = nil
   ) throws -> (url: URL, cleanupURL: URL?) {
     guard relativePath == "Application Support/OpenVitals/open_vitals.sqlite" else {
       return (sourceURL, nil)
@@ -312,15 +313,25 @@ extension OpenVitalsLocalDataExporter {
     let snapshotURL = fileManager.temporaryDirectory
       .appendingPathComponent("open-vitals-sqlite-snapshot-\(exportID)-\(UUID().uuidString).sqlite")
     try? fileManager.removeItem(at: snapshotURL)
-    try snapshotSQLiteDatabase(from: sourceURL, to: snapshotURL)
-    try applyExportProtection(to: snapshotURL)
-    return (snapshotURL, snapshotURL)
+    do {
+      try snapshotSQLiteDatabase(from: sourceURL, to: snapshotURL, progress: progress)
+      try applyExportProtection(to: snapshotURL)
+      return (snapshotURL, snapshotURL)
+    } catch {
+      try? fileManager.removeItem(at: snapshotURL)
+      throw error
+    }
   }
 
-  static func snapshotSQLiteDatabase(from sourceURL: URL, to targetURL: URL) throws {
+  static func snapshotSQLiteDatabase(
+    from sourceURL: URL,
+    to targetURL: URL,
+    progress: ((String, Double?) -> Void)? = nil
+  ) throws {
     var sourceDB: OpaquePointer?
     var targetDB: OpaquePointer?
 
+    progress?("Opening SQLite database", 0)
     let sourceFlags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
     var rc = sqlite3_open_v2(sourceURL.path, &sourceDB, sourceFlags, nil)
     guard rc == SQLITE_OK, let sourceDB else {
@@ -333,7 +344,7 @@ extension OpenVitalsLocalDataExporter {
     defer {
       sqlite3_close(sourceDB)
     }
-    sqlite3_busy_timeout(sourceDB, 15_000)
+    sqlite3_busy_timeout(sourceDB, 250)
 
     let targetFlags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
     rc = sqlite3_open_v2(targetURL.path, &targetDB, targetFlags, nil)
@@ -347,21 +358,63 @@ extension OpenVitalsLocalDataExporter {
     defer {
       sqlite3_close(targetDB)
     }
-    sqlite3_busy_timeout(targetDB, 15_000)
+    sqlite3_busy_timeout(targetDB, 250)
 
     guard let backup = sqlite3_backup_init(targetDB, "main", sourceDB, "main") else {
       throw sqliteSnapshotError(sqliteErrorMessage(db: targetDB, fallback: "start sqlite backup", code: sqlite3_errcode(targetDB)))
     }
 
+    let snapshotStartedAt = Date()
+    var lastProgressAt = snapshotStartedAt
+    var lastReportedCopiedPages = -1
+    var lastReportedFraction = -1.0
+    let maxSecondsWithoutProgress: TimeInterval = 30
+    let maxSnapshotSeconds: TimeInterval = 180
+
+    func reportBackupProgress(detail: String? = nil, force: Bool = false) {
+      let remainingPages = Int(sqlite3_backup_remaining(backup))
+      let totalPages = Int(sqlite3_backup_pagecount(backup))
+      guard totalPages > 0 else {
+        progress?(detail ?? "Preparing SQLite pages", nil)
+        return
+      }
+      let copiedPages = max(0, totalPages - remainingPages)
+      let fraction = min(max(Double(copiedPages) / Double(totalPages), 0), 1)
+      if force
+        || copiedPages != lastReportedCopiedPages
+        || fraction - lastReportedFraction >= 0.01
+      {
+        lastReportedCopiedPages = copiedPages
+        lastReportedFraction = fraction
+        progress?(detail ?? "Copied \(copiedPages)/\(totalPages) SQLite pages", fraction)
+      }
+    }
+
+    progress?("Copying SQLite pages", nil)
     while true {
-      rc = sqlite3_backup_step(backup, 256)
+      rc = sqlite3_backup_step(backup, 64)
       if rc == SQLITE_DONE {
+        reportBackupProgress(detail: "SQLite copy complete", force: true)
         break
       }
       if rc == SQLITE_OK {
+        lastProgressAt = Date()
+        reportBackupProgress()
         continue
       }
       if rc == SQLITE_BUSY || rc == SQLITE_LOCKED {
+        let now = Date()
+        let secondsWithoutProgress = now.timeIntervalSince(lastProgressAt)
+        let totalSeconds = now.timeIntervalSince(snapshotStartedAt)
+        if secondsWithoutProgress > maxSecondsWithoutProgress {
+          rc = SQLITE_BUSY
+          break
+        }
+        if totalSeconds > maxSnapshotSeconds {
+          rc = SQLITE_BUSY
+          break
+        }
+        progress?("Waiting for local database writes (\(Int(secondsWithoutProgress))s)", lastReportedFraction >= 0 ? lastReportedFraction : nil)
         Thread.sleep(forTimeInterval: 0.05)
         continue
       }
@@ -371,8 +424,12 @@ extension OpenVitalsLocalDataExporter {
     let finishRC = sqlite3_backup_finish(backup)
     guard rc == SQLITE_DONE, finishRC == SQLITE_OK else {
       let code = rc == SQLITE_DONE ? finishRC : rc
+      if code == SQLITE_BUSY || code == SQLITE_LOCKED {
+        throw sqliteSnapshotError("snapshot timed out waiting for local database writes to finish; stop active capture or probe and try export again")
+      }
       throw sqliteSnapshotError(sqliteErrorMessage(db: targetDB, fallback: "finish sqlite backup", code: code))
     }
+    progress?("SQLite snapshot ready", 1)
   }
 
   static func sqliteErrorMessage(db: OpaquePointer?, fallback: String, code: Int32) -> String {

@@ -168,7 +168,7 @@ fn parses_history_packet_stable_header_and_hr_marker() {
         0x55,
         0xaa,
         0x4d,
-        0xbb,
+        0x00,
         0xcc,
         0xdd,
         0xee,
@@ -189,15 +189,57 @@ fn parses_history_packet_stable_header_and_hr_marker() {
             hr_marker_offset: Some(14),
             hr_present_marker: Some(0x4d),
             body_offset: 13,
-            body_hex: "aa4dbbccddeeff".to_string(),
+            body_hex: "aa4d00ccddeeff".to_string(),
             body_summary: Some(DataPacketBodySummary::NormalHistory {
                 hr_present: Some(true),
                 marker_offset: Some(14),
                 marker_value: Some(0x4d),
+                heart_rate_bpm: Some(0x4d),
+                rr_count: Some(0),
+                rr_intervals_ms: Vec::new(),
+                warnings: Vec::new(),
             }),
             warnings: Vec::new(),
         })
     );
+}
+
+#[test]
+fn parses_noop_v18_history_rr_candidates_from_k18_payload_offsets() {
+    let frame_hex = "aa01740001003fb12f1280733d8401b69f266a66460066025a0265020000000000007b0a8d656463ff0012163cf6a439bf2924fd3ed763fe3e3200aa000000000000000000f7000901f10b0007010c020c00000000000000000000000000000000000000000000000100656f1e1e0000009d61a7c00000003e862817";
+    let parsed = parse_frame_hex(DeviceType::OpenVitals, frame_hex).unwrap();
+
+    assert_eq!(parsed.packet_type_name.as_deref(), Some("HISTORICAL_DATA"));
+    match parsed.parsed_payload.unwrap() {
+        ParsedPayload::DataPacket {
+            packet_k,
+            timestamp_seconds,
+            hr_marker_offset,
+            hr_present_marker,
+            body_summary,
+            warnings,
+            ..
+        } => {
+            assert_eq!(packet_k, Some(18));
+            assert_eq!(timestamp_seconds, Some(1_780_916_150));
+            assert_eq!(hr_marker_offset, Some(14));
+            assert_eq!(hr_present_marker, Some(102));
+            assert!(warnings.is_empty(), "{warnings:?}");
+            assert_eq!(
+                body_summary,
+                Some(DataPacketBodySummary::NormalHistory {
+                    hr_present: Some(true),
+                    marker_offset: Some(14),
+                    marker_value: Some(102),
+                    heart_rate_bpm: Some(102),
+                    rr_count: Some(2),
+                    rr_intervals_ms: vec![602, 613],
+                    warnings: Vec::new(),
+                })
+            );
+        }
+        other => panic!("expected data packet, got {other:?}"),
+    }
 }
 
 #[test]
@@ -223,6 +265,10 @@ fn normal_history_zero_hr_marker_is_not_treated_as_hr_present() {
                     hr_present: Some(false),
                     marker_offset: Some(17),
                     marker_value: Some(0),
+                    heart_rate_bpm: None,
+                    rr_count: None,
+                    rr_intervals_ms: Vec::new(),
+                    warnings: Vec::new(),
                 })
             );
         }
@@ -504,10 +550,15 @@ fn short_data_packets_preserve_raw_body_and_warn() {
                 hr_present: None,
                 marker_offset: Some(14),
                 marker_value: None,
+                heart_rate_bpm: None,
+                rr_count: None,
+                rr_intervals_ms: Vec::new(),
+                warnings: vec!["normal_history_k18_rr_count_missing".to_string()],
             }),
             warnings: vec![
                 "data_packet_header_too_short".to_string(),
                 "history_hr_marker_missing".to_string(),
+                "normal_history_k18_rr_count_missing".to_string(),
             ],
         })
     );

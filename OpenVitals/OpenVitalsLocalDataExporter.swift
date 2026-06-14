@@ -560,7 +560,11 @@ enum OpenVitalsLocalDataExporter {
               sourceURL: file.url,
               relativePath: file.relativePath,
               exportID: exportID,
-              fileManager: fileManager
+              fileManager: fileManager,
+              progress: { detail, fraction in
+                let snapshotFraction = 0.08 + ((fraction ?? 0) * 0.06)
+                report("Snapshotting database", detail, snapshotFraction)
+              }
             )
             preparedReadURL = prepared.url
             cleanupURL = prepared.cleanupURL
@@ -684,7 +688,7 @@ enum OpenVitalsLocalDataExporter {
       try writeString("}\n", to: handle)
       report("Writing bundle", "Flushing local data file", 0.84)
       try synchronizeAndClose(handle)
-      report("Validating bundle", "Checking JSON structure", 0.86)
+      report("Validating bundle", "Checking bundle envelope", 0.86)
       if let validationError = bundleJSONStructureIssue(at: temporaryURL) {
         throw OpenVitalsLocalDataExportError.invalidBundleJSON(validationError)
       }

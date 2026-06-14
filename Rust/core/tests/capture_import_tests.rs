@@ -13,6 +13,8 @@ use open_vitals_core::{
 use rusqlite::{Connection, params};
 
 const GET_HELLO_FRAME: &str = "aa0108000001e67123019101363e5c8d";
+const HISTORICAL_K18_FRAME: &str =
+    include_str!("../fixtures/synthetic/open_vitals_v5_historical_k18_packet.hex");
 
 #[test]
 fn imports_indexed_frame_fixture_into_sqlite_raw_and_decoded_tables() {
@@ -200,6 +202,80 @@ fn imports_app_captured_frame_batch_and_returns_timeline_rows() {
         raw.capture_session_id.as_deref(),
         Some("capture-import-session")
     );
+}
+
+#[test]
+fn captured_historical_batch_skips_duplicate_device_timestamp_payload() {
+    let store = OpenVitalsStore::open_in_memory().unwrap();
+    let device_id = "11111111-2222-3333-4444-555555555555";
+    let first = vec![CapturedFrameInput {
+        evidence_id: format!("ios.{device_id}.1770000000000.0.aa0118000001e2b1"),
+        frame_id: None,
+        source: "ios.corebluetooth.notification".to_string(),
+        captured_at: "2026-05-28T12:00:00Z".to_string(),
+        device_model: "Compatible BLE health device".to_string(),
+        frame_hex: HISTORICAL_K18_FRAME.to_string(),
+        sensitivity: "user-owned-capture".to_string(),
+        capture_session_id: None,
+        device_type: DeviceType::OpenVitals,
+    }];
+    let second = vec![CapturedFrameInput {
+        evidence_id: format!("ios.{device_id}.1770000060000.0.aa0118000001e2b1"),
+        frame_id: None,
+        source: "ios.corebluetooth.notification".to_string(),
+        captured_at: "2026-05-28T12:01:00Z".to_string(),
+        device_model: "Compatible BLE health device".to_string(),
+        frame_hex: HISTORICAL_K18_FRAME.to_string(),
+        sensitivity: "user-owned-capture".to_string(),
+        capture_session_id: None,
+        device_type: DeviceType::OpenVitals,
+    }];
+
+    let first_report = import_captured_frame_batch(
+        &store,
+        &first,
+        CapturedFrameBatchOptions {
+            parser_version: "open-vitals-core/test",
+        },
+    )
+    .unwrap();
+    let second_report = import_captured_frame_batch(
+        &store,
+        &second,
+        CapturedFrameBatchOptions {
+            parser_version: "open-vitals-core/test",
+        },
+    )
+    .unwrap();
+
+    assert!(first_report.pass, "{:?}", first_report.issues);
+    assert_eq!(first_report.raw_inserted, 1);
+    assert_eq!(first_report.frames_inserted, 1);
+    assert_eq!(first_report.historical_duplicate_skipped, 0);
+    assert!(first_report.historical_checkpoint_advanced);
+    assert!(first_report.results[0].sync_identity.is_some());
+    assert_eq!(
+        first_report.results[0].sync_device_timestamp_seconds,
+        Some(287454020)
+    );
+    assert!(!first_report.results[0].skipped_duplicate);
+
+    assert!(second_report.pass, "{:?}", second_report.issues);
+    assert_eq!(second_report.raw_inserted, 0);
+    assert_eq!(second_report.raw_existing, 0);
+    assert_eq!(second_report.frames_inserted, 0);
+    assert_eq!(second_report.frames_existing, 0);
+    assert_eq!(second_report.historical_duplicate_skipped, 1);
+    assert!(!second_report.historical_checkpoint_advanced);
+    assert!(second_report.results[0].skipped_duplicate);
+    assert_eq!(
+        second_report.results[0].sync_identity,
+        first_report.results[0].sync_identity
+    );
+    assert_eq!(store.table_count("raw_evidence").unwrap(), 1);
+    assert_eq!(store.table_count("decoded_frames").unwrap(), 1);
+    assert_eq!(store.table_count("band_sync_frame_identities").unwrap(), 1);
+    assert_eq!(store.table_count("band_sync_checkpoints").unwrap(), 1);
 }
 
 #[test]

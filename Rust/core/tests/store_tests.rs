@@ -280,6 +280,8 @@ fn migrates_fresh_database_to_current_schema() {
     assert_eq!(store.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
     assert_eq!(store.table_count("raw_evidence").unwrap(), 0);
     assert_eq!(store.table_count("decoded_frames").unwrap(), 0);
+    assert_eq!(store.table_count("band_sync_frame_identities").unwrap(), 0);
+    assert_eq!(store.table_count("band_sync_checkpoints").unwrap(), 0);
     assert_eq!(store.table_count("capture_sessions").unwrap(), 0);
     assert_eq!(store.table_count("activity_sessions").unwrap(), 0);
     assert_eq!(store.table_count("activity_metrics").unwrap(), 0);
@@ -309,6 +311,8 @@ fn migrates_legacy_capture_metric_database_and_keeps_activity_tables_empty() {
         CURRENT_SCHEMA_VERSION
     );
     assert_eq!(store.table_count("raw_evidence").unwrap(), 1);
+    assert_eq!(store.table_count("band_sync_frame_identities").unwrap(), 0);
+    assert_eq!(store.table_count("band_sync_checkpoints").unwrap(), 0);
     assert_eq!(store.table_count("capture_sessions").unwrap(), 1);
     assert_eq!(store.table_count("algorithm_definitions").unwrap(), 1);
     assert_eq!(store.table_count("algorithm_runs").unwrap(), 1);

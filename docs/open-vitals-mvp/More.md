@@ -50,6 +50,12 @@ MVP rule: More owns operational surfaces: device, connection lab, capture/import
 - [ ] Add import emulator log action.
 - [ ] Add local frame match action.
 - [ ] Add validated sample/read command action.
+- [x] Add a separate desktop BLE packet debugger under `Tools/ble-packet-debugger` for Mac-side scanning, capture, Rust parsing, and local SQLite imports without routing every packet through the phone.
+- [x] Match the desktop BLE packet debugger renderer to the iOS dark graphite/champagne OpenVitals palette.
+- [x] Add desktop scanner filters for supported, near, and all devices so noisy BLE environments can focus on compatible bands and HR straps.
+- [x] Store desktop debugger captures as local SQLite sessions with `mac.bluetooth.desktop_debugger` provenance through the Rust bridge.
+- [x] Store standard Heart Rate Service RR samples from HR straps as validation-only reference evidence.
+- [x] Document the desktop debugger architecture, workflow, safety boundaries, and validation commands in `docs/desktop-ble-packet-debugger.md`.
 
 ## Local Store
 
@@ -105,6 +111,11 @@ MVP rule: More owns operational surfaces: device, connection lab, capture/import
 - [x] Add a K20 waveform transform scanner that sweeps channel, polarity, sample-rate, spacing, smoothing, and threshold parameters against nearby trusted HR and optional RR reference evidence.
 - [x] Add a combined Beat Evidence Report that runs packet delta, K20 waveform/channel/field scans, and K26 field scan from one button while keeping all outputs diagnostic-only.
 - [x] Add a guided RR + automatic probe action that scans/selects the reference strap, waits for live RR samples, starts the band probe, stops RR capture after the probe, and waits for RR storage before export.
+- [x] Use a 15-minute automatic stream probe window so K18 historical device-time rows have enough chance to overlap an external RR reference run.
+- [x] Add an advisory K18 export-readiness check that compares latest quality-gated K18 RR sample time against the probe/reference target end while still allowing export of captured evidence.
+- [x] Freeze the RR reference window at automatic probe timeout, keep band capture open for bounded K18 catch-up polling, then stop the band capture once K18 is ready or the catch-up timeout expires.
+- [x] Start the underlying band diagnostic capture with a longer fail-safe timeout than the 15-minute probe window so the app-level capture timer does not stop K18 catch-up at the same moment the reference window freezes.
+- [x] Add a Clear Debug Data action that removes stored debug sessions, probe/capture evidence, RR reference rows, and generated export bundles from the device.
 - [x] Keep the route analysis-only; live device command sends remain blocked behind command validation, explicit user intent, dry-run bytes, and rollback expectations.
 - [ ] Add a validated command execution flow only after command evidence and UI confirmations are ready.
 

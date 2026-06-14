@@ -40,6 +40,7 @@ struct CaptureFrameWriteResult: Sendable {
   let rawExisting: Int
   let inserted: Int
   let existing: Int
+  let historicalDuplicateSkipped: Int
   let pass: Bool
   let issues: [String]
   let nextActions: [String]
@@ -290,6 +291,7 @@ final class CaptureFrameWriteQueue: @unchecked Sendable {
           rawExisting: Self.intValue(report["raw_existing"]) ?? 0,
           inserted: Self.intValue(report["frames_inserted"]) ?? 0,
           existing: Self.intValue(report["frames_existing"]) ?? 0,
+          historicalDuplicateSkipped: Self.intValue(report["historical_duplicate_skipped"]) ?? 0,
           pass: Self.boolValue(report["pass"]) ?? true,
           issues: Self.stringArray(report["issues"]),
           nextActions: Self.nextActionSummaries(report["next_actions"]),
@@ -305,6 +307,7 @@ final class CaptureFrameWriteQueue: @unchecked Sendable {
           rawExisting: 0,
           inserted: 0,
           existing: 0,
+          historicalDuplicateSkipped: 0,
           pass: false,
           issues: [],
           nextActions: [],
@@ -386,6 +389,7 @@ final class CaptureFrameWriteQueue: @unchecked Sendable {
       rawExisting: lhs.rawExisting + rhs.rawExisting,
       inserted: lhs.inserted + rhs.inserted,
       existing: lhs.existing + rhs.existing,
+      historicalDuplicateSkipped: lhs.historicalDuplicateSkipped + rhs.historicalDuplicateSkipped,
       pass: lhs.pass && rhs.pass,
       issues: Array((lhs.issues + rhs.issues).prefix(12)),
       nextActions: Array((lhs.nextActions + rhs.nextActions).prefix(8)),

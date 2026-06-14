@@ -641,13 +641,13 @@ fn algorithm_metamorphic_properties(cases: usize) -> PropertyGroupReport {
         );
 
         let recovery_low_hrv = open_vitals_recovery_v0(&RecoveryInput {
-            hrv_rmssd_ms: 40.0,
+            hrv_rmssd_ms: Some(40.0),
             ..base_recovery_input()
         })
         .output
         .expect("valid recovery input");
         let recovery_high_hrv = open_vitals_recovery_v0(&RecoveryInput {
-            hrv_rmssd_ms: 60.0,
+            hrv_rmssd_ms: Some(60.0),
             ..base_recovery_input()
         })
         .output
@@ -952,16 +952,17 @@ fn check_recovery_bounds(group: &mut GroupBuilder, rng: &mut DeterministicRng, c
     let result = open_vitals_recovery_v0(&RecoveryInput {
         start_time: "2026-05-28T06:00:00Z".to_string(),
         end_time: "2026-05-28T06:05:00Z".to_string(),
-        hrv_rmssd_ms: rng.f64(5.0, 140.0),
-        hrv_baseline_rmssd_ms: rng.f64(10.0, 120.0),
-        resting_hr_bpm: rng.f64(40.0, 95.0),
-        resting_hr_baseline_bpm: rng.f64(40.0, 95.0),
-        respiratory_rate_rpm: rng.f64(10.0, 24.0),
-        respiratory_rate_baseline_rpm: rng.f64(10.0, 24.0),
-        skin_temp_delta_c: rng.f64(-3.0, 3.0),
-        sleep_score_0_to_100: rng.f64(0.0, 100.0),
-        prior_strain_0_to_21: rng.f64(0.0, 21.0),
+        hrv_rmssd_ms: Some(rng.f64(5.0, 140.0)),
+        hrv_baseline_rmssd_ms: Some(rng.f64(10.0, 120.0)),
+        resting_hr_bpm: Some(rng.f64(40.0, 95.0)),
+        resting_hr_baseline_bpm: Some(rng.f64(40.0, 95.0)),
+        respiratory_rate_rpm: Some(rng.f64(10.0, 24.0)),
+        respiratory_rate_baseline_rpm: Some(rng.f64(10.0, 24.0)),
+        skin_temp_delta_c: Some(rng.f64(-3.0, 3.0)),
+        sleep_score_0_to_100: Some(rng.f64(0.0, 100.0)),
+        prior_strain_0_to_21: Some(rng.f64(0.0, 21.0)),
         input_ids: Vec::new(),
+        ..Default::default()
     });
     let Some(output) = result.output else {
         group.fail(
@@ -1088,16 +1089,17 @@ fn base_recovery_input() -> RecoveryInput {
     RecoveryInput {
         start_time: "2026-05-28T06:00:00Z".to_string(),
         end_time: "2026-05-28T06:05:00Z".to_string(),
-        hrv_rmssd_ms: 50.0,
-        hrv_baseline_rmssd_ms: 50.0,
-        resting_hr_bpm: 58.0,
-        resting_hr_baseline_bpm: 58.0,
-        respiratory_rate_rpm: 14.0,
-        respiratory_rate_baseline_rpm: 14.0,
-        skin_temp_delta_c: 0.0,
-        sleep_score_0_to_100: 80.0,
-        prior_strain_0_to_21: 8.0,
+        hrv_rmssd_ms: Some(50.0),
+        hrv_baseline_rmssd_ms: Some(50.0),
+        resting_hr_bpm: Some(58.0),
+        resting_hr_baseline_bpm: Some(58.0),
+        respiratory_rate_rpm: Some(14.0),
+        respiratory_rate_baseline_rpm: Some(14.0),
+        skin_temp_delta_c: Some(0.0),
+        sleep_score_0_to_100: Some(80.0),
+        prior_strain_0_to_21: Some(8.0),
         input_ids: Vec::new(),
+        ..Default::default()
     }
 }
 

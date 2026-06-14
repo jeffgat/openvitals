@@ -74,6 +74,36 @@ fn run() -> open_vitals_core::OpenVitalsResult<()> {
         "--end-time-unix-ms",
         "end_time_unix_ms",
     )?;
+    insert_i64_arg(
+        &mut request_args,
+        &args,
+        "--max-clock-offset-ms",
+        "max_clock_offset_ms",
+    )?;
+    insert_i64_arg(
+        &mut request_args,
+        &args,
+        "--clock-offset-step-ms",
+        "clock_offset_step_ms",
+    )?;
+    insert_i64_arg(
+        &mut request_args,
+        &args,
+        "--clock-offset-ms",
+        "clock_offset_ms",
+    )?;
+    insert_i64_arg(
+        &mut request_args,
+        &args,
+        "--window-radius-ms",
+        "window_radius_ms",
+    )?;
+    insert_i64_arg(
+        &mut request_args,
+        &args,
+        "--catch-up-grace-seconds",
+        "catch_up_grace_seconds",
+    )?;
     insert_bool_flag(
         &mut request_args,
         &args,
@@ -123,6 +153,8 @@ fn run() -> open_vitals_core::OpenVitalsResult<()> {
             "--provided-vitals-provenance-json",
             "provided_vitals_provenance_json",
         ),
+        ("--polarity", "polarity"),
+        ("--observed-end", "observed_end"),
     ] {
         insert_string_arg(&mut request_args, &args, arg, field)?;
     }
@@ -154,8 +186,21 @@ fn run() -> open_vitals_core::OpenVitalsResult<()> {
         ("--max-ranked-channels", "max_ranked_channels"),
         ("--max-ranked-fields", "max_ranked_fields"),
         ("--max-ranked-transforms", "max_ranked_transforms"),
+        ("--max-ranked-sequences", "max_ranked_sequences"),
         ("--max-segment-summaries", "max_segment_summaries"),
+        ("--max-match-preview", "max_match_preview"),
+        ("--max-events", "max_events"),
+        ("--max-segments", "max_segments"),
         ("--max-analyzed-frames", "max_analyzed_frames"),
+        ("--min-reference-beats", "min_reference_beats"),
+        ("--min-matched-beats", "min_matched_beats"),
+        ("--min-k18-intervals", "min_k18_intervals"),
+        ("--min-k18-rr-frames", "min_k18_rr_frames"),
+        ("--min-k18-rr-intervals", "min_k18_rr_intervals"),
+        ("--min-reference-intervals", "min_reference_intervals"),
+        ("--bin-seconds", "bin_seconds"),
+        ("--channel-offset", "channel_offset"),
+        ("--smoothing-window-samples", "smoothing_window_samples"),
     ] {
         insert_usize_arg(&mut request_args, &args, arg, field)?;
     }
@@ -228,6 +273,17 @@ fn run() -> open_vitals_core::OpenVitalsResult<()> {
         ("--motion-peak-threshold-i16", "peak_threshold_i16"),
         ("--max-hr-match-lag-seconds", "max_hr_match_lag_seconds"),
         ("--hr-tolerance-bpm", "hr_tolerance_bpm"),
+        ("--beat-match-tolerance-ms", "beat_match_tolerance_ms"),
+        ("--rmssd-tolerance-ms", "rmssd_tolerance_ms"),
+        ("--sdnn-tolerance-ms", "sdnn_tolerance_ms"),
+        ("--mean-nn-tolerance-ms", "mean_nn_tolerance_ms"),
+        ("--binned-mae-tolerance-ms", "binned_mae_tolerance_ms"),
+        ("--min-binned-correlation", "min_binned_correlation"),
+        ("--min-match-fraction", "min_match_fraction"),
+        (
+            "--threshold-stddev-multiplier",
+            "threshold_stddev_multiplier",
+        ),
     ] {
         insert_f64_arg(&mut request_args, &args, arg, field)?;
     }
@@ -372,6 +428,32 @@ fn metric_bridge_method(value: &str) -> open_vitals_core::OpenVitalsResult<&'sta
         | "k20-transform-scan"
         | "k20_transform_scan"
         | "metrics.k20_waveform_transform_scan" => Ok("metrics.k20_waveform_transform_scan"),
+        "k20-rr-sequence-validation"
+        | "k20_rr_sequence_validation"
+        | "k20-sequence-validation"
+        | "k20_sequence_validation"
+        | "rr-sequence-validation"
+        | "rr_sequence_validation"
+        | "metrics.k20_rr_sequence_validation" => Ok("metrics.k20_rr_sequence_validation"),
+        "k18-hrv-validation"
+        | "k18_hrv_validation"
+        | "k18-validation"
+        | "k18_validation"
+        | "metrics.k18_hrv_validation" => Ok("metrics.k18_hrv_validation"),
+        "k18-export-readiness"
+        | "k18_export_readiness"
+        | "k18-readiness"
+        | "k18_readiness"
+        | "export-readiness"
+        | "export_readiness"
+        | "metrics.k18_export_readiness" => Ok("metrics.k18_export_readiness"),
+        "k20-peak-inspection"
+        | "k20_peak_inspection"
+        | "k20-peak-inspector"
+        | "k20_peak_inspector"
+        | "peak-inspection"
+        | "peak_inspection"
+        | "metrics.k20_peak_inspection" => Ok("metrics.k20_peak_inspection"),
         "k20-field-discovery"
         | "k20_field_discovery"
         | "k20-field-scan"

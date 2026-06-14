@@ -553,6 +553,49 @@ extension MoreDataStore {
     }
   }
 
+  func runK18ExportReadinessCheck(completion: ((Bool) -> Void)? = nil) {
+    guard streamProbeWindowIssueSummary() == nil else {
+      k18ExportReadinessStatus = streamProbeWindowIssueSummary() ?? "Window blocked"
+      completion?(false)
+      return
+    }
+
+    k18ExportReadinessInProgress = true
+    k18ExportReadinessStatus = "Checking K18 catch-up..."
+    k18ExportReadinessNextActions = []
+    let databasePath = databasePath
+    let start = streamProbeStart
+    let end = streamProbeEnd
+    let observedEnd = Date().moreISO8601String()
+    OpenVitalsRustBridge.performInBackground(qos: .utility, {
+      try OpenVitalsRustBridge().request(
+        method: "metrics.k18_export_readiness",
+        args: [
+          "database_path": databasePath,
+          "start": start,
+          "end": end,
+          "observed_end": observedEnd,
+          "catch_up_grace_seconds": 30,
+          "min_k18_rr_frames": 10,
+          "min_k18_rr_intervals": 10,
+        ]
+      )
+    }) { [weak self] result in
+      guard let self else {
+        return
+      }
+      k18ExportReadinessInProgress = false
+      switch result {
+      case .success(let value):
+        applyK18ExportReadiness(value)
+        completion?((value["pass"] as? Bool) == true)
+      case .failure(let error):
+        k18ExportReadinessStatus = "K18 readiness failed: \(Self.errorSummary(error))"
+        completion?(false)
+      }
+    }
+  }
+
   func streamProbeWindowIssueSummary() -> String? {
     guard let start = Self.parseISO8601(streamProbeStart) else {
       return "Start must be ISO-8601 UTC"
@@ -679,6 +722,30 @@ extension MoreDataStore {
     beatEvidenceStatus = "\(status) | K20 \(k20Frames) | K26 \(k26Frames) | RR ref \(rrSamples) | \(pass ? "passed" : "blocked")"
   }
 
+  private func applyK18ExportReadiness(_ value: [String: Any]) {
+    let nextActions = value["next_actions"] as? [[String: Any]] ?? []
+    k18ExportReadinessNextActions = nextActions.map { row in
+      let reason = Self.firstString(row, keys: ["reason"]) ?? "next_action"
+      let action = Self.firstString(row, keys: ["action"]) ?? Self.shortBridgeSummary(row)
+      return "\(reason): \(action)"
+    }
+
+    let status = Self.firstString(value, keys: ["readiness_status"]) ?? "unknown"
+    let pass = (value["pass"] as? Bool) == true
+    let target = Self.firstString(value, keys: ["target_time"]) ?? "target --"
+    let latest = Self.firstString(value, keys: ["latest_quality_gated_k18_rr_sample_time"])
+      ?? Self.firstString(value, keys: ["latest_k18_rr_sample_time"])
+      ?? "K18 RR --"
+    let lag = Self.firstString(value, keys: ["latest_quality_gated_k18_rr_sample_lag_seconds"])
+      ?? Self.firstString(value, keys: ["latest_k18_rr_sample_lag_seconds"])
+      ?? "--"
+    let rrFrames = Self.firstString(value, keys: ["quality_gated_k18_rr_frame_count"]) ?? "0"
+    let rrIntervals = Self.firstString(value, keys: ["quality_gated_k18_rr_interval_count"]) ?? "0"
+    let rrReference = Self.firstString(value, keys: ["rr_reference_sample_count"]) ?? "0"
+    let label = pass ? "Ready to export" : status.replacingOccurrences(of: "_", with: " ")
+    k18ExportReadinessStatus = "\(label) | K18 RR \(latest) | target \(target) | lag \(lag)s | gated \(rrFrames)/\(rrIntervals) | RR ref \(rrReference)"
+  }
+
   private static func stringArray(_ value: Any?) -> [String] {
     if let values = value as? [String] {
       return values
@@ -689,9 +756,17 @@ extension MoreDataStore {
     return []
   }
 
-  static let automaticStreamProbeDuration: TimeInterval = 5 * 60
+  static let automaticStreamProbeDuration: TimeInterval = 15 * 60
   static let automaticStreamProbeWindowPadding: TimeInterval = 30
   static let automaticStreamProbeStartRetryDelay: TimeInterval = 1
+  static let automaticStreamProbeK18CatchUpTimeout: TimeInterval = 10 * 60
+  static let automaticStreamProbeK18CatchUpPollDelay: TimeInterval = 15
+  static let automaticStreamProbeBandCaptureFailSafePadding: TimeInterval = 60
+  static var automaticStreamProbeBandCaptureFailSafeDuration: TimeInterval {
+    automaticStreamProbeDuration
+      + automaticStreamProbeK18CatchUpTimeout
+      + automaticStreamProbeBandCaptureFailSafePadding
+  }
   static let guidedReferenceProbePollDelay: TimeInterval = 1
   static let guidedReferenceProbeTimeout: TimeInterval = 90
 
@@ -796,6 +871,8 @@ extension MoreDataStore {
 
     automaticStreamProbeStopWorkItem?.cancel()
     automaticStreamProbeStopWorkItem = nil
+    automaticStreamProbeCatchUpWorkItem?.cancel()
+    automaticStreamProbeCatchUpWorkItem = nil
     guidedReferenceProbeWorkItem?.cancel()
     guidedReferenceProbeWorkItem = nil
     guidedReferenceProbeInProgress = false
@@ -813,6 +890,8 @@ extension MoreDataStore {
     k20WaveformCandidates = []
     k20WaveformNextActions = []
     beatEvidenceNextActions = []
+    k18ExportReadinessNextActions = []
+    k18ExportReadinessStatus = "K18 export readiness not checked"
     k20WaveformScanStatus = "No K20 waveform transform scan"
     beatEvidenceStatus = "No beat evidence report"
     localExportURL = nil
@@ -867,7 +946,7 @@ extension MoreDataStore {
     automaticStreamProbeStatus = "Starting diagnostic packet capture..."
     model.startHealthPacketCapture(
       mode: .diagnostic,
-      duration: Self.automaticStreamProbeDuration,
+      duration: Self.automaticStreamProbeBandCaptureFailSafeDuration,
       source: "stream_probe.auto"
     ) { [weak self, weak model] started in
       guard let self, let model else {
@@ -889,7 +968,7 @@ extension MoreDataStore {
       self.streamProbeEnd = startedAt.addingTimeInterval(Self.automaticStreamProbeDuration + Self.automaticStreamProbeWindowPadding).moreISO8601String()
       self.rawExportStart = self.streamProbeStart
       self.rawExportEnd = self.streamProbeEnd
-      self.automaticStreamProbeStatus = "Capturing diagnostic packets for \(Self.automaticProbeDurationText). Keep the app open and the band connected."
+      self.automaticStreamProbeStatus = "Capturing \(Self.automaticProbeDurationText) probe window. Band capture can stay open afterward for K18 catch-up."
 
       let workItem = DispatchWorkItem { [weak self, weak model] in
         guard let self, let model else {
@@ -905,13 +984,118 @@ extension MoreDataStore {
   func finishAutomaticStreamProbe(model: OpenVitalsAppModel, reason: String = "manual stop") {
     automaticStreamProbeStopWorkItem?.cancel()
     automaticStreamProbeStopWorkItem = nil
+    automaticStreamProbeCatchUpWorkItem?.cancel()
+    automaticStreamProbeCatchUpWorkItem = nil
 
     guard automaticStreamProbeInProgress else {
       automaticStreamProbeStatus = "No automatic stream probe is running"
       return
     }
 
-    automaticStreamProbeStatus = "Stopping capture and preparing analysis..."
+    if reason == "timer elapsed" {
+      finishAutomaticStreamProbeReferenceWindow(model: model)
+      return
+    }
+
+    stopAutomaticStreamProbeBandCapture(
+      model: model,
+      reason: reason,
+      finalStatus: "Probe stopped. Ready to create export bundle."
+    )
+  }
+
+  private func finishAutomaticStreamProbeReferenceWindow(model: OpenVitalsAppModel) {
+    let endedAt = Date()
+    if automaticStreamProbeStartedAt == nil {
+      automaticStreamProbeStartedAt = endedAt
+      streamProbeStart = endedAt.addingTimeInterval(-Self.automaticStreamProbeDuration - Self.automaticStreamProbeWindowPadding).moreISO8601String()
+    }
+    streamProbeEnd = endedAt.moreISO8601String()
+    rawExportStart = streamProbeStart
+    rawExportEnd = streamProbeEnd
+    refreshRecentCaptureSessions()
+
+    if rrReferenceCapture.isCapturing {
+      automaticStreamProbeStatus = "Probe window complete. Stopping RR reference and keeping band capture open for K18 catch-up..."
+      rrReferenceCapture.stopCapture()
+      waitForReferenceStorageBeforeExport(startedAt: Date()) { [weak self, weak model] in
+        guard let self, let model else {
+          return
+        }
+        self.continueAutomaticStreamProbeK18CatchUp(model: model, startedAt: Date())
+      }
+    } else if rrReferenceCapture.sampleCount > 0 && !rrReferenceCapture.storageReadyForExport {
+      automaticStreamProbeStatus = "Probe window complete. Waiting for RR storage before K18 catch-up..."
+      waitForReferenceStorageBeforeExport(startedAt: Date()) { [weak self, weak model] in
+        guard let self, let model else {
+          return
+        }
+        self.continueAutomaticStreamProbeK18CatchUp(model: model, startedAt: Date())
+      }
+    } else {
+      automaticStreamProbeStatus = "Probe window complete. Keeping band capture open for K18 catch-up..."
+      continueAutomaticStreamProbeK18CatchUp(model: model, startedAt: Date())
+    }
+  }
+
+  private func continueAutomaticStreamProbeK18CatchUp(model: OpenVitalsAppModel, startedAt: Date) {
+    guard automaticStreamProbeInProgress else {
+      return
+    }
+    guard model.healthPacketCaptureSessionID != nil else {
+      automaticStreamProbeInProgress = false
+      automaticStreamProbeStatus = "Band capture already stopped. Ready to create export bundle."
+      return
+    }
+    if Date().timeIntervalSince(startedAt) > Self.automaticStreamProbeK18CatchUpTimeout {
+      stopAutomaticStreamProbeBandCapture(
+        model: model,
+        reason: "k18_catch_up_timeout",
+        finalStatus: "K18 catch-up timed out. Export is available with readiness warning.",
+        updateProbeWindowEnd: false
+      )
+      return
+    }
+
+    automaticStreamProbeStatus = "Checking K18 catch-up while band capture stays open..."
+    runK18ExportReadinessCheck { [weak self, weak model] ready in
+      guard let self, let model else {
+        return
+      }
+      guard self.automaticStreamProbeInProgress else {
+        return
+      }
+      if ready {
+        self.stopAutomaticStreamProbeBandCapture(
+          model: model,
+          reason: "k18_catch_up_ready",
+          finalStatus: "K18 caught up. Ready to create export bundle.",
+          updateProbeWindowEnd: false
+        )
+        return
+      }
+
+      self.automaticStreamProbeStatus = "K18 catch-up pending. \(self.k18ExportReadinessStatus)"
+      let workItem = DispatchWorkItem { [weak self, weak model] in
+        guard let self, let model else {
+          return
+        }
+        self.continueAutomaticStreamProbeK18CatchUp(model: model, startedAt: startedAt)
+      }
+      self.automaticStreamProbeCatchUpWorkItem = workItem
+      DispatchQueue.main.asyncAfter(deadline: .now() + Self.automaticStreamProbeK18CatchUpPollDelay, execute: workItem)
+    }
+  }
+
+  private func stopAutomaticStreamProbeBandCapture(
+    model: OpenVitalsAppModel,
+    reason: String,
+    finalStatus: String,
+    updateProbeWindowEnd: Bool = true
+  ) {
+    automaticStreamProbeCatchUpWorkItem?.cancel()
+    automaticStreamProbeCatchUpWorkItem = nil
+    automaticStreamProbeStatus = "Stopping band capture and preparing analysis..."
     model.stopHealthPacketCapture(reason: "stream_probe_auto_\(reason.replacingOccurrences(of: " ", with: "_"))") { [weak self, weak model] stopped in
       guard let self, let model else {
         return
@@ -921,9 +1105,11 @@ extension MoreDataStore {
         self.automaticStreamProbeStartedAt = endedAt
         self.streamProbeStart = endedAt.addingTimeInterval(-Self.automaticStreamProbeDuration - Self.automaticStreamProbeWindowPadding).moreISO8601String()
       }
-      self.streamProbeEnd = endedAt.addingTimeInterval(Self.automaticStreamProbeWindowPadding).moreISO8601String()
+      if updateProbeWindowEnd {
+        self.streamProbeEnd = endedAt.addingTimeInterval(Self.automaticStreamProbeWindowPadding).moreISO8601String()
+      }
       self.rawExportStart = self.streamProbeStart
-      self.rawExportEnd = self.streamProbeEnd
+      self.rawExportEnd = endedAt.moreISO8601String()
       self.refreshRecentCaptureSessions()
       guard stopped else {
         self.automaticStreamProbeInProgress = false
@@ -939,23 +1125,27 @@ extension MoreDataStore {
         self.automaticStreamProbeStatus = "Probe stopped. Waiting for RR storage before export..."
         self.waitForReferenceStorageBeforeExport(startedAt: Date())
       } else {
-        self.automaticStreamProbeStatus = "Probe stopped. Ready to create export bundle."
+        self.automaticStreamProbeStatus = finalStatus
       }
     }
   }
 
-  private func waitForReferenceStorageBeforeExport(startedAt: Date) {
+  private func waitForReferenceStorageBeforeExport(startedAt: Date, completion: (() -> Void)? = nil) {
     if rrReferenceCapture.storageReadyForExport {
-      automaticStreamProbeStatus = "RR samples stored. Ready to create export bundle."
+      automaticStreamProbeStatus = completion == nil
+        ? "RR samples stored. Ready to create export bundle."
+        : "RR samples stored. Checking K18 catch-up..."
+      completion?()
       return
     }
     if Date().timeIntervalSince(startedAt) > Self.guidedReferenceProbeTimeout {
       automaticStreamProbeStatus = "RR storage still not ready: \(rrReferenceCapture.lastFlushStatus). Wait or retry export after storage catches up."
+      completion?()
       return
     }
     automaticStreamProbeStatus = "Waiting for RR storage: \(rrReferenceCapture.lastFlushStatus)"
     DispatchQueue.main.asyncAfter(deadline: .now() + Self.guidedReferenceProbePollDelay) { [weak self] in
-      self?.waitForReferenceStorageBeforeExport(startedAt: startedAt)
+      self?.waitForReferenceStorageBeforeExport(startedAt: startedAt, completion: completion)
     }
   }
 
@@ -1075,6 +1265,7 @@ private struct MoreRRReferenceCaptureSection: View {
 struct MoreStreamProbePlanView: View {
   @EnvironmentObject private var model: OpenVitalsAppModel
   @ObservedObject var store: MoreDataStore
+  @State private var clearDebugDataStopInProgress = false
 
   var body: some View {
     List {
@@ -1118,6 +1309,15 @@ struct MoreStreamProbePlanView: View {
           status: store.localExportInProgress ? .inProgress : (store.localExportURL == nil ? .pending : .ready)
         )
         MoreActionRow(
+          title: "Check K18 Export Readiness",
+          detail: store.k18ExportReadinessStatus,
+          systemImage: "clock.badge.checkmark",
+          status: k18ReadinessStatus,
+          disabled: k18ReadinessDisabled
+        ) {
+          store.runK18ExportReadinessCheck()
+        }
+        MoreActionRow(
           title: "Create Export Bundle",
           detail: exportBundleDetail,
           systemImage: "externaldrive.badge.plus",
@@ -1126,8 +1326,23 @@ struct MoreStreamProbePlanView: View {
         ) {
           store.saveLocalDataBundle()
         }
+        MoreActionRow(
+          title: "Clear Debug Data",
+          detail: clearDebugDataDetail,
+          systemImage: "trash",
+          status: clearDebugDataStatus,
+          disabled: clearDebugDataDisabled
+        ) {
+          clearDebugData()
+        }
         if store.automaticStreamProbeInProgress {
           ProgressView(store.automaticStreamProbeStatus)
+        }
+        if store.debugDataClearInProgress {
+          ProgressView(store.debugDataClearStatus)
+        }
+        if store.k18ExportReadinessInProgress {
+          ProgressView(store.k18ExportReadinessStatus)
         }
         if store.localExportInProgress {
           MoreLocalExportProgressView(
@@ -1381,9 +1596,9 @@ struct MoreStreamProbePlanView: View {
         }
       }
 
-      if !store.beatEvidenceNextActions.isEmpty || !store.k20WaveformNextActions.isEmpty || !store.k20ChannelNextActions.isEmpty {
+      if !store.beatEvidenceNextActions.isEmpty || !store.k20WaveformNextActions.isEmpty || !store.k20ChannelNextActions.isEmpty || !store.k18ExportReadinessNextActions.isEmpty {
         Section("Beat Evidence Next Actions") {
-          ForEach((store.beatEvidenceNextActions + store.k20WaveformNextActions + store.k20ChannelNextActions).prefix(8), id: \.self) { action in
+          ForEach((store.beatEvidenceNextActions + store.k20WaveformNextActions + store.k20ChannelNextActions + store.k18ExportReadinessNextActions).prefix(8), id: \.self) { action in
             MoreInfoRow(
               title: "Action",
               value: action,
@@ -1409,7 +1624,7 @@ struct MoreStreamProbePlanView: View {
     if store.automaticStreamProbeInProgress {
       return .listening
     }
-    if store.localExportInProgress || store.streamProbeDeltaInProgress || store.k20ChannelScanInProgress || store.k20WaveformScanInProgress || store.beatEvidenceInProgress {
+    if store.localExportInProgress || store.streamProbeDeltaInProgress || store.k20ChannelScanInProgress || store.k20WaveformScanInProgress || store.beatEvidenceInProgress || store.k18ExportReadinessInProgress {
       return .inProgress
     }
     if store.automaticStreamProbeStatus.localizedCaseInsensitiveContains("could not start")
@@ -1453,8 +1668,14 @@ struct MoreStreamProbePlanView: View {
     if store.localExportInProgress {
       return store.localExportStatus
     }
+    if store.k18ExportReadinessInProgress {
+      return store.k18ExportReadinessStatus
+    }
     if store.automaticStreamProbeInProgress || store.guidedReferenceProbeInProgress {
       return "Wait for the probe to finish before exporting."
+    }
+    if k18ReadinessShouldWait {
+      return "\(store.k18ExportReadinessStatus) Export is still available for captured evidence."
     }
     if store.rrReferenceCapture.sampleCount > 0 && !store.rrReferenceCapture.storageReadyForExport {
       return "Wait for RR storage: \(store.rrReferenceCapture.lastFlushStatus)"
@@ -1469,10 +1690,13 @@ struct MoreStreamProbePlanView: View {
     if store.localExportInProgress {
       return .inProgress
     }
+    if store.k18ExportReadinessInProgress {
+      return .inProgress
+    }
     if store.localExportURL != nil {
       return .ready
     }
-    if store.automaticStreamProbeInProgress || store.guidedReferenceProbeInProgress {
+    if store.automaticStreamProbeInProgress || store.guidedReferenceProbeInProgress || k18ReadinessShouldWait {
       return .waiting
     }
     if store.rrReferenceCapture.sampleCount > 0 && !store.rrReferenceCapture.storageReadyForExport {
@@ -1483,9 +1707,113 @@ struct MoreStreamProbePlanView: View {
 
   private var exportBundleDisabled: Bool {
     store.localExportInProgress
+      || store.k18ExportReadinessInProgress
       || store.automaticStreamProbeInProgress
       || store.guidedReferenceProbeInProgress
       || (store.rrReferenceCapture.sampleCount > 0 && !store.rrReferenceCapture.storageReadyForExport)
+  }
+
+  private var k18ReadinessDisabled: Bool {
+    store.k18ExportReadinessInProgress
+      || store.localExportInProgress
+      || store.automaticStreamProbeInProgress
+      || store.guidedReferenceProbeInProgress
+      || store.streamProbeWindowIssueSummary() != nil
+  }
+
+  private var k18ReadinessShouldWait: Bool {
+    let status = store.k18ExportReadinessStatus
+    return status.localizedCaseInsensitiveContains("waiting for k18 catch")
+      || status.localizedCaseInsensitiveContains("k18 sample time behind")
+      || status.localizedCaseInsensitiveContains("quality gated k18")
+      || status.localizedCaseInsensitiveContains("no k18")
+      || status.localizedCaseInsensitiveContains("not enough")
+  }
+
+  private var k18ReadinessStatus: MoreStatusKind {
+    if store.k18ExportReadinessInProgress {
+      return .inProgress
+    }
+    if store.k18ExportReadinessStatus.localizedCaseInsensitiveContains("ready to export") {
+      return .ready
+    }
+    if k18ReadinessShouldWait {
+      return .waiting
+    }
+    if store.k18ExportReadinessStatus.localizedCaseInsensitiveContains("failed")
+      || store.k18ExportReadinessStatus.localizedCaseInsensitiveContains("blocked")
+    {
+      return .blocked
+    }
+    return .notRun
+  }
+
+  private var clearDebugDataDetail: String {
+    if clearDebugDataStopInProgress {
+      return store.debugDataClearStatus
+    }
+    if store.rrReferenceCapture.isCapturing {
+      return "Stop RR reference capture before clearing stored debug data."
+    }
+    if store.rrReferenceCapture.sampleCount > 0 && !store.rrReferenceCapture.storageReadyForExport {
+      return "Wait for RR storage: \(store.rrReferenceCapture.lastFlushStatus)"
+    }
+    if !store.canClearDeviceDebugData {
+      return "Wait for probe, analysis, upload, or export work to finish."
+    }
+    if model.healthPacketCaptureSessionID != nil {
+      return "Stops active health packet capture, then clears stored debug data."
+    }
+    return store.debugDataClearStatus
+  }
+
+  private var clearDebugDataDisabled: Bool {
+    clearDebugDataStopInProgress
+      || store.rrReferenceCapture.isCapturing
+      || (store.rrReferenceCapture.sampleCount > 0 && !store.rrReferenceCapture.storageReadyForExport)
+      || !store.canClearDeviceDebugData
+  }
+
+  private var clearDebugDataStatus: MoreStatusKind {
+    if clearDebugDataStopInProgress {
+      return .inProgress
+    }
+    if store.debugDataClearInProgress {
+      return .inProgress
+    }
+    if clearDebugDataDisabled {
+      return .blocked
+    }
+    if model.healthPacketCaptureSessionID != nil {
+      return .pending
+    }
+    if store.debugDataClearStatus.localizedCaseInsensitiveContains("cleared") {
+      return .ready
+    }
+    if store.debugDataClearStatus.localizedCaseInsensitiveContains("failed")
+      || store.debugDataClearStatus.localizedCaseInsensitiveContains("blocked")
+    {
+      return .blocked
+    }
+    return .notRun
+  }
+
+  private func clearDebugData() {
+    guard model.healthPacketCaptureSessionID != nil else {
+      store.clearDeviceDebugData()
+      return
+    }
+
+    clearDebugDataStopInProgress = true
+    store.debugDataClearStatus = "Stopping health packet capture before clearing..."
+    model.stopHealthPacketCapture(reason: "stream_probe_clear_debug_data") { stopped in
+      clearDebugDataStopInProgress = false
+      guard stopped else {
+        store.debugDataClearStatus = "Clear blocked: \(model.healthPacketCaptureStatus)"
+        return
+      }
+      store.clearDeviceDebugData()
+    }
   }
 
   private var automaticProbeDetail: String {
@@ -1503,6 +1831,9 @@ struct MoreStreamProbePlanView: View {
     }
     if store.beatEvidenceInProgress {
       return store.beatEvidenceStatus
+    }
+    if store.k18ExportReadinessInProgress {
+      return store.k18ExportReadinessStatus
     }
     if store.k20WaveformScanInProgress {
       return store.k20WaveformScanStatus

@@ -705,16 +705,17 @@ fn recovery_input(index: usize) -> RecoveryInput {
     RecoveryInput {
         start_time: "2026-05-28T06:00:00Z".to_string(),
         end_time: "2026-05-28T06:05:00Z".to_string(),
-        hrv_rmssd_ms: 45.0 + (index % 20) as f64,
-        hrv_baseline_rmssd_ms: 50.0,
-        resting_hr_bpm: 56.0 + (index % 8) as f64,
-        resting_hr_baseline_bpm: 58.0,
-        respiratory_rate_rpm: 14.0,
-        respiratory_rate_baseline_rpm: 14.0,
-        skin_temp_delta_c: ((index % 5) as f64 - 2.0) * 0.1,
-        sleep_score_0_to_100: 75.0,
-        prior_strain_0_to_21: 8.0,
+        hrv_rmssd_ms: Some(45.0 + (index % 20) as f64),
+        hrv_baseline_rmssd_ms: Some(50.0),
+        resting_hr_bpm: Some(56.0 + (index % 8) as f64),
+        resting_hr_baseline_bpm: Some(58.0),
+        respiratory_rate_rpm: Some(14.0),
+        respiratory_rate_baseline_rpm: Some(14.0),
+        skin_temp_delta_c: Some(((index % 5) as f64 - 2.0) * 0.1),
+        sleep_score_0_to_100: Some(75.0),
+        prior_strain_0_to_21: Some(8.0),
         input_ids: Vec::new(),
+        ..Default::default()
     }
 }
 

@@ -16,4 +16,7 @@ Rust/iphoneos/
 Rust/iphonesimulator/
 Vendor/CodexRust/codex-rs/target/
 tmp/
+node_modules/
+Tools/ble-packet-debugger/dist/
+Tools/ble-packet-debugger/dist-renderer/
 .stuff

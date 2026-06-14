@@ -50,17 +50,17 @@ fn algo_benchmark_reports_runtime_coverage_and_label_error() {
         report["label_comparison"]["prediction_value"]
             .as_f64()
             .unwrap(),
-        84.875,
+        86.83789515021726,
     );
     assert_close(
         report["label_comparison"]["signed_error"].as_f64().unwrap(),
-        -1.125,
+        0.8378951502172604,
     );
     assert_close(
         report["label_comparison"]["absolute_error"]
             .as_f64()
             .unwrap(),
-        1.125,
+        0.8378951502172604,
     );
     assert_eq!(report["label_comparison"]["error_within_threshold"], true);
     assert!(report["next_actions"].as_array().unwrap().is_empty());
@@ -155,13 +155,13 @@ fn algo_benchmark_fails_label_threshold_without_hiding_error_value() {
         report["label_comparison"]["prediction_value"]
             .as_f64()
             .unwrap(),
-        8.049999999999999,
+        8.682697400506427,
     );
     assert_close(
         report["label_comparison"]["absolute_error"]
             .as_f64()
             .unwrap(),
-        1.950000000000001,
+        1.317302599493573,
     );
     assert_eq!(report["label_comparison"]["error_within_threshold"], false);
     assert!(report["errors"].as_array().unwrap().iter().any(|error| {

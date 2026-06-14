@@ -24,7 +24,9 @@ Do not put WHOOP in user-facing copy, marketing copy, README-style positioning, 
 - `OpenVitals.xcodeproj`: Xcode project.
 - `Rust/core/`: Rust protocol, evidence, validation, SQLite, metrics, export, privacy, command, and bridge core.
 - `Scripts/build_ios_rust.sh`: Xcode build phase script that builds and stages the Rust static library.
+- `Tools/ble-packet-debugger/`: internal Electron/TypeScript macOS BLE packet debugger for direct desktop scan, connect, packet capture, Rust parsing, and local SQLite imports.
 - `docs/open-vitals-mvp/`: feature contracts and remaining MVP work.
+- `docs/desktop-ble-packet-debugger.md`: desktop debugger architecture, capabilities, workflow, and safety boundaries.
 - `docs/testing-and-tooling-strategy.md`: preferred validation/tooling order.
 - `docs/learnings.md`: durable lessons discovered while building.
 - `docs/blocked.md`: requests blocked on human input, device actions, captures, labels, credentials, or product decisions.
@@ -48,11 +50,14 @@ The Rust core is intentionally the trusted place for protocol parsing, capture i
 
 The app stores local SQLite data under the app's Application Support `OpenVitals/open_vitals.sqlite` path through `HealthDataStore.defaultDatabasePath()`. Built Rust archives are generated artifacts staged under `Rust/iphoneos/` or `Rust/iphonesimulator/` and should not be committed.
 
+The desktop BLE packet debugger mirrors the capture side of the app without routing packets through the phone. It runs an Electron renderer, a plain Node BLE host using `@abandonware/noble`, and `open-vitals-bridge --stdio` for Rust-owned parsing and SQLite writes. It can scan and filter supported/nearby/all BLE devices, connect to compatible bands and standard Heart Rate Service straps, subscribe to useful notify/read characteristics, show live raw/decoded packet rows, send explicit hello/probe commands, store capture sessions with sensitive raw evidence, and insert standard RR-reference samples for validation.
+
 ## Feature Boundaries
 
 - Home is the daily command center: live device state, today's scores, outlook, timeline, shortcuts, and evidence footer.
 - Health owns metric detail: Health Monitor, Sleep, Recovery, Strain, Stress, Cardio Load, Energy Bank, Packet Inputs, Algorithms, References, and Calibration.
 - More owns operations: Device, Connection Lab, Capture, Local Store, Health Sync, Raw Export, Algorithms settings, Debug, Privacy, Support, and About.
+- Desktop debugger work is internal developer tooling. Keep its UI and docs brand-neutral, operational, and privacy-conscious; use it to accelerate protocol discovery and feed findings back into Rust/Swift mobile logic.
 - Coach should remain deterministic and provenance-backed until there is a backend, privacy policy, persistence strategy, and consent path for free-form AI chat.
 
 ## Data And Safety Rules
@@ -61,6 +66,7 @@ The app stores local SQLite data under the app's Application Support `OpenVitals
 - Keep platform sleep imports quarantined as reference evidence unless the active metric contract explicitly permits them.
 - Do not write RMSSD HRV into a HealthKit field with incompatible semantics.
 - Direct BLE writes must remain gated by command validation, visible user intent, dry-run bytes, session logging, and explicit confirmation for critical/destructive actions.
+- Desktop debugger packet captures, RR-reference samples, command writes, local SQLite files, and export bundles are sensitive. Store them locally by default, label provenance clearly, and run privacy lint before sharing.
 - Keep destructive/debug commands behind More/Debug-style operational routes with clear disabled states until backing gates pass.
 - Run privacy lint on raw exports before treating them as shareable artifacts.
 
@@ -106,9 +112,22 @@ cargo test
 
 Useful Rust validation tools live in `Rust/core/src/bin/`. Common gates include `open-vitals-metric-input-readiness`, `open-vitals-capture-sqlite-import`, `open-vitals-command-capture-plan`, `open-vitals-metric-feature-report`, `open-vitals-local-health-validation-suite`, `open-vitals-export-validator`, `open-vitals-privacy-lint`, `open-vitals-property-test-suite`, and `open-vitals-perf-budget`.
 
+Desktop BLE debugger:
+
+```sh
+cd Tools/ble-packet-debugger
+npm install
+npm run typecheck
+npm run build
+npm run dev
+```
+
+Use `OPENVITALS_BLE_DEBUGGER_DB=/absolute/path/open_vitals_ble_debugger.sqlite` to point the debugger at a specific local database, and `OPENVITALS_BRIDGE_BIN=/absolute/path/open-vitals-bridge` to use a prebuilt Rust bridge instead of `cargo run`.
+
 ## Working Rules For Future Agents
 
 - Read the relevant MVP doc before changing a feature surface, then update it when the task changes status or scope.
+- Read `docs/desktop-ble-packet-debugger.md` before changing the desktop BLE debugger's capture, parser, storage, command, or device-filtering behavior, then update it when capabilities or safety boundaries change.
 - Update `docs/learnings.md` when a discovery will matter after the current task.
 - Update `docs/blocked.md` when a request is blocked on human input or action, and remove/update entries once the blocker is resolved.
 - Keep changes scoped and match the existing SwiftUI/Rust style.

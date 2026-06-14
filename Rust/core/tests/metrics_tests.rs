@@ -211,7 +211,7 @@ fn open_vitals_sleep_v0_computes_hand_derived_component_score() {
     assert_eq!(output.algorithm_id, OPENVITALS_SLEEP_V0_ID);
     assert_close(output.sleep_debt_minutes, 60.0);
     assert_close(output.efficiency_fraction, 0.875);
-    assert_close(output.score_0_to_100, 84.875);
+    assert_close(output.score_0_to_100, 86.83789515021726);
     assert!(result.errors.is_empty());
 }
 
@@ -245,7 +245,7 @@ fn open_vitals_sleep_v0_reports_sleep_architecture_latency_and_hr_dip() {
             .contains(&"sleep_architecture_unavailable".to_string())
     );
     let output = result.output.unwrap();
-    assert_close(output.score_0_to_100, 84.875);
+    assert_close(output.score_0_to_100, 87.33789515021726);
     assert_close(output.sleep_performance_fraction, 0.875);
     assert_close(output.awake_minutes, 60.0);
     assert_close(output.restorative_sleep_minutes, 210.0);
@@ -727,7 +727,7 @@ fn open_vitals_sleep_v1_computes_hand_derived_component_score() {
     assert_eq!(output.algorithm_id, OPENVITALS_SLEEP_V1_ID);
     assert_eq!(output.model_status, SleepModelStatus::BaselineReady);
     assert_eq!(output.model_status_label, "Baseline ready");
-    assert_close(output.score_0_to_100, 80.64194480408024);
+    assert_close(output.score_0_to_100, 84.6449667343507);
     assert_close(output.sleep_need_minutes, 480.0);
     assert_close(output.rolling_sleep_debt_minutes, 90.0);
     assert_close(output.bedtime_deviation_minutes, 20.0);
@@ -2267,7 +2267,7 @@ fn open_vitals_strain_v0_computes_hand_derived_zone_and_hr_reserve_score() {
     assert_eq!(output.algorithm_id, OPENVITALS_STRAIN_V0_ID);
     assert_close(output.zone_load, 140.0);
     assert_close(output.average_hr_reserve_fraction, 0.5);
-    assert_close(output.score_0_to_21, 8.73104974192709);
+    assert_close(output.score_0_to_21, 8.682697400506427);
 }
 
 #[test]
@@ -2305,21 +2305,25 @@ fn open_vitals_recovery_v0_computes_hand_derived_interpretable_composite() {
     let result = open_vitals_recovery_v0(&RecoveryInput {
         start_time: "2026-05-28T00:00:00Z".to_string(),
         end_time: "2026-05-28T08:00:00Z".to_string(),
-        hrv_rmssd_ms: 50.0,
-        hrv_baseline_rmssd_ms: 50.0,
-        resting_hr_bpm: 60.0,
-        resting_hr_baseline_bpm: 60.0,
-        respiratory_rate_rpm: 14.0,
-        respiratory_rate_baseline_rpm: 14.0,
-        skin_temp_delta_c: 0.0,
-        sleep_score_0_to_100: 80.0,
-        prior_strain_0_to_21: 10.5,
+        hrv_rmssd_ms: Some(50.0),
+        hrv_baseline_rmssd_ms: Some(50.0),
+        resting_hr_bpm: Some(60.0),
+        resting_hr_baseline_bpm: Some(60.0),
+        respiratory_rate_rpm: Some(14.0),
+        respiratory_rate_baseline_rpm: Some(14.0),
+        skin_temp_delta_c: Some(0.0),
+        sleep_score_0_to_100: Some(80.0),
+        prior_strain_0_to_21: Some(10.5),
         input_ids: vec!["hand-derived.recovery".to_string()],
+        ..Default::default()
     });
 
     let output = result.output.unwrap();
     assert_eq!(output.algorithm_id, OPENVITALS_RECOVERY_V0_ID);
-    assert_close(output.score_0_to_100, 77.6);
+    assert_close(output.score_0_to_100, 78.8);
+    assert_eq!(output.score_status, "complete");
+    assert_close(output.component_coverage, 1.0);
+    assert_close(output.recovery_confidence, 0.90);
     assert_eq!(output.components.len(), 5);
 }
 
@@ -2328,16 +2332,17 @@ fn open_vitals_recovery_v0_flags_low_sleep_and_high_prior_strain() {
     let result = open_vitals_recovery_v0(&RecoveryInput {
         start_time: "2026-05-28T00:00:00Z".to_string(),
         end_time: "2026-05-28T08:00:00Z".to_string(),
-        hrv_rmssd_ms: 45.0,
-        hrv_baseline_rmssd_ms: 50.0,
-        resting_hr_bpm: 62.0,
-        resting_hr_baseline_bpm: 60.0,
-        respiratory_rate_rpm: 15.0,
-        respiratory_rate_baseline_rpm: 14.0,
-        skin_temp_delta_c: 0.3,
-        sleep_score_0_to_100: 55.0,
-        prior_strain_0_to_21: 15.0,
+        hrv_rmssd_ms: Some(45.0),
+        hrv_baseline_rmssd_ms: Some(50.0),
+        resting_hr_bpm: Some(62.0),
+        resting_hr_baseline_bpm: Some(60.0),
+        respiratory_rate_rpm: Some(15.0),
+        respiratory_rate_baseline_rpm: Some(14.0),
+        skin_temp_delta_c: Some(0.3),
+        sleep_score_0_to_100: Some(55.0),
+        prior_strain_0_to_21: Some(15.0),
         input_ids: Vec::new(),
+        ..Default::default()
     });
 
     assert!(result.output.is_some());
@@ -2438,7 +2443,7 @@ fn flagship_score_fixtures_match_hand_derived_expected_outputs() {
     .unwrap();
     assert_close(
         open_vitals_sleep_v0(&sleep).output.unwrap().score_0_to_100,
-        84.875,
+        86.83789515021726,
     );
 
     let strain: StrainInput = serde_json::from_str(include_str!(
@@ -2447,7 +2452,7 @@ fn flagship_score_fixtures_match_hand_derived_expected_outputs() {
     .unwrap();
     assert_close(
         open_vitals_strain_v0(&strain).output.unwrap().score_0_to_21,
-        8.73104974192709,
+        8.682697400506427,
     );
 
     let recovery: RecoveryInput = serde_json::from_str(include_str!(
@@ -2459,7 +2464,7 @@ fn flagship_score_fixtures_match_hand_derived_expected_outputs() {
             .output
             .unwrap()
             .score_0_to_100,
-        77.6,
+        78.8,
     );
 
     let stress: StressInput = serde_json::from_str(include_str!(

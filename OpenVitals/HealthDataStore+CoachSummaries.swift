@@ -508,8 +508,11 @@ extension HealthDataStore {
     guard let report = packetScoreReports["recovery"] else {
       return packetScoreStatus == "No run" ? "No run" : packetScoreStatus
     }
-    let score = Self.numberText(Self.map(report, "score_result", "output")?["score_0_to_100"], fractionDigits: 1) ?? "no score"
-    return "\(Self.passStatus(report)) | \(score) recovery"
+    let output = Self.map(report, "score_result", "output")
+    let score = Self.numberText(output?["score_0_to_100"], fractionDigits: 1) ?? "no score"
+    let status = (output?["score_status"] as? String)?.replacingOccurrences(of: "_", with: " ") ?? "unknown"
+    let coverage = Self.percentText(output?["component_coverage"]) ?? "no coverage"
+    return "\(Self.passStatus(report)) | \(status) | \(score) recovery | \(coverage)"
   }
 
   func recoveryProvidedVitalsSummary() -> String {
@@ -527,6 +530,14 @@ extension HealthDataStore {
       return "\(source) | \(rr) rpm | \(baseline) rpm baseline | \(temp) C"
     }
     if let report = packetScoreReports["recovery"] {
+      if let output = Self.map(report, "score_result", "output"),
+         output["score_status"] as? String == "partial" {
+        let missing = Self.stringArray(output["missing_inputs"])
+          .filter { $0 == "respiratory_rate_rpm" || $0 == "skin_temp_delta_c" }
+        if !missing.isEmpty {
+          return "partial | missing \(missing.joined(separator: ", "))"
+        }
+      }
       let issues = Self.stringArray(report["issues"])
       if let issue = issues.first(where: { $0.hasPrefix("provided_resp_temp") }) {
         return "blocked | \(issue)"

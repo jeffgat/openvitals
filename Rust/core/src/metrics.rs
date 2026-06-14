@@ -82,6 +82,22 @@ pub struct SleepScoreOutput {
     pub wake_after_sleep_onset_minutes: f64,
     pub wake_episode_count: u32,
     pub heart_rate_dip_percent: Option<f64>,
+    #[serde(default)]
+    pub efficiency_score: f64,
+    #[serde(default)]
+    pub latency_score: f64,
+    #[serde(default)]
+    pub waso_score: f64,
+    #[serde(default)]
+    pub disturbance_count: u32,
+    #[serde(default)]
+    pub disturbances_per_hour: f64,
+    #[serde(default)]
+    pub disturbance_rate_score: f64,
+    #[serde(default)]
+    pub component_scores: BTreeMap<String, f64>,
+    #[serde(default)]
+    pub component_weights: BTreeMap<String, f64>,
     pub components: Vec<ScoreComponent>,
 }
 
@@ -277,6 +293,28 @@ pub struct SleepV1Output {
     pub baseline: Option<SleepBaseline>,
     #[serde(default)]
     pub previous_night_comparison: Option<SleepPreviousNightComparison>,
+    #[serde(default)]
+    pub efficiency_score: f64,
+    #[serde(default)]
+    pub latency_score: f64,
+    #[serde(default)]
+    pub waso_score: f64,
+    #[serde(default)]
+    pub disturbance_count: u32,
+    #[serde(default)]
+    pub disturbances_per_hour: f64,
+    #[serde(default)]
+    pub disturbance_rate_score: f64,
+    #[serde(default)]
+    pub regularity_timing_score: f64,
+    #[serde(default)]
+    pub stage_confidence_0_to_1: Option<f64>,
+    #[serde(default)]
+    pub restorative_autonomic_score: f64,
+    #[serde(default)]
+    pub component_scores: BTreeMap<String, f64>,
+    #[serde(default)]
+    pub component_weights: BTreeMap<String, f64>,
     pub status_report: SleepModelStatusReport,
     pub components: Vec<ScoreComponent>,
     pub component_provenance: BTreeMap<String, serde_json::Value>,
@@ -405,8 +443,50 @@ pub struct StrainScoreOutput {
     pub algorithm_id: String,
     pub algorithm_version: String,
     pub score_0_to_21: f64,
+    #[serde(default)]
+    pub strain_percent: f64,
+    #[serde(default)]
+    pub strain_type: String,
+    #[serde(default)]
+    pub muscular_load_available: bool,
+    #[serde(default)]
+    pub strain_confidence_0_to_1: f64,
+    #[serde(default)]
+    pub resting_hr_bpm: f64,
+    #[serde(default)]
+    pub max_hr_bpm: f64,
+    #[serde(default)]
+    pub max_hr_source: String,
+    #[serde(default)]
+    pub average_hr_bpm: f64,
+    #[serde(default)]
+    pub top_5min_hr_bpm: Option<f64>,
+    #[serde(default)]
+    pub top_5min_hr_reserve_fraction: Option<f64>,
+    #[serde(default)]
+    pub zone_minutes: Vec<f64>,
+    #[serde(default)]
+    pub zone_weights: Vec<f64>,
     pub zone_load: f64,
+    #[serde(default)]
+    pub load_ref: f64,
+    #[serde(default)]
+    pub load_cap: f64,
+    #[serde(default)]
+    pub zone_score_0_to_100: f64,
     pub average_hr_reserve_fraction: f64,
+    #[serde(default)]
+    pub sustained_intensity_score_0_to_100: f64,
+    #[serde(default)]
+    pub hr_coverage_percent: Option<f64>,
+    #[serde(default)]
+    pub hr_quality_score_0_to_100: Option<f64>,
+    #[serde(default)]
+    pub missing_inputs: Vec<String>,
+    #[serde(default)]
+    pub component_scores: BTreeMap<String, f64>,
+    #[serde(default)]
+    pub component_weights: BTreeMap<String, f64>,
     pub components: Vec<ScoreComponent>,
 }
 
@@ -414,17 +494,63 @@ pub struct StrainScoreOutput {
 pub struct RecoveryInput {
     pub start_time: String,
     pub end_time: String,
-    pub hrv_rmssd_ms: f64,
-    pub hrv_baseline_rmssd_ms: f64,
-    pub resting_hr_bpm: f64,
-    pub resting_hr_baseline_bpm: f64,
-    pub respiratory_rate_rpm: f64,
-    pub respiratory_rate_baseline_rpm: f64,
-    pub skin_temp_delta_c: f64,
-    pub sleep_score_0_to_100: f64,
-    pub prior_strain_0_to_21: f64,
+    #[serde(default)]
+    pub hrv_rmssd_ms: Option<f64>,
+    #[serde(default)]
+    pub hrv_baseline_rmssd_ms: Option<f64>,
+    #[serde(default)]
+    pub hrv_ln_spread: Option<f64>,
+    #[serde(default)]
+    pub resting_hr_bpm: Option<f64>,
+    #[serde(default)]
+    pub resting_hr_baseline_bpm: Option<f64>,
+    #[serde(default)]
+    pub resting_hr_spread_bpm: Option<f64>,
+    #[serde(default)]
+    pub respiratory_rate_rpm: Option<f64>,
+    #[serde(default)]
+    pub respiratory_rate_baseline_rpm: Option<f64>,
+    #[serde(default)]
+    pub respiratory_rate_spread_rpm: Option<f64>,
+    #[serde(default)]
+    pub skin_temp_delta_c: Option<f64>,
+    #[serde(default)]
+    pub skin_temp_spread_c: Option<f64>,
+    #[serde(default)]
+    pub sleep_score_0_to_100: Option<f64>,
+    #[serde(default)]
+    pub sleep_debt_minutes: Option<f64>,
+    #[serde(default)]
+    pub prior_strain_0_to_21: Option<f64>,
+    #[serde(default)]
+    pub seven_day_avg_strain_0_to_21: Option<f64>,
     #[serde(default)]
     pub input_ids: Vec<String>,
+}
+
+impl Default for RecoveryInput {
+    fn default() -> Self {
+        Self {
+            start_time: String::new(),
+            end_time: String::new(),
+            hrv_rmssd_ms: None,
+            hrv_baseline_rmssd_ms: None,
+            hrv_ln_spread: None,
+            resting_hr_bpm: None,
+            resting_hr_baseline_bpm: None,
+            resting_hr_spread_bpm: None,
+            respiratory_rate_rpm: None,
+            respiratory_rate_baseline_rpm: None,
+            respiratory_rate_spread_rpm: None,
+            skin_temp_delta_c: None,
+            skin_temp_spread_c: None,
+            sleep_score_0_to_100: None,
+            sleep_debt_minutes: None,
+            prior_strain_0_to_21: None,
+            seven_day_avg_strain_0_to_21: None,
+            input_ids: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -432,6 +558,66 @@ pub struct RecoveryScoreOutput {
     pub algorithm_id: String,
     pub algorithm_version: String,
     pub score_0_to_100: f64,
+    #[serde(default)]
+    pub score_status: String,
+    #[serde(default)]
+    pub recovery_confidence: f64,
+    #[serde(default)]
+    pub component_coverage: f64,
+    #[serde(default)]
+    pub missing_inputs: Vec<String>,
+    #[serde(default)]
+    pub hrv_rmssd_ms: Option<f64>,
+    #[serde(default)]
+    pub hrv_baseline_rmssd_ms: Option<f64>,
+    #[serde(default)]
+    pub hrv_ln_spread: Option<f64>,
+    #[serde(default)]
+    pub hrv_z: Option<f64>,
+    #[serde(default)]
+    pub hrv_score: Option<f64>,
+    #[serde(default)]
+    pub resting_hr_bpm: Option<f64>,
+    #[serde(default)]
+    pub resting_hr_baseline_bpm: Option<f64>,
+    #[serde(default)]
+    pub resting_hr_spread_bpm: Option<f64>,
+    #[serde(default)]
+    pub resting_hr_z: Option<f64>,
+    #[serde(default)]
+    pub resting_hr_score: Option<f64>,
+    #[serde(default)]
+    pub respiratory_rate_rpm: Option<f64>,
+    #[serde(default)]
+    pub respiratory_rate_baseline_rpm: Option<f64>,
+    #[serde(default)]
+    pub respiratory_rate_spread_rpm: Option<f64>,
+    #[serde(default)]
+    pub respiratory_rate_z: Option<f64>,
+    #[serde(default)]
+    pub skin_temp_delta_c: Option<f64>,
+    #[serde(default)]
+    pub skin_temp_spread_c: Option<f64>,
+    #[serde(default)]
+    pub skin_temp_z: Option<f64>,
+    #[serde(default)]
+    pub physiological_anomaly_score: Option<f64>,
+    #[serde(default)]
+    pub sleep_score_0_to_100: Option<f64>,
+    #[serde(default)]
+    pub sleep_debt_minutes: Option<f64>,
+    #[serde(default)]
+    pub sleep_or_sleep_debt_score: Option<f64>,
+    #[serde(default)]
+    pub yesterday_strain_0_to_21: Option<f64>,
+    #[serde(default)]
+    pub seven_day_avg_strain_0_to_21: Option<f64>,
+    #[serde(default)]
+    pub load_balance_score: Option<f64>,
+    #[serde(default)]
+    pub component_scores: BTreeMap<String, f64>,
+    #[serde(default)]
+    pub component_weights: BTreeMap<String, f64>,
     pub components: Vec<ScoreComponent>,
 }
 
@@ -947,13 +1133,18 @@ pub fn open_vitals_sleep_v0(input: &SleepInput) -> AlgorithmRunResult<SleepScore
         let sleep_performance_fraction =
             clamp_fraction(input.sleep_duration_minutes / input.sleep_need_minutes);
         let duration_score =
-            clamp_0_100(input.sleep_duration_minutes / input.sleep_need_minutes * 100.0);
+            sleep_duration_adequacy_score(input.sleep_duration_minutes, input.sleep_need_minutes);
         let efficiency_fraction =
             clamp_fraction(input.sleep_duration_minutes / input.time_in_bed_minutes);
         let efficiency_score = efficiency_fraction * 100.0;
         let consistency_score =
             clamp_0_100(100.0 - input.midpoint_deviation_minutes / 120.0 * 100.0);
-        let disturbance_score = clamp_0_100(100.0 - input.disturbance_count as f64 * 5.0);
+        let disturbances_per_hour =
+            sleep_disturbances_per_hour(input.disturbance_count, input.sleep_duration_minutes);
+        let disturbance_score =
+            sleep_disturbance_rate_score(input.disturbance_count, input.sleep_duration_minutes);
+        let latency_score = sleep_latency_score(input.sleep_latency_minutes);
+        let waso_score = sleep_waso_score(input.wake_after_sleep_onset_minutes);
         let sleep_debt_minutes = (input.sleep_need_minutes - input.sleep_duration_minutes).max(0.0);
         let awake_minutes = stage_minutes(&input.stage_minutes, "awake")
             .unwrap_or_else(|| (input.time_in_bed_minutes - input.sleep_duration_minutes).max(0.0));
@@ -975,7 +1166,7 @@ pub fn open_vitals_sleep_v0(input: &SleepInput) -> AlgorithmRunResult<SleepScore
                 input.sleep_duration_minutes,
                 "minutes",
                 duration_score,
-                0.45,
+                0.35,
                 100.0,
             ),
             score_component(
@@ -983,7 +1174,7 @@ pub fn open_vitals_sleep_v0(input: &SleepInput) -> AlgorithmRunResult<SleepScore
                 efficiency_fraction,
                 "fraction",
                 efficiency_score,
-                0.30,
+                0.25,
                 100.0,
             ),
             score_component(
@@ -991,13 +1182,13 @@ pub fn open_vitals_sleep_v0(input: &SleepInput) -> AlgorithmRunResult<SleepScore
                 input.midpoint_deviation_minutes,
                 "minutes_deviation",
                 consistency_score,
-                0.15,
+                0.25,
                 100.0,
             ),
             score_component(
                 "disturbances",
-                input.disturbance_count as f64,
-                "count",
+                disturbances_per_hour,
+                "count_per_hour",
                 disturbance_score,
                 0.10,
                 100.0,
@@ -1006,15 +1197,15 @@ pub fn open_vitals_sleep_v0(input: &SleepInput) -> AlgorithmRunResult<SleepScore
                 "sleep_latency",
                 input.sleep_latency_minutes,
                 "minutes",
-                clamp_0_100(100.0 - input.sleep_latency_minutes / 60.0 * 100.0),
-                0.0,
+                latency_score,
+                0.05,
                 100.0,
             ),
             score_component(
                 "wake_after_sleep_onset",
                 input.wake_after_sleep_onset_minutes,
                 "minutes",
-                clamp_0_100(100.0 - input.wake_after_sleep_onset_minutes / 90.0 * 100.0),
+                waso_score,
                 0.0,
                 100.0,
             ),
@@ -1042,6 +1233,14 @@ pub fn open_vitals_sleep_v0(input: &SleepInput) -> AlgorithmRunResult<SleepScore
             wake_after_sleep_onset_minutes: input.wake_after_sleep_onset_minutes,
             wake_episode_count: input.wake_episode_count,
             heart_rate_dip_percent: input.heart_rate_dip_percent,
+            efficiency_score,
+            latency_score,
+            waso_score,
+            disturbance_count: input.disturbance_count,
+            disturbances_per_hour,
+            disturbance_rate_score: disturbance_score,
+            component_scores: component_scores_map(&components),
+            component_weights: component_weights_map(&components),
             components,
         })
     } else {
@@ -1059,7 +1258,7 @@ pub fn open_vitals_sleep_v0(input: &SleepInput) -> AlgorithmRunResult<SleepScore
         errors,
         provenance: json!({
             "input_ids": input.input_ids,
-            "score_policy": "weighted_duration_efficiency_consistency_disturbances_with_unweighted_sleep_architecture_diagnostics",
+            "score_policy": "minimal_change_sleep_v1_audit_duration_adequacy_continuity_timing_disturbance_rate_latency",
             "expected_values_policy": "hand-derived-tests-and-versioned-open-vitals-output"
         }),
     }
@@ -1202,6 +1401,33 @@ pub fn open_vitals_sleep_v1(input: &SleepV1Input) -> AlgorithmRunResult<SleepV1O
                 sleep_window_confidence_0_to_1,
                 &effective_stage_minutes,
             );
+            let disturbances_per_hour = sleep_disturbances_per_hour(
+                input.sleep.disturbance_count,
+                input.sleep.sleep_duration_minutes,
+            );
+            let latency_score = sleep_latency_score(input.sleep.sleep_latency_minutes);
+            let waso_score = sleep_waso_score(input.sleep.wake_after_sleep_onset_minutes);
+            let disturbance_rate_score = sleep_disturbance_rate_score(
+                input.sleep.disturbance_count,
+                input.sleep.sleep_duration_minutes,
+            );
+            let regularity_timing_score = sleep_schedule_regularity_score(
+                input.bedtime_deviation_minutes,
+                input.wake_time_deviation_minutes,
+                input.sleep.midpoint_deviation_minutes,
+                baseline.as_ref(),
+            );
+            let stage_confidence_0_to_1 =
+                sleep_architecture_confidence_0_to_1.or(stage_segment_confidence_0_to_1);
+            let restorative_autonomic_score = sleep_restorative_autonomic_score(
+                sleep_architecture_score(
+                    &effective_stage_minutes,
+                    input.sleep.sleep_duration_minutes,
+                    baseline.as_ref(),
+                ),
+                sleep_cardiovascular_score(input, baseline.as_ref()),
+                stage_confidence_0_to_1,
+            );
             let component_provenance = sleep_v1_component_provenance(
                 input,
                 baseline.as_ref(),
@@ -1269,6 +1495,17 @@ pub fn open_vitals_sleep_v1(input: &SleepV1Input) -> AlgorithmRunResult<SleepV1O
                 confidence_0_to_1,
                 baseline,
                 previous_night_comparison: previous_night_comparison.clone(),
+                efficiency_score: v0_output.efficiency_score,
+                latency_score,
+                waso_score,
+                disturbance_count: input.sleep.disturbance_count,
+                disturbances_per_hour,
+                disturbance_rate_score,
+                regularity_timing_score,
+                stage_confidence_0_to_1,
+                restorative_autonomic_score,
+                component_scores: component_scores_map(&components),
+                component_weights: component_weights_map(&components),
                 status_report,
                 components,
                 component_provenance,
@@ -1593,21 +1830,34 @@ pub fn open_vitals_strain_v0(input: &StrainInput) -> AlgorithmRunResult<StrainSc
     if (zone_minutes_sum - input.duration_minutes).abs() > 5.0 {
         quality_flags.push("zone_minutes_duration_mismatch".to_string());
     }
+    if input.max_hr_bpm - input.resting_hr_bpm < 30.0 {
+        quality_flags.push("low_hr_reserve_denominator".to_string());
+    }
 
     let output = if errors.is_empty() {
+        let zone_weights = vec![1.0, 2.0, 3.0, 4.0, 5.0];
         let zone_load = input
             .hr_zone_minutes
             .iter()
-            .zip([1.0, 2.0, 3.0, 4.0, 5.0])
+            .zip(zone_weights.iter().copied())
             .map(|(minutes, weight)| minutes * weight)
             .sum::<f64>();
-        let zone_score_0_to_21 = strain_zone_load_score_0_to_21(zone_load);
+        let zone_score_0_to_100 = strain_zone_load_score_0_to_100(zone_load);
         let hr_reserve_fraction = clamp_fraction(
             (input.average_hr_bpm - input.resting_hr_bpm)
                 / (input.max_hr_bpm - input.resting_hr_bpm),
         );
-        let zone_score_0_to_100 = zone_score_0_to_21 / 21.0 * 100.0;
-        let avg_hr_score_0_to_100 = hr_reserve_fraction.powf(1.15) * 100.0;
+        let sustained_intensity_score_0_to_100 = hr_reserve_fraction.powf(1.20) * 100.0;
+        let strain_confidence_0_to_1 = if input.max_hr_bpm - input.resting_hr_bpm < 30.0 {
+            0.45
+        } else if quality_flags
+            .iter()
+            .any(|flag| flag == "zone_minutes_duration_mismatch")
+        {
+            0.75
+        } else {
+            0.90
+        };
 
         let components = vec![
             score_component(
@@ -1619,21 +1869,43 @@ pub fn open_vitals_strain_v0(input: &StrainInput) -> AlgorithmRunResult<StrainSc
                 21.0,
             ),
             score_component(
-                "average_hr_reserve",
+                "sustained_intensity",
                 hr_reserve_fraction,
                 "fraction",
-                avg_hr_score_0_to_100,
+                sustained_intensity_score_0_to_100,
                 0.15,
                 21.0,
             ),
         ];
+        let score_0_to_21 = component_sum(&components);
 
         Some(StrainScoreOutput {
             algorithm_id: OPENVITALS_STRAIN_V0_ID.to_string(),
             algorithm_version: OPENVITALS_STRAIN_V0_VERSION.to_string(),
-            score_0_to_21: component_sum(&components),
+            score_0_to_21,
+            strain_percent: clamp_0_100(score_0_to_21 / 21.0 * 100.0),
+            strain_type: "cardiovascular".to_string(),
+            muscular_load_available: false,
+            strain_confidence_0_to_1,
+            resting_hr_bpm: input.resting_hr_bpm,
+            max_hr_bpm: input.max_hr_bpm,
+            max_hr_source: "provided_or_observed".to_string(),
+            average_hr_bpm: input.average_hr_bpm,
+            top_5min_hr_bpm: None,
+            top_5min_hr_reserve_fraction: None,
+            zone_minutes: input.hr_zone_minutes.clone(),
+            zone_weights,
             zone_load,
+            load_ref: STRAIN_ZONE_LOAD_REF,
+            load_cap: STRAIN_ZONE_LOAD_CAP,
+            zone_score_0_to_100,
             average_hr_reserve_fraction: hr_reserve_fraction,
+            sustained_intensity_score_0_to_100,
+            hr_coverage_percent: None,
+            hr_quality_score_0_to_100: None,
+            missing_inputs: vec!["top_5min_hr".to_string(), "muscular_load".to_string()],
+            component_scores: component_scores_map(&components),
+            component_weights: component_weights_map(&components),
             components,
         })
     } else {
@@ -1655,131 +1927,322 @@ pub fn open_vitals_strain_v0(input: &StrainInput) -> AlgorithmRunResult<StrainSc
             "zone_weights": [1.0, 2.0, 3.0, 4.0, 5.0],
             "zone_load_curve": {
                 "kind": "saturating_log",
-                "scale": 150.0,
-                "reference_load": 600.0
+                "scale": STRAIN_ZONE_LOAD_REF,
+                "reference_load": STRAIN_ZONE_LOAD_CAP
             },
+            "strain_type": "cardiovascular",
+            "muscular_load_available": false,
             "expected_values_policy": "hand-derived-tests-and-versioned-open-vitals-output"
         }),
     }
 }
 
-fn strain_zone_load_score_0_to_21(zone_load: f64) -> f64 {
-    const LOAD_SCALE: f64 = 150.0;
-    const REFERENCE_LOAD: f64 = 600.0;
-    let normalized =
-        (1.0 + zone_load.max(0.0) / LOAD_SCALE).ln() / (1.0 + REFERENCE_LOAD / LOAD_SCALE).ln();
-    clamp_0_to(21.0, normalized * 21.0)
+const STRAIN_ZONE_LOAD_REF: f64 = 150.0;
+const STRAIN_ZONE_LOAD_CAP: f64 = 600.0;
+
+fn strain_zone_load_score_0_to_100(zone_load: f64) -> f64 {
+    let normalized = (1.0 + zone_load.max(0.0) / STRAIN_ZONE_LOAD_REF).ln()
+        / (1.0 + STRAIN_ZONE_LOAD_CAP / STRAIN_ZONE_LOAD_REF).ln();
+    clamp_0_100(normalized * 100.0)
 }
 
 pub fn open_vitals_recovery_v0(input: &RecoveryInput) -> AlgorithmRunResult<RecoveryScoreOutput> {
     let mut quality_flags = Vec::new();
     let mut errors = Vec::new();
+    let mut missing_inputs = Vec::new();
 
-    require_finite_positive(
+    let hrv_rmssd_ms =
+        optional_finite_non_negative("hrv_rmssd_ms", input.hrv_rmssd_ms, &mut errors);
+    let hrv_baseline_rmssd_ms = optional_finite_positive(
         "hrv_baseline_rmssd_ms",
         input.hrv_baseline_rmssd_ms,
         &mut errors,
     );
-    require_finite_positive(
+    let hrv_ln_spread = optional_finite_positive("hrv_ln_spread", input.hrv_ln_spread, &mut errors);
+    let resting_hr_bpm =
+        optional_finite_positive("resting_hr_bpm", input.resting_hr_bpm, &mut errors);
+    let resting_hr_baseline_bpm = optional_finite_positive(
         "resting_hr_baseline_bpm",
         input.resting_hr_baseline_bpm,
         &mut errors,
     );
-    require_finite_positive(
-        "respiratory_rate_baseline_rpm",
-        input.respiratory_rate_baseline_rpm,
+    let resting_hr_spread_bpm = optional_finite_positive(
+        "resting_hr_spread_bpm",
+        input.resting_hr_spread_bpm,
         &mut errors,
     );
-    require_finite_non_negative("hrv_rmssd_ms", input.hrv_rmssd_ms, &mut errors);
-    require_finite_positive("resting_hr_bpm", input.resting_hr_bpm, &mut errors);
-    require_finite_positive(
+    let respiratory_rate_rpm = optional_finite_positive(
         "respiratory_rate_rpm",
         input.respiratory_rate_rpm,
         &mut errors,
     );
-    require_bounded(
+    let respiratory_rate_baseline_rpm = optional_finite_positive(
+        "respiratory_rate_baseline_rpm",
+        input.respiratory_rate_baseline_rpm,
+        &mut errors,
+    );
+    let respiratory_rate_spread_rpm = optional_finite_positive(
+        "respiratory_rate_spread_rpm",
+        input.respiratory_rate_spread_rpm,
+        &mut errors,
+    );
+    let skin_temp_delta_c =
+        optional_finite("skin_temp_delta_c", input.skin_temp_delta_c, &mut errors);
+    let skin_temp_spread_c =
+        optional_finite_positive("skin_temp_spread_c", input.skin_temp_spread_c, &mut errors);
+    let sleep_score_0_to_100 = optional_bounded(
         "sleep_score_0_to_100",
         input.sleep_score_0_to_100,
         0.0,
         100.0,
         &mut errors,
     );
-    require_bounded(
+    let sleep_debt_minutes =
+        optional_finite_non_negative("sleep_debt_minutes", input.sleep_debt_minutes, &mut errors);
+    let prior_strain_0_to_21 = optional_bounded(
         "prior_strain_0_to_21",
         input.prior_strain_0_to_21,
         0.0,
         21.0,
         &mut errors,
     );
+    let seven_day_avg_strain_0_to_21 = optional_bounded(
+        "seven_day_avg_strain_0_to_21",
+        input.seven_day_avg_strain_0_to_21,
+        0.0,
+        21.0,
+        &mut errors,
+    );
 
-    if input.sleep_score_0_to_100 < 60.0 {
+    recovery_missing_input(&mut missing_inputs, "hrv_rmssd_ms", hrv_rmssd_ms);
+    recovery_missing_input(
+        &mut missing_inputs,
+        "hrv_baseline_rmssd_ms",
+        hrv_baseline_rmssd_ms,
+    );
+    recovery_missing_input(&mut missing_inputs, "resting_hr_bpm", resting_hr_bpm);
+    recovery_missing_input(
+        &mut missing_inputs,
+        "resting_hr_baseline_bpm",
+        resting_hr_baseline_bpm,
+    );
+    recovery_missing_input(
+        &mut missing_inputs,
+        "respiratory_rate_rpm",
+        respiratory_rate_rpm,
+    );
+    recovery_missing_input(
+        &mut missing_inputs,
+        "respiratory_rate_baseline_rpm",
+        respiratory_rate_baseline_rpm,
+    );
+    recovery_missing_input(&mut missing_inputs, "skin_temp_delta_c", skin_temp_delta_c);
+    recovery_missing_input(
+        &mut missing_inputs,
+        "sleep_score_0_to_100",
+        sleep_score_0_to_100,
+    );
+    recovery_missing_input(
+        &mut missing_inputs,
+        "prior_strain_0_to_21",
+        prior_strain_0_to_21,
+    );
+    missing_inputs.sort();
+    missing_inputs.dedup();
+
+    if sleep_score_0_to_100.is_some_and(|score| score < 60.0) {
         quality_flags.push("low_sleep_score".to_string());
     }
-    if input.prior_strain_0_to_21 > 14.0 {
+    if prior_strain_0_to_21.is_some_and(|strain| strain > 14.0) {
         quality_flags.push("high_prior_strain".to_string());
     }
-    if (input.respiratory_rate_rpm - input.respiratory_rate_baseline_rpm).abs() >= 2.0 {
+    if respiratory_rate_rpm
+        .zip(respiratory_rate_baseline_rpm)
+        .is_some_and(|(current, baseline)| (current - baseline).abs() >= 2.0)
+    {
         quality_flags.push("respiratory_rate_anomaly".to_string());
     }
-    if input.skin_temp_delta_c.abs() >= 0.5 {
+    if skin_temp_delta_c.is_some_and(|delta| delta.abs() >= 0.5) {
         quality_flags.push("skin_temperature_anomaly".to_string());
     }
 
     let output = if errors.is_empty() {
-        let hrv_score = clamp_0_100(
-            72.0 + (input.hrv_rmssd_ms.max(1.0).ln() - input.hrv_baseline_rmssd_ms.max(1.0).ln())
-                / 0.25
-                * 28.0,
-        );
-        let rhr_score =
-            clamp_0_100(72.0 + (input.resting_hr_baseline_bpm - input.resting_hr_bpm) * 4.0);
-        let respiratory_penalty =
-            (input.respiratory_rate_rpm - input.respiratory_rate_baseline_rpm).abs() * 15.0;
-        let temperature_penalty = input.skin_temp_delta_c.abs() * 35.0;
-        let physiological_anomaly_score =
-            clamp_0_100(100.0 - respiratory_penalty - temperature_penalty);
-        let strain_readiness_score = clamp_0_100(100.0 - input.prior_strain_0_to_21 / 21.0 * 60.0);
+        let hrv_z = hrv_rmssd_ms
+            .zip(hrv_baseline_rmssd_ms)
+            .zip(hrv_ln_spread)
+            .map(|((current, baseline), spread)| {
+                (current.max(1.0).ln() - baseline.max(1.0).ln()) / spread
+            });
+        let hrv_score = hrv_rmssd_ms
+            .zip(hrv_baseline_rmssd_ms)
+            .map(|(current, baseline)| {
+                if let Some(z) = hrv_z {
+                    clamp_0_100(72.0 + 22.0 * (z / 1.25).tanh())
+                } else {
+                    clamp_0_100(
+                        72.0 + (current.max(1.0).ln() - baseline.max(1.0).ln()) / 0.25 * 28.0,
+                    )
+                }
+            });
+        let resting_hr_z = resting_hr_bpm
+            .zip(resting_hr_baseline_bpm)
+            .zip(resting_hr_spread_bpm)
+            .map(|((current, baseline), spread)| (current - baseline) / spread);
+        let resting_hr_score =
+            resting_hr_bpm
+                .zip(resting_hr_baseline_bpm)
+                .map(|(current, baseline)| {
+                    if let Some(z) = resting_hr_z {
+                        clamp_0_100((78.0 - 14.0 * z).min(88.0))
+                    } else {
+                        let delta = current - baseline;
+                        if delta > 0.0 {
+                            clamp_0_100(78.0 - delta * 4.0)
+                        } else {
+                            clamp_0_100(78.0 + (-delta * 2.0).min(10.0))
+                        }
+                    }
+                });
+        let respiratory_rate_z = respiratory_rate_rpm
+            .zip(respiratory_rate_baseline_rpm)
+            .zip(respiratory_rate_spread_rpm)
+            .map(|((current, baseline), spread)| (current - baseline) / spread);
+        let skin_temp_z = skin_temp_delta_c
+            .zip(skin_temp_spread_c)
+            .map(|(delta, spread)| delta / spread);
+        let physiological_anomaly_score = match (
+            respiratory_rate_rpm,
+            respiratory_rate_baseline_rpm,
+            skin_temp_delta_c,
+        ) {
+            (Some(resp), Some(resp_baseline), Some(temp_delta)) => {
+                if let (Some(rr_z), Some(temp_z)) = (respiratory_rate_z, skin_temp_z) {
+                    let rr_penalty = 18.0 * (rr_z - 1.0).max(0.0);
+                    let temp_penalty =
+                        20.0 * (temp_z - 1.0).max(0.0) + 8.0 * (-temp_z - 2.0).max(0.0);
+                    Some(clamp_0_100(100.0 - rr_penalty - temp_penalty))
+                } else {
+                    let respiratory_penalty = (resp - resp_baseline).abs() * 15.0;
+                    let temperature_penalty = temp_delta.abs() * 35.0;
+                    Some(clamp_0_100(
+                        100.0 - respiratory_penalty - temperature_penalty,
+                    ))
+                }
+            }
+            _ => None,
+        };
+        let sleep_or_sleep_debt_score = sleep_score_0_to_100.map(|score| {
+            let sleep_debt_penalty = sleep_debt_minutes
+                .map(|debt| (debt / 300.0 * 20.0).clamp(0.0, 20.0))
+                .unwrap_or(0.0);
+            clamp_0_100(score - sleep_debt_penalty)
+        });
+        let load_balance_score = prior_strain_0_to_21.map(|yesterday| {
+            let seven_day = seven_day_avg_strain_0_to_21.unwrap_or(yesterday);
+            clamp_0_100(100.0 - 40.0 * (yesterday / 21.0) - 20.0 * (seven_day / 21.0))
+        });
 
-        let components = vec![
-            score_component(
-                "hrv",
-                input.hrv_rmssd_ms,
-                "ms_rmssd",
-                hrv_score,
-                0.35,
-                100.0,
-            ),
-            score_component("rhr", input.resting_hr_bpm, "bpm", rhr_score, 0.20, 100.0),
-            score_component(
+        let mut weighted_components = Vec::new();
+        if let (Some(value), Some(score)) = (hrv_rmssd_ms, hrv_score) {
+            weighted_components.push(("hrv", value, "ms_rmssd", score, 0.35));
+        }
+        if let (Some(value), Some(score)) = (resting_hr_bpm, resting_hr_score) {
+            weighted_components.push(("rhr", value, "bpm", score, 0.20));
+        }
+        if let (Some(value), Some(score)) = (respiratory_rate_rpm, physiological_anomaly_score) {
+            weighted_components.push((
                 "physiological_anomaly",
-                input.respiratory_rate_rpm,
+                value,
                 "respiratory_rpm_and_skin_temp_c_delta",
-                physiological_anomaly_score,
+                score,
                 0.15,
-                100.0,
-            ),
-            score_component(
-                "sleep",
-                input.sleep_score_0_to_100,
-                "score_0_to_100",
-                input.sleep_score_0_to_100,
-                0.20,
-                100.0,
-            ),
-            score_component(
-                "prior_strain",
-                input.prior_strain_0_to_21,
-                "score_0_to_21",
-                strain_readiness_score,
-                0.10,
-                100.0,
-            ),
-        ];
+            ));
+        }
+        if let (Some(value), Some(score)) = (sleep_score_0_to_100, sleep_or_sleep_debt_score) {
+            weighted_components.push(("sleep", value, "score_0_to_100", score, 0.20));
+        }
+        if let (Some(value), Some(score)) = (prior_strain_0_to_21, load_balance_score) {
+            weighted_components.push(("load_balance", value, "score_0_to_21", score, 0.10));
+        }
+
+        let component_coverage = weighted_components
+            .iter()
+            .map(|(_, _, _, _, weight)| *weight)
+            .sum::<f64>();
+        let has_recovery_anchor = hrv_score.is_some() || resting_hr_score.is_some();
+        let score_status = if !has_recovery_anchor || component_coverage < 0.60 {
+            "blocked"
+        } else if component_coverage < 0.95 {
+            "partial"
+        } else {
+            "complete"
+        };
+        if score_status == "partial" {
+            quality_flags.push("partial_recovery_score".to_string());
+        }
+        if score_status == "blocked" {
+            quality_flags.push("recovery_score_blocked".to_string());
+        }
+        if missing_inputs
+            .iter()
+            .any(|input| matches!(input.as_str(), "respiratory_rate_rpm" | "skin_temp_delta_c"))
+        {
+            quality_flags.push("recovery_secondary_inputs_missing".to_string());
+        }
+        quality_flags.sort();
+        quality_flags.dedup();
+
+        let components = if component_coverage > 0.0 {
+            weighted_components
+                .into_iter()
+                .map(|(name, value, unit, score, weight)| {
+                    score_component(name, value, unit, score, weight / component_coverage, 100.0)
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let score_0_to_100 = component_sum(&components);
+        let recovery_confidence = match score_status {
+            "complete" => 0.90,
+            "partial" => component_coverage.min(0.80),
+            _ => 0.0,
+        };
 
         Some(RecoveryScoreOutput {
             algorithm_id: OPENVITALS_RECOVERY_V0_ID.to_string(),
             algorithm_version: OPENVITALS_RECOVERY_V0_VERSION.to_string(),
-            score_0_to_100: component_sum(&components),
+            score_0_to_100,
+            score_status: score_status.to_string(),
+            recovery_confidence,
+            component_coverage,
+            missing_inputs: missing_inputs.clone(),
+            hrv_rmssd_ms,
+            hrv_baseline_rmssd_ms,
+            hrv_ln_spread,
+            hrv_z,
+            hrv_score,
+            resting_hr_bpm,
+            resting_hr_baseline_bpm,
+            resting_hr_spread_bpm,
+            resting_hr_z,
+            resting_hr_score,
+            respiratory_rate_rpm,
+            respiratory_rate_baseline_rpm,
+            respiratory_rate_spread_rpm,
+            respiratory_rate_z,
+            skin_temp_delta_c,
+            skin_temp_spread_c,
+            skin_temp_z,
+            physiological_anomaly_score,
+            sleep_score_0_to_100,
+            sleep_debt_minutes,
+            sleep_or_sleep_debt_score,
+            yesterday_strain_0_to_21: prior_strain_0_to_21,
+            seven_day_avg_strain_0_to_21,
+            load_balance_score,
+            component_scores: component_scores_map(&components),
+            component_weights: component_weights_map(&components),
             components,
         })
     } else {
@@ -1797,7 +2260,8 @@ pub fn open_vitals_recovery_v0(input: &RecoveryInput) -> AlgorithmRunResult<Reco
         errors,
         provenance: json!({
             "input_ids": input.input_ids,
-            "score_policy": "research_weighted_recovery_with_personal_baselines_and_anomaly_penalties",
+            "score_policy": "available_weight_recovery_with_partial_status_personal_baseline_fallbacks_and_anomaly_modifiers",
+            "missing_inputs": missing_inputs,
             "official_labels_policy": "not_used_unless_explicit_calibration_label",
             "expected_values_policy": "hand-derived-tests-and-versioned-open-vitals-output"
         }),
@@ -2487,6 +2951,8 @@ fn sleep_v1_components(
         input.sleep.sleep_latency_minutes,
         input.sleep.wake_after_sleep_onset_minutes,
         input.sleep.wake_episode_count,
+        input.sleep.disturbance_count,
+        input.sleep.sleep_duration_minutes,
     );
     let schedule_score = sleep_schedule_regularity_score(
         input.bedtime_deviation_minutes,
@@ -2525,7 +2991,7 @@ fn sleep_v1_components(
             input.sleep.midpoint_deviation_minutes,
             "minutes_deviation",
             schedule_score,
-            0.20,
+            0.25,
             100.0,
         ),
         score_component(
@@ -2541,7 +3007,7 @@ fn sleep_v1_components(
             input.sleep.heart_rate_dip_percent.unwrap_or(0.0),
             "hr_dip_percent",
             cardiovascular_score,
-            0.07,
+            0.05,
             100.0,
         ),
         score_component(
@@ -2549,7 +3015,7 @@ fn sleep_v1_components(
             input.prior_day_strain.unwrap_or(0.0),
             "strain_0_to_21",
             context_score,
-            0.03,
+            0.00,
             100.0,
         ),
         score_component(
@@ -2680,6 +3146,19 @@ fn sleep_v1_component_provenance(
     provenance
 }
 
+fn sleep_duration_adequacy_score(sleep_duration_minutes: f64, sleep_need_minutes: f64) -> f64 {
+    if sleep_need_minutes <= 0.0 || !sleep_need_minutes.is_finite() {
+        return 0.0;
+    }
+    let under_sleep = (sleep_need_minutes - sleep_duration_minutes).max(0.0);
+    let over_sleep = (sleep_duration_minutes - sleep_need_minutes * 1.15).max(0.0);
+    clamp_0_100(
+        100.0
+            - 100.0 * (under_sleep / sleep_need_minutes).powf(1.25)
+            - 40.0 * (over_sleep / sleep_need_minutes).powf(1.10),
+    )
+}
+
 fn sleep_need_fulfillment_score(
     sleep_duration_minutes: f64,
     sleep_need_minutes: f64,
@@ -2689,7 +3168,36 @@ fn sleep_need_fulfillment_score(
     let debt_pressure_minutes = (rolling_sleep_debt_minutes * 0.20).min(120.0);
     let effective_sleep_need = (sleep_need_minutes + debt_pressure_minutes - naps_minutes * 0.50)
         .max(sleep_need_minutes * 0.75);
-    clamp_0_100(sleep_duration_minutes / effective_sleep_need * 100.0)
+    sleep_duration_adequacy_score(sleep_duration_minutes, effective_sleep_need)
+}
+
+fn sleep_disturbances_per_hour(disturbance_count: u32, sleep_duration_minutes: f64) -> f64 {
+    disturbance_count as f64 / (sleep_duration_minutes / 60.0).max(1.0)
+}
+
+fn sleep_disturbance_rate_score(disturbance_count: u32, sleep_duration_minutes: f64) -> f64 {
+    clamp_0_100(
+        100.0 - sleep_disturbances_per_hour(disturbance_count, sleep_duration_minutes) * 12.0,
+    )
+}
+
+fn sleep_latency_score(sleep_latency_minutes: f64) -> f64 {
+    if sleep_latency_minutes <= 5.0 {
+        90.0
+    } else if sleep_latency_minutes <= 20.0 {
+        100.0
+    } else {
+        clamp_0_100(100.0 - (sleep_latency_minutes - 20.0) * 2.0)
+    }
+}
+
+fn sleep_waso_score(wake_after_sleep_onset_minutes: f64) -> f64 {
+    clamp_0_100(100.0 - wake_after_sleep_onset_minutes * 1.5)
+}
+
+fn sleep_restlessness_score(wake_episode_count: u32, sleep_duration_minutes: f64) -> f64 {
+    let episodes_per_hour = wake_episode_count as f64 / (sleep_duration_minutes / 60.0).max(1.0);
+    clamp_0_100(100.0 - episodes_per_hour * 15.0)
 }
 
 fn sleep_continuity_score(
@@ -2697,12 +3205,20 @@ fn sleep_continuity_score(
     sleep_latency_minutes: f64,
     wake_after_sleep_onset_minutes: f64,
     wake_episode_count: u32,
+    disturbance_count: u32,
+    sleep_duration_minutes: f64,
 ) -> f64 {
-    let efficiency_score = clamp_0_100((efficiency_fraction - 0.70) / 0.25 * 100.0);
-    let latency_score = clamp_0_100(100.0 - sleep_latency_minutes / 60.0 * 100.0);
-    let waso_score = clamp_0_100(100.0 - wake_after_sleep_onset_minutes / 120.0 * 100.0);
-    let episode_score = clamp_0_100(100.0 - wake_episode_count as f64 / 8.0 * 100.0);
-    efficiency_score * 0.40 + latency_score * 0.20 + waso_score * 0.25 + episode_score * 0.15
+    let efficiency_score = clamp_0_100(efficiency_fraction * 100.0);
+    let waso_score = sleep_waso_score(wake_after_sleep_onset_minutes);
+    let disturbance_rate_score =
+        sleep_disturbance_rate_score(disturbance_count, sleep_duration_minutes);
+    let latency_score = sleep_latency_score(sleep_latency_minutes);
+    let restlessness_score = sleep_restlessness_score(wake_episode_count, sleep_duration_minutes);
+    efficiency_score * 0.35
+        + waso_score * 0.25
+        + disturbance_rate_score * 0.25
+        + latency_score * 0.10
+        + restlessness_score * 0.05
 }
 
 fn sleep_schedule_score(
@@ -2912,6 +3428,16 @@ fn sleep_cardiovascular_score(input: &SleepV1Input, baseline: Option<&SleepBasel
     }
 }
 
+fn sleep_restorative_autonomic_score(
+    stage_based_restorative_score: f64,
+    hr_dip_or_continuity_proxy_score: f64,
+    stage_confidence_0_to_1: Option<f64>,
+) -> f64 {
+    let stage_confidence = stage_confidence_0_to_1.unwrap_or(0.0).clamp(0.0, 0.65);
+    stage_based_restorative_score * stage_confidence
+        + hr_dip_or_continuity_proxy_score * (1.0 - stage_confidence)
+}
+
 fn pre_sleep_awake_hr_score(
     pre_sleep_awake_hr_bpm: Option<f64>,
     sleep_hr_bpm: Option<f64>,
@@ -3011,6 +3537,20 @@ fn component_sum(components: &[ScoreComponent]) -> f64 {
         .iter()
         .map(|component| component.contribution)
         .sum()
+}
+
+fn component_scores_map(components: &[ScoreComponent]) -> BTreeMap<String, f64> {
+    components
+        .iter()
+        .map(|component| (component.name.clone(), component.score_0_to_100))
+        .collect()
+}
+
+fn component_weights_map(components: &[ScoreComponent]) -> BTreeMap<String, f64> {
+    components
+        .iter()
+        .map(|component| (component.name.clone(), component.weight))
+        .collect()
 }
 
 fn clamp_0_100(value: f64) -> f64 {
@@ -3442,5 +3982,69 @@ fn require_finite_non_negative(name: &str, value: f64, errors: &mut Vec<String>)
 fn require_bounded(name: &str, value: f64, min: f64, max: f64, errors: &mut Vec<String>) {
     if !value.is_finite() || value < min || value > max {
         errors.push(format!("{name}_must_be_between_{min}_and_{max}"));
+    }
+}
+
+fn optional_finite(name: &str, value: Option<f64>, errors: &mut Vec<String>) -> Option<f64> {
+    match value {
+        Some(value) if value.is_finite() => Some(value),
+        Some(_) => {
+            errors.push(format!("{name}_must_be_finite"));
+            None
+        }
+        None => None,
+    }
+}
+
+fn optional_finite_positive(
+    name: &str,
+    value: Option<f64>,
+    errors: &mut Vec<String>,
+) -> Option<f64> {
+    match value {
+        Some(value) if value.is_finite() && value > 0.0 => Some(value),
+        Some(_) => {
+            errors.push(format!("{name}_must_be_finite_positive"));
+            None
+        }
+        None => None,
+    }
+}
+
+fn optional_finite_non_negative(
+    name: &str,
+    value: Option<f64>,
+    errors: &mut Vec<String>,
+) -> Option<f64> {
+    match value {
+        Some(value) if value.is_finite() && value >= 0.0 => Some(value),
+        Some(_) => {
+            errors.push(format!("{name}_must_be_finite_non_negative"));
+            None
+        }
+        None => None,
+    }
+}
+
+fn optional_bounded(
+    name: &str,
+    value: Option<f64>,
+    min: f64,
+    max: f64,
+    errors: &mut Vec<String>,
+) -> Option<f64> {
+    match value {
+        Some(value) if value.is_finite() && value >= min && value <= max => Some(value),
+        Some(_) => {
+            errors.push(format!("{name}_must_be_between_{min}_and_{max}"));
+            None
+        }
+        None => None,
+    }
+}
+
+fn recovery_missing_input(missing_inputs: &mut Vec<String>, name: &str, value: Option<f64>) {
+    if value.is_none() {
+        missing_inputs.push(name.to_string());
     }
 }

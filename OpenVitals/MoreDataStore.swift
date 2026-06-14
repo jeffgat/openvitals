@@ -95,6 +95,11 @@ final class MoreDataStore: ObservableObject {
   @Published var localExportProgress: OpenVitalsLocalDataExportProgress?
   @Published var localExportURL: URL?
   @Published var localExportManifestURL: URL?
+  @Published var k18ExportReadinessStatus = "K18 export readiness not checked"
+  @Published var k18ExportReadinessInProgress = false
+  @Published var k18ExportReadinessNextActions: [String] = []
+  @Published var debugDataClearStatus = "Debug data not cleared"
+  @Published var debugDataClearInProgress = false
   @Published var supabaseProjectURL: String
   @Published var supabaseAnonKey: String
   @Published var supabaseBucket: String
@@ -161,6 +166,7 @@ final class MoreDataStore: ObservableObject {
   }
   var debugSessionID = "swift-more-\(UUID().uuidString)"
   var automaticStreamProbeStopWorkItem: DispatchWorkItem?
+  var automaticStreamProbeCatchUpWorkItem: DispatchWorkItem?
   var guidedReferenceProbeWorkItem: DispatchWorkItem?
   lazy var rrReferenceCapture = OpenVitalsRRReferenceCapture(databasePath: databasePath)
 
@@ -235,7 +241,7 @@ final class MoreDataStore: ObservableObject {
   }
 
   private var streamProbeRouteStatus: MoreStatusKind {
-    if guidedReferenceProbeInProgress || automaticStreamProbeInProgress || streamProbePlanInProgress || streamProbeDeltaInProgress || k20ChannelScanInProgress || k20WaveformScanInProgress || beatEvidenceInProgress {
+    if guidedReferenceProbeInProgress || automaticStreamProbeInProgress || streamProbePlanInProgress || streamProbeDeltaInProgress || k20ChannelScanInProgress || k20WaveformScanInProgress || beatEvidenceInProgress || k18ExportReadinessInProgress || debugDataClearInProgress {
       return .inProgress
     }
     if streamProbePlanStatus.localizedCaseInsensitiveContains("blocked")
@@ -243,15 +249,19 @@ final class MoreDataStore: ObservableObject {
       || k20ChannelScanStatus.localizedCaseInsensitiveContains("blocked")
       || k20WaveformScanStatus.localizedCaseInsensitiveContains("blocked")
       || beatEvidenceStatus.localizedCaseInsensitiveContains("blocked")
+      || k18ExportReadinessStatus.localizedCaseInsensitiveContains("blocked")
+      || debugDataClearStatus.localizedCaseInsensitiveContains("blocked")
       || streamProbePlanStatus.localizedCaseInsensitiveContains("failed")
       || streamProbeDeltaStatus.localizedCaseInsensitiveContains("failed")
       || k20ChannelScanStatus.localizedCaseInsensitiveContains("failed")
       || k20WaveformScanStatus.localizedCaseInsensitiveContains("failed")
       || beatEvidenceStatus.localizedCaseInsensitiveContains("failed")
+      || k18ExportReadinessStatus.localizedCaseInsensitiveContains("failed")
+      || debugDataClearStatus.localizedCaseInsensitiveContains("failed")
     {
       return .blocked
     }
-    if !streamProbePacketDeltas.isEmpty || !k20ChannelCandidates.isEmpty || !k20WaveformCandidates.isEmpty || !beatEvidenceNextActions.isEmpty {
+    if !streamProbePacketDeltas.isEmpty || !k20ChannelCandidates.isEmpty || !k20WaveformCandidates.isEmpty || !beatEvidenceNextActions.isEmpty || k18ExportReadinessStatus.localizedCaseInsensitiveContains("ready to export") {
       return .ready
     }
     return streamProbeSteps.isEmpty ? .notRun : .pending
@@ -486,6 +496,61 @@ final class MoreDataStore: ObservableObject {
     !rawExportInProgress && !localExportInProgress && !supabaseUploadInProgress
   }
 
+  var canClearDeviceDebugData: Bool {
+    canWipeLocalAppData
+      && !debugDataClearInProgress
+      && !guidedReferenceProbeInProgress
+      && !automaticStreamProbeInProgress
+      && !streamProbePlanInProgress
+      && !streamProbeDeltaInProgress
+      && !k20ChannelScanInProgress
+      && !k20WaveformScanInProgress
+      && !beatEvidenceInProgress
+      && !k18ExportReadinessInProgress
+  }
+
+  func clearDeviceDebugData() {
+    guard canClearDeviceDebugData else {
+      debugDataClearStatus = "Clear blocked while debug work is running"
+      return
+    }
+
+    debugDataClearInProgress = true
+    debugDataClearStatus = "Clearing stored debug data..."
+    let databasePath = databasePath
+    let outputDirectory = outputDirectory
+    OpenVitalsRustBridge.performInBackground(qos: .userInitiated, {
+      let result: [String: Any]
+      if FileManager.default.fileExists(atPath: databasePath) {
+        result = try OpenVitalsRustBridge().request(
+          method: "debug.clear_data",
+          args: ["database_path": databasePath]
+        )
+      } else {
+        result = ["schema": "open_vitals.debug-data-clear-result.v1"]
+      }
+      let removedExportFolders = Self.removeLocalDataDirectories([
+        URL(fileURLWithPath: outputDirectory, isDirectory: true),
+      ])
+      return (result, removedExportFolders)
+    }) { [weak self] result in
+      guard let self else {
+        return
+      }
+      debugDataClearInProgress = false
+      switch result {
+      case .success(let clearResult):
+        resetStateAfterDebugDataClear()
+        debugDataClearStatus = Self.debugDataClearSummary(
+          clearResult.0,
+          removedExportFolders: clearResult.1
+        )
+      case .failure(let error):
+        debugDataClearStatus = "Clear failed: \(Self.errorSummary(error))"
+      }
+    }
+  }
+
   func wipeLocalAppData() {
     guard canWipeLocalAppData else {
       deletionStatus = "Wipe blocked while export is running"
@@ -538,6 +603,8 @@ final class MoreDataStore: ObservableObject {
     automaticStreamProbeStartedAt = nil
     automaticStreamProbeStopWorkItem?.cancel()
     automaticStreamProbeStopWorkItem = nil
+    automaticStreamProbeCatchUpWorkItem?.cancel()
+    automaticStreamProbeCatchUpWorkItem = nil
     guidedReferenceProbeStatus = "No guided reference probe run"
     guidedReferenceProbeInProgress = false
     guidedReferenceProbeWorkItem?.cancel()
@@ -546,6 +613,9 @@ final class MoreDataStore: ObservableObject {
     localExportProgress = nil
     localExportURL = nil
     localExportManifestURL = nil
+    k18ExportReadinessStatus = "K18 export readiness not checked"
+    k18ExportReadinessInProgress = false
+    k18ExportReadinessNextActions = []
     supabaseUploadStatus = supabaseUploadIsConfigured ? "Ready to upload debug bundle" : "Not configured"
     supabaseUploadInProgress = false
     supabaseLastBundlePath = Self.supabaseNoBundleUploadText
@@ -556,7 +626,82 @@ final class MoreDataStore: ObservableObject {
     debugSessionID = "swift-more-\(UUID().uuidString)"
   }
 
-  private static func removeLocalDataDirectories(_ directories: [URL]) -> Int {
+  private func resetStateAfterDebugDataClear() {
+    captureSessionID = nil
+    captureSessionStartedAt = nil
+    captureFrameCount = 0
+    captureStatus = "No capture session"
+    liveCaptureStatus = "Connect a device to mirror notifications into capture"
+    recentCaptureSessions = []
+    rawExportStatus = "No export yet"
+    rawBundlePath = "No bundle"
+    rawZipPath = "No zip"
+    rawZipURL = nil
+    rawRowCounts = "No rows"
+    rawValidationManifestStatus = "No validation manifest"
+    rawValidationManifestURL = nil
+    rawValidationReviewStatus = "No validation review"
+    rawValidationReviewURL = nil
+    rawValidationRunbookStatus = "No validation runbook"
+    rawValidationRunbookURL = nil
+    rawBundleValidation = "Not validated"
+    rawZipValidation = "Not validated"
+    privacyLintStatus = "Not linted"
+    sanitizedPrivacyStatus = "No sanitized copy"
+    streamProbeCaptureSessions = ""
+    streamProbePacketDeltas = []
+    streamProbeNextActions = []
+    streamProbeDeltaStatus = "No packet delta analysis"
+    k20ChannelCandidates = []
+    k20ChannelNextActions = []
+    k20ChannelScanStatus = "No K20 channel scan"
+    k20WaveformCandidates = []
+    k20WaveformNextActions = []
+    k20WaveformScanStatus = "No K20 waveform transform scan"
+    beatEvidenceNextActions = []
+    beatEvidenceStatus = "No beat evidence report"
+    k18ExportReadinessStatus = "K18 export readiness not checked"
+    k18ExportReadinessInProgress = false
+    k18ExportReadinessNextActions = []
+    automaticStreamProbeStatus = "No automatic stream probe run"
+    automaticStreamProbeInProgress = false
+    automaticStreamProbeStartedAt = nil
+    automaticStreamProbeStopWorkItem?.cancel()
+    automaticStreamProbeStopWorkItem = nil
+    automaticStreamProbeCatchUpWorkItem?.cancel()
+    automaticStreamProbeCatchUpWorkItem = nil
+    guidedReferenceProbeStatus = "No guided reference probe run"
+    guidedReferenceProbeInProgress = false
+    guidedReferenceProbeWorkItem?.cancel()
+    guidedReferenceProbeWorkItem = nil
+    localExportStatus = "No local export"
+    localExportProgress = nil
+    localExportURL = nil
+    localExportManifestURL = nil
+    debugWebSocketStatus = "Not started"
+    debugNextAction = "Start a local debug session"
+    debugSessionID = "swift-more-\(UUID().uuidString)"
+    rrReferenceCapture.resetAfterStoredDebugClear()
+  }
+
+  private static func debugDataClearSummary(_ result: [String: Any], removedExportFolders: Int) -> String {
+    let rowKeys = [
+      "deleted_debug_events",
+      "deleted_debug_commands",
+      "deleted_debug_sessions",
+      "deleted_metric_debug_features",
+      "deleted_rr_reference_samples",
+      "deleted_decoded_frames",
+      "deleted_raw_evidence",
+      "deleted_capture_sessions",
+    ]
+    let deletedRows = rowKeys.reduce(0) { total, key in
+      total + (Int(stringValue(result[key] ?? 0)) ?? 0)
+    }
+    return "Cleared \(deletedRows) stored debug rows | removed \(removedExportFolders) export folders"
+  }
+
+  nonisolated private static func removeLocalDataDirectories(_ directories: [URL]) -> Int {
     var removed = 0
     let fileManager = FileManager.default
     for directory in directories {

@@ -530,6 +530,40 @@ fn required_columns() -> BTreeMap<&'static str, Vec<&'static str>> {
         ],
     );
     columns.insert(
+        "band_sync_frame_identities",
+        vec![
+            "sync_identity",
+            "device_key",
+            "scope",
+            "packet_type",
+            "packet_k",
+            "device_timestamp_seconds",
+            "device_timestamp_subseconds",
+            "payload_sha256",
+            "evidence_id",
+            "frame_id",
+            "capture_session_id",
+            "first_captured_at",
+            "created_at",
+        ],
+    );
+    columns.insert(
+        "band_sync_checkpoints",
+        vec![
+            "device_key",
+            "scope",
+            "latest_device_timestamp_seconds",
+            "latest_device_timestamp_subseconds",
+            "latest_sync_identity",
+            "latest_capture_session_id",
+            "latest_captured_at",
+            "accepted_frame_count",
+            "duplicate_frame_count",
+            "created_at",
+            "updated_at",
+        ],
+    );
+    columns.insert(
         "algorithm_definitions",
         vec![
             "algorithm_id",

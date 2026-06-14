@@ -1,0 +1,25 @@
+export const IPC = {
+  getState: "debugger:get-state",
+  stateChanged: "debugger:state-changed",
+  startScan: "debugger:start-scan",
+  stopScan: "debugger:stop-scan",
+  connect: "debugger:connect",
+  disconnect: "debugger:disconnect",
+  startCapture: "debugger:start-capture",
+  stopCapture: "debugger:stop-capture",
+  setDatabasePath: "debugger:set-database-path",
+  storageCheck: "debugger:storage-check",
+  sendHello: "debugger:send-hello",
+  startIosParityPhysiologyProbe: "debugger:start-ios-parity-physiology-probe",
+  startBandParityProbe: "debugger:start-band-parity-probe",
+  runNativeAuthProbe: "debugger:run-native-auth-probe",
+  checkMacPairingStatus: "debugger:check-mac-pairing-status",
+  openBluetoothSettings: "debugger:open-bluetooth-settings",
+  startPhysiologyCapture: "debugger:start-physiology-capture",
+  stopPhysiologyCapture: "debugger:stop-physiology-capture",
+  enterHighFrequencyHistorySync: "debugger:enter-high-frequency-history-sync",
+  exitHighFrequencyHistorySync: "debugger:exit-high-frequency-history-sync",
+  selectPacket: "debugger:select-packet",
+} as const;
+
+export type IpcCommand = (typeof IPC)[keyof typeof IPC];

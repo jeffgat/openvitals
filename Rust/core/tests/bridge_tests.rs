@@ -46,8 +46,9 @@ use open_vitals_core::{
     store::{
         ActivitySessionInput, AlgorithmRunRecord, CURRENT_SCHEMA_VERSION, CalibrationLabelInput,
         CaptureSessionInput, CommandValidationRecord, DailyActivityMetricInput,
-        DailyRecoveryMetricInput, DecodedFrameRow, HourlyActivityMetricInput, OpenVitalsStore,
-        RawEvidenceInput, StepCounterSampleInput,
+        DailyRecoveryMetricInput, DebugCommandRow, DebugEventRow, DebugSessionRow, DecodedFrameRow,
+        HourlyActivityMetricInput, OpenVitalsStore, RawEvidenceInput, RrReferenceSampleInput,
+        StepCounterSampleInput,
     },
 };
 use rusqlite::Connection;
@@ -576,7 +577,10 @@ fn bridge_exposes_algorithm_registry_and_score_methods() {
         }
     }));
     assert!(sleep.ok, "{:?}", sleep.error);
-    assert_eq!(sleep.result.unwrap()["output"]["score_0_to_100"], 84.875);
+    assert_eq!(
+        sleep.result.unwrap()["output"]["score_0_to_100"],
+        86.83789515021726
+    );
 
     let sleep_v1 = request(serde_json::json!({
         "schema": "open_vitals.bridge.request.v1",
@@ -631,7 +635,7 @@ fn bridge_exposes_algorithm_registry_and_score_methods() {
         .as_f64()
         .unwrap();
     assert!(
-        (sleep_v1_score - 80.64194480408024).abs() < 1e-9,
+        (sleep_v1_score - 84.6449667343507).abs() < 1e-9,
         "expected hand-derived sleep v1 score, got {sleep_v1_score}"
     );
     assert_eq!(sleep_v1_result["output"]["deep_sleep_minutes"], 90.0);
@@ -5186,7 +5190,7 @@ fn bridge_builds_local_strain_score_from_feature_reports() {
     assert_eq!(report["strain_input"]["max_hr_bpm"], 100.0);
     assert_eq!(
         report["score_result"]["output"]["score_0_to_21"],
-        serde_json::json!(5.151225377542748)
+        serde_json::json!(5.1028730361220855)
     );
 }
 
@@ -5350,7 +5354,10 @@ fn bridge_builds_local_sleep_score_from_motion_features() {
     assert_eq!(report["sleep_window"]["time_in_bed_minutes"], 240.0);
     assert_eq!(report["sleep_window"]["sleep_duration_minutes"], 180.0);
     assert_eq!(report["sleep_window"]["disturbance_count"], 1);
-    assert_eq!(report["score_result"]["output"]["score_0_to_100"], 80.75);
+    assert_eq!(
+        report["score_result"]["output"]["score_0_to_100"],
+        86.66281566461771
+    );
     assert_eq!(
         report["persisted_algorithm_run"]["run_id"],
         "bridge-sleep-feature-run-1"
@@ -6742,7 +6749,10 @@ fn bridge_builds_local_recovery_score_from_feature_reports_and_provided_vitals()
     assert_eq!(report["recovery_input"]["hrv_rmssd_ms"], 25.0);
     assert_eq!(report["recovery_input"]["hrv_baseline_rmssd_ms"], 50.0);
     assert_eq!(report["recovery_input"]["resting_hr_bpm"], 72.0);
-    assert_eq!(report["recovery_input"]["sleep_score_0_to_100"], 80.75);
+    assert_eq!(
+        report["recovery_input"]["sleep_score_0_to_100"],
+        86.66281566461771
+    );
     assert_eq!(
         report["provided_vitals"]["source"],
         "metrics.recovery_sensor_discovery"
@@ -6826,10 +6836,21 @@ fn bridge_builds_local_recovery_score_from_feature_reports_and_provided_vitals()
     }));
     assert!(blocked.ok, "{:?}", blocked.error);
     let blocked_report = blocked.result.unwrap();
-    assert_eq!(blocked_report["pass"], false);
+    assert_eq!(blocked_report["pass"], true);
     assert_eq!(
-        blocked_report["persisted_algorithm_run"]["blocked_reason"],
-        "report_not_passed"
+        blocked_report["score_result"]["output"]["score_status"],
+        "partial"
+    );
+    assert!(
+        blocked_report["score_result"]["quality_flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|flag| flag == "provided_resp_temp_inputs_not_packet_derived")
+    );
+    assert_eq!(
+        blocked_report["persisted_algorithm_run"]["run_id"],
+        "bridge-recovery-untrusted-vitals"
     );
 }
 
@@ -7685,6 +7706,153 @@ fn bridge_records_debug_session_command_events_for_debug_tab_stream() {
     let snapshot_result = snapshot.result.unwrap();
     assert_eq!(snapshot_result["contract_report"]["pass"], true);
     assert_eq!(snapshot_result["contract_report"]["contract_ready"], true);
+}
+
+#[test]
+fn bridge_clears_device_debug_data() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let db = tempdir.path().join("open_vitals.sqlite");
+    let db_path = db.display().to_string();
+    let store = OpenVitalsStore::open(&db).unwrap();
+    let raw = hex::decode(GET_HELLO_FRAME).unwrap();
+    let parsed = parse_frame_hex(DeviceType::OpenVitals, GET_HELLO_FRAME).unwrap();
+
+    store
+        .start_capture_session(CaptureSessionInput {
+            session_id: "stream-probe-clear",
+            source: "stream_probe.auto",
+            started_at_unix_ms: 1779840000000,
+            device_model: "OpenVitals test device",
+            active_device_id: Some("test-device"),
+            provenance_json: "{}",
+        })
+        .unwrap();
+    store
+        .insert_raw_evidence(RawEvidenceInput {
+            evidence_id: "stream-probe-clear-evidence",
+            source: "ios_core_bluetooth.live_notifications",
+            captured_at: "2026-05-28T00:00:00Z",
+            device_model: "OpenVitals test device",
+            payload: &raw,
+            sensitivity: "sensitive",
+            capture_session_id: Some("stream-probe-clear"),
+        })
+        .unwrap();
+    store
+        .insert_decoded_frame(open_vitals_core::store::DecodedFrameInput {
+            frame_id: "stream-probe-clear-frame",
+            evidence_id: "stream-probe-clear-evidence",
+            parsed: &parsed,
+            parser_version: "bridge-test",
+        })
+        .unwrap();
+    store
+        .insert_rr_reference_samples(&[RrReferenceSampleInput {
+            sample_id: "rr-clear-1",
+            session_id: "stream-probe-clear",
+            captured_at: "2026-05-28T00:00:01Z",
+            device_name: "Reference Strap",
+            device_id: "reference-device",
+            heart_rate_bpm: Some(62.0),
+            rr_interval_ms: 968.0,
+            notification_sequence: 1,
+            rr_index: 0,
+            contact_detected: Some(true),
+            energy_expended_j: None,
+            provenance_json: "{}",
+        }])
+        .unwrap();
+    store
+        .insert_debug_session(&DebugSessionRow {
+            session_id: "debug-clear-session".to_string(),
+            started_at_unix_ms: 1779840000000,
+            bridge_url: "ws://127.0.0.1:49152/open-vitals-debug/stream?token=test".to_string(),
+            bind_host: "127.0.0.1".to_string(),
+            token_required: true,
+            token_present: true,
+            remote_bind_enabled: false,
+            visible_remote_bind_toggle: false,
+        })
+        .unwrap();
+    store
+        .insert_debug_command(&DebugCommandRow {
+            command_id: "debug-clear-command".to_string(),
+            session_id: "debug-clear-session".to_string(),
+            schema: "open_vitals.debug.command.v1".to_string(),
+            command: "export.raw_timeframe".to_string(),
+            args_json: "{}".to_string(),
+            dry_run: true,
+            received_at_unix_ms: 1779840000100,
+        })
+        .unwrap();
+    store
+        .insert_debug_event(&DebugEventRow {
+            session_id: "debug-clear-session".to_string(),
+            sequence: 1,
+            schema: "open_vitals.debug.event.v1".to_string(),
+            time_unix_ms: 1779840000200,
+            source: "app".to_string(),
+            level: "info".to_string(),
+            topic: "stream_probe.test".to_string(),
+            message: "stored debug data".to_string(),
+            command_id: Some("debug-clear-command".to_string()),
+            data_json: "{}".to_string(),
+        })
+        .unwrap();
+    drop(store);
+
+    let clear = request(serde_json::json!({
+        "schema": "open_vitals.bridge.request.v1",
+        "request_id": "debug-clear-data",
+        "method": "debug.clear_data",
+        "args": {
+            "database_path": db_path
+        }
+    }));
+    assert!(clear.ok, "{:?}", clear.error);
+    let result = clear.result.unwrap();
+    assert_eq!(result["schema"], "open_vitals.debug-data-clear-result.v1");
+    assert_eq!(result["deleted_debug_events"], 1);
+    assert_eq!(result["deleted_debug_commands"], 1);
+    assert_eq!(result["deleted_debug_sessions"], 1);
+    assert_eq!(result["deleted_rr_reference_samples"], 1);
+    assert_eq!(result["deleted_decoded_frames"], 1);
+    assert_eq!(result["deleted_raw_evidence"], 1);
+    assert_eq!(result["deleted_capture_sessions"], 1);
+
+    let store = OpenVitalsStore::open(&db).unwrap();
+    assert!(
+        store
+            .debug_sessions_between(0, 9_999_999_999_999)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        store
+            .capture_sessions_between(0, 9_999_999_999_999)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        store
+            .raw_evidence_between("2026-05-28T00:00:00Z", "2026-05-29T00:00:00Z")
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        store
+            .decoded_frames_between("2026-05-28T00:00:00Z", "2026-05-29T00:00:00Z")
+            .unwrap()
+            .is_empty()
+    );
+    let rr_summary = store
+        .rr_reference_summary(
+            None,
+            Some("2026-05-28T00:00:00Z"),
+            Some("2026-05-29T00:00:00Z"),
+        )
+        .unwrap();
+    assert_eq!(rr_summary.sample_count, 0);
 }
 
 #[test]

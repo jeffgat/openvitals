@@ -282,7 +282,10 @@ extension OpenVitalsAppModel {
 
     let timingSuffix = result.importTimingSummary.map { " | \($0)" } ?? ""
     let batchPrefix = result.batchCount > 1 ? "\(result.batchCount) batches | " : ""
-    pendingPacketImportStatus = "\(batchPrefix)Imported raw \(result.rawInserted), decoded \(result.inserted), existing \(result.existing)\(timingSuffix)"
+    let skippedSuffix = result.historicalDuplicateSkipped > 0
+      ? ", skipped \(result.historicalDuplicateSkipped) already synced"
+      : ""
+    pendingPacketImportStatus = "\(batchPrefix)Imported raw \(result.rawInserted), decoded \(result.inserted), existing \(result.existing)\(skippedSuffix)\(timingSuffix)"
     schedulePacketImportRevisionPublish()
     if !result.pass || !result.issues.isEmpty {
       let issueSummary = result.issues.prefix(3).joined(separator: " | ")
@@ -291,14 +294,14 @@ extension OpenVitalsAppModel {
         level: .warn,
         source: "rust",
         title: "capture.import.issues",
-        body: "batches=\(result.batchCount) raw=\(result.rawInserted)/\(result.rawExisting) decoded=\(result.inserted)/\(result.existing) queued=\(result.frameCount) issues=\(issueSummary) next=\(nextActionSummary)"
+        body: "batches=\(result.batchCount) raw=\(result.rawInserted)/\(result.rawExisting) decoded=\(result.inserted)/\(result.existing) skipped=\(result.historicalDuplicateSkipped) queued=\(result.frameCount) issues=\(issueSummary) next=\(nextActionSummary)"
       )
     }
     ble.record(
       level: .debug,
       source: "rust",
       title: "capture.import.ok",
-      body: "batches \(result.batchCount) | raw \(result.rawInserted) inserted, \(result.rawExisting) existing | decoded \(result.inserted) inserted, \(result.existing) existing | \(result.frameCount) queued\(timingSuffix)"
+      body: "batches \(result.batchCount) | raw \(result.rawInserted) inserted, \(result.rawExisting) existing | decoded \(result.inserted) inserted, \(result.existing) existing | skipped \(result.historicalDuplicateSkipped) already synced | \(result.frameCount) queued\(timingSuffix)"
     )
   }
 

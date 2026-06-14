@@ -1398,6 +1398,7 @@ fn historical_sync_step_kind_label(kind: HistoricalSyncPlanStepKind) -> &'static
     match kind {
         HistoricalSyncPlanStepKind::Connect => "connect",
         HistoricalSyncPlanStepKind::GetDataRange => "get_data_range",
+        HistoricalSyncPlanStepKind::SetReadPointer => "set_read_pointer",
         HistoricalSyncPlanStepKind::SendHistoricalData => "send_historical_data",
         HistoricalSyncPlanStepKind::ConsumeMetadata => "consume_metadata",
         HistoricalSyncPlanStepKind::ConsumeReading => "consume_reading",
@@ -1415,6 +1416,7 @@ fn historical_sync_state_label(state: HistoricalSyncState) -> &'static str {
         HistoricalSyncState::Idle => "idle",
         HistoricalSyncState::Connected => "connected",
         HistoricalSyncState::RangeRequested => "range_requested",
+        HistoricalSyncState::ReadPointerSet => "read_pointer_set",
         HistoricalSyncState::Transferring => "transferring",
         HistoricalSyncState::AckPending => "ack_pending",
         HistoricalSyncState::Complete => "complete",
@@ -1429,6 +1431,7 @@ fn historical_sync_payload_expectation_label(
     match expectation {
         HistoricalSyncPayloadExpectation::Empty => "empty",
         HistoricalSyncPayloadExpectation::ZeroByte => "zero_byte",
+        HistoricalSyncPayloadExpectation::ValidatedReadPointer => "validated_read_pointer",
         HistoricalSyncPayloadExpectation::HistoryEndAck {
             disposition: HistoricalSyncAckDisposition::Success,
         } => "history_end_ack_success",

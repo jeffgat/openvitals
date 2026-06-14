@@ -6,13 +6,14 @@ use open_vitals_core::{
     historical_sync::{
         HISTORICAL_SYNC_DRY_RUN_REPORT_SCHEMA, HISTORICAL_SYNC_PHYSICAL_VALIDATION_REPORT_SCHEMA,
         HistoricalSyncAckDisposition, HistoricalSyncCharacteristicEvidence,
-        HistoricalSyncDryRunInput, HistoricalSyncFakeEvent, HistoricalSyncGeneration,
-        HistoricalSyncNotificationEvidence, HistoricalSyncObservedCommand,
-        HistoricalSyncObservedEvent, HistoricalSyncPayloadExpectation,
-        HistoricalSyncPhysicalValidationInput, HistoricalSyncPlanStepKind,
-        HistoricalSyncRawEvidenceAnchor, HistoricalSyncSafetyGate, HistoricalSyncState,
-        HistoricalSyncTimestampEvidence, historical_sync_physical_evidence_template,
-        run_historical_sync_dry_run, validate_historical_sync_physical_evidence,
+        HistoricalSyncDeviceCursorPlan, HistoricalSyncDryRunInput, HistoricalSyncFakeEvent,
+        HistoricalSyncGeneration, HistoricalSyncNotificationEvidence,
+        HistoricalSyncObservedCommand, HistoricalSyncObservedEvent,
+        HistoricalSyncPayloadExpectation, HistoricalSyncPhysicalValidationInput,
+        HistoricalSyncPlanStepKind, HistoricalSyncRawEvidenceAnchor, HistoricalSyncSafetyGate,
+        HistoricalSyncState, HistoricalSyncTimestampEvidence,
+        historical_sync_physical_evidence_template, run_historical_sync_dry_run,
+        validate_historical_sync_physical_evidence,
     },
     store::{ActivitySessionInput, CaptureSessionInput, OpenVitalsStore},
 };
@@ -82,6 +83,89 @@ fn gen5_history_plan_uses_empty_payloads_and_can_skip_the_range_request() {
             .state_trace
             .contains(&HistoricalSyncState::RangeRequested)
     );
+}
+
+#[test]
+fn device_cursor_request_blocks_until_command_33_payload_is_validated() {
+    let mut input = base_input(HistoricalSyncGeneration::Gen5, true, happy_path_events());
+    input.device_cursor = HistoricalSyncDeviceCursorPlan {
+        requested: true,
+        after_unix_ms: Some(1_781_400_000_000),
+        evidence_validated: false,
+        command_payload_hex: None,
+    };
+
+    let report = run_historical_sync_dry_run(&input);
+
+    assert!(!report.pass);
+    assert!(report.input_valid);
+    assert_eq!(report.state, HistoricalSyncState::Blocked);
+    assert_eq!(
+        report.state_trace,
+        vec![HistoricalSyncState::Idle, HistoricalSyncState::Blocked]
+    );
+    assert_eq!(report.planned_command_count, 0);
+    assert_eq!(report.blocked_count, 1);
+    assert!(report.device_cursor.requested);
+    assert_eq!(
+        report.issues,
+        vec![
+            "device_cursor_command_33_payload_unvalidated".to_string(),
+            "history_sync_cancelled".to_string()
+        ]
+    );
+    assert!(report.next_actions.iter().any(|action| {
+        action.reason == "device_cursor_command_33_payload_unvalidated"
+            && action.action.contains("command 33 read-pointer payload")
+    }));
+}
+
+#[test]
+fn validated_device_cursor_plans_set_read_pointer_before_transfer() {
+    let mut input = base_input(HistoricalSyncGeneration::Gen5, true, happy_path_events());
+    input.device_cursor = HistoricalSyncDeviceCursorPlan {
+        requested: true,
+        after_unix_ms: Some(1_781_400_000_000),
+        evidence_validated: true,
+        command_payload_hex: Some("01020304".to_string()),
+    };
+
+    let report = run_historical_sync_dry_run(&input);
+
+    assert!(report.pass, "{:?}", report.issues);
+    assert_eq!(report.state, HistoricalSyncState::Complete);
+    assert_eq!(report.planned_command_count, 4);
+    assert!(
+        report
+            .state_trace
+            .contains(&HistoricalSyncState::ReadPointerSet)
+    );
+
+    let set_read_pointer = step(&report, HistoricalSyncPlanStepKind::SetReadPointer);
+    assert_eq!(
+        set_read_pointer.safety_gate,
+        Some(HistoricalSyncSafetyGate::UserVisibleStateChange)
+    );
+    assert_eq!(set_read_pointer.command_number, Some(33));
+    assert_eq!(
+        set_read_pointer.payload_expectation,
+        Some(HistoricalSyncPayloadExpectation::ValidatedReadPointer)
+    );
+    assert_eq!(
+        set_read_pointer.note,
+        "validated_read_pointer_after_unix_ms=1781400000000"
+    );
+    let set_read_pointer_index = report
+        .steps
+        .iter()
+        .position(|step| step.kind == HistoricalSyncPlanStepKind::SetReadPointer)
+        .expect("set_read_pointer step");
+    let send_historical_data_index = report
+        .steps
+        .iter()
+        .position(|step| step.kind == HistoricalSyncPlanStepKind::SendHistoricalData)
+        .expect("send_historical_data step");
+    assert!(set_read_pointer_index < send_historical_data_index);
 }
 
 #[test]
@@ -1090,6 +1174,7 @@ fn base_input(
         device_connected: true,
         safety_gate_ready: true,
         request_data_range,
+        device_cursor: Default::default(),
         retry: Default::default(),
         timeout: Default::default(),
         cancel: Default::default(),

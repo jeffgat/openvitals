@@ -1,12 +1,14 @@
 use open_vitals_core::{
     capture_import::{CapturedFrameBatchOptions, CapturedFrameInput, import_captured_frame_batch},
     metric_features::{
-        HeartRateFeatureOptions, HrvFeatureOptions, MetricWindowFeatureOptions,
-        MotionFeatureOptions, RecoveryFeatureScoreOptions, RecoverySensorDiscoveryOptions,
-        RecoverySensorWidgetDiscovery, RestingHeartRateFeatureOptions, SleepFeatureScoreOptions,
-        SleepStageKind, StrainFeatureScoreOptions, StressFeatureScoreOptions,
-        VitalEventFeatureOptions, run_heart_rate_feature_report_for_store,
-        run_hrv_feature_report_for_store, run_metric_window_feature_report_for_store,
+        HeartRateFeatureOptions, HrvFeatureOptions, K18ExportReadinessOptions,
+        K18HrvValidationOptions, MetricWindowFeatureOptions, MotionFeatureOptions,
+        RecoveryFeatureScoreOptions, RecoverySensorDiscoveryOptions, RecoverySensorWidgetDiscovery,
+        RestingHeartRateFeatureOptions, SleepFeatureScoreOptions, SleepStageKind,
+        StrainFeatureScoreOptions, StressFeatureScoreOptions, VitalEventFeatureOptions,
+        run_heart_rate_feature_report_for_store, run_hrv_feature_report_for_store,
+        run_k18_export_readiness_for_store, run_k18_hrv_validation_for_store,
+        run_k18_hrv_validation_for_store_observed, run_metric_window_feature_report_for_store,
         run_motion_feature_report_for_store, run_recovery_feature_score_report_for_store,
         run_recovery_sensor_discovery_report_for_store,
         run_resting_heart_rate_feature_report_for_store, run_sleep_feature_score_report_for_store,
@@ -17,8 +19,9 @@ use open_vitals_core::{
         DeviceType, PACKET_TYPE_EVENT, PACKET_TYPE_HISTORICAL_DATA, PACKET_TYPE_REALTIME_RAW_DATA,
         build_v5_payload_frame,
     },
-    store::OpenVitalsStore,
+    store::{CaptureSessionInput, OpenVitalsStore, RrReferenceSampleInput},
 };
+use rusqlite::Connection;
 
 #[test]
 fn motion_feature_extraction_normalizes_owned_k10_raw_amplitude() {
@@ -471,6 +474,583 @@ fn hrv_feature_extraction_builds_open_vitals_hrv_score_from_trusted_r17_samples(
     let output = score.output.unwrap();
     assert_close(output.rmssd_ms, 14.142135623730951);
     assert_close(output.sdnn_ms, 8.16496580927726);
+}
+
+#[test]
+fn hrv_feature_extraction_exposes_k18_noop_v18_rr_candidates_for_diagnostics() {
+    let store = OpenVitalsStore::open_in_memory().unwrap();
+    import_history_frame_with_hex(
+        &store,
+        "user-owned-live-notification",
+        102,
+        "2026-05-27T04:00:00Z",
+        historical_k18_frame_hex_with_rr(102, &[602, 613]),
+    );
+
+    let report = run_hrv_feature_report_for_store(
+        &store,
+        "test-db",
+        "2026-05-27T00:00:00Z",
+        "2026-05-28T00:00:00Z",
+        HrvFeatureOptions {
+            min_owned_captures_per_summary: 1,
+            require_trusted_evidence: false,
+            min_rr_intervals_to_compute: 2,
+            baseline_min_days: 3,
+            require_baseline: false,
+        },
+    )
+    .unwrap();
+
+    assert!(report.pass, "{:?}", report.issues);
+    assert_eq!(report.candidate_frame_count, 1);
+    assert_eq!(report.feature_count, 1);
+    assert_eq!(report.trusted_feature_count, 0);
+    assert_eq!(report.rr_interval_count, 2);
+    assert_eq!(report.trusted_rr_interval_count, 0);
+    assert_eq!(
+        report.hrv_input.as_ref().unwrap().rr_intervals_ms,
+        vec![602.0, 613.0]
+    );
+    let feature = &report.features[0];
+    assert_eq!(feature.body_summary_kind, "normal_history");
+    assert_eq!(
+        feature.source_signal,
+        "normal_history_k18_rr_intervals_candidate_unvalidated"
+    );
+    assert_eq!(
+        feature.scale_basis,
+        "noop_v18_payload_offsets_16_plus_2n_u16_le_ms"
+    );
+    assert!(!feature.trusted_metric_input);
+    assert!(
+        feature
+            .quality_flags
+            .iter()
+            .any(|flag| flag == "normal_history_k18_rr_candidate")
+    );
+    assert!(
+        feature
+            .quality_flags
+            .iter()
+            .any(|flag| flag == "hrv_candidate_not_promoted")
+    );
+    let output = report.score_result.unwrap().output.unwrap();
+    assert_close(output.rmssd_ms, 11.0);
+}
+
+#[test]
+fn hrv_feature_extraction_falls_back_to_k18_payload_when_decoded_json_is_older() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let db_path = tempdir.path().join("open_vitals.sqlite");
+    let store = OpenVitalsStore::open(&db_path).unwrap();
+    import_history_frame_with_hex(
+        &store,
+        "user-owned-live-notification",
+        102,
+        "2026-05-27T04:00:00Z",
+        historical_k18_frame_hex_with_rr(102, &[602, 613]),
+    );
+    let connection = Connection::open(&db_path).unwrap();
+    connection
+        .execute(
+            r#"
+            UPDATE decoded_frames
+            SET parsed_payload_json = json_remove(
+                parsed_payload_json,
+                '$.body_summary.heart_rate_bpm',
+                '$.body_summary.rr_count',
+                '$.body_summary.rr_intervals_ms',
+                '$.body_summary.warnings'
+            )
+            "#,
+            [],
+        )
+        .unwrap();
+    drop(connection);
+
+    let report = run_hrv_feature_report_for_store(
+        &store,
+        "test-db",
+        "2026-05-27T00:00:00Z",
+        "2026-05-28T00:00:00Z",
+        HrvFeatureOptions {
+            min_owned_captures_per_summary: 1,
+            require_trusted_evidence: false,
+            min_rr_intervals_to_compute: 2,
+            baseline_min_days: 3,
+            require_baseline: false,
+        },
+    )
+    .unwrap();
+
+    assert!(report.pass, "{:?}", report.issues);
+    assert_eq!(
+        report.hrv_input.as_ref().unwrap().rr_intervals_ms,
+        vec![602.0, 613.0]
+    );
+    assert!(
+        report.features[0]
+            .quality_flags
+            .iter()
+            .any(|flag| flag == "normal_history_k18_rr_payload_fallback")
+    );
+}
+
+#[test]
+fn hrv_feature_extraction_keeps_k18_rr_candidates_out_of_trusted_inputs() {
+    let store = OpenVitalsStore::open_in_memory().unwrap();
+    import_history_frame_with_hex(
+        &store,
+        "user-owned-live-notification",
+        102,
+        "2026-05-27T04:00:00Z",
+        historical_k18_frame_hex_with_rr(102, &[602, 613]),
+    );
+
+    let report = run_hrv_feature_report_for_store(
+        &store,
+        "test-db",
+        "2026-05-27T00:00:00Z",
+        "2026-05-28T00:00:00Z",
+        HrvFeatureOptions {
+            min_owned_captures_per_summary: 1,
+            require_trusted_evidence: true,
+            min_rr_intervals_to_compute: 2,
+            baseline_min_days: 3,
+            require_baseline: false,
+        },
+    )
+    .unwrap();
+
+    assert!(!report.pass);
+    assert_eq!(report.candidate_frame_count, 1);
+    assert_eq!(report.feature_count, 1);
+    assert_eq!(report.trusted_feature_count, 0);
+    assert_eq!(report.rr_interval_count, 2);
+    assert_eq!(report.trusted_rr_interval_count, 0);
+    assert!(report.hrv_input.is_none());
+    assert!(report.score_result.is_none());
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| issue == "no_trusted_hrv_features")
+    );
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| issue == "not_enough_rr_intervals")
+    );
+}
+
+#[test]
+fn k18_hrv_validation_compares_quality_gated_rr_against_reference() {
+    let store = OpenVitalsStore::open_in_memory().unwrap();
+    import_k18_rr_validation_sequence(&store, 20, 1_779_854_400, 60, 1_000);
+    import_rr_reference_validation_sequence(&store, 20, 1_000.0);
+
+    let report = run_k18_hrv_validation_for_store(
+        &store,
+        "2026-05-27T04:00:00Z",
+        "2026-05-27T04:00:30Z",
+        K18HrvValidationOptions {
+            min_k18_intervals: 20,
+            min_reference_intervals: 20,
+            rmssd_tolerance_ms: 1.0,
+            sdnn_tolerance_ms: 1.0,
+            mean_nn_tolerance_ms: 1.0,
+            binned_mae_tolerance_ms: 1.0,
+            min_binned_correlation: 0.0,
+            bin_seconds: 2,
+            max_frame_summaries: 4,
+        },
+    )
+    .unwrap();
+
+    assert!(report.pass, "{:?}", report.issues);
+    assert_eq!(
+        report.validation_status,
+        "candidate_k18_hrv_validated_repeat_required"
+    );
+    assert_eq!(report.k18_frame_count, 20);
+    assert_eq!(report.k18_rr_frame_count, 20);
+    assert_eq!(report.gated_interval_count, 20);
+    assert_eq!(report.rr_reference_overlap_count, 20);
+    assert_eq!(report.gated_k18_summary.mean_nn_ms, Some(1000.0));
+    assert_eq!(report.reference_summary.mean_nn_ms, Some(1000.0));
+    assert_eq!(report.rmssd_error_ms, Some(0.0));
+    assert_eq!(report.sdnn_error_ms, Some(0.0));
+    assert_eq!(report.mean_nn_error_ms, Some(0.0));
+    assert_eq!(
+        report
+            .binned_comparison
+            .as_ref()
+            .unwrap()
+            .mean_absolute_error_ms,
+        Some(0.0)
+    );
+    assert_eq!(report.frame_summaries.len(), 4);
+    assert_eq!(report.promotion_status, "validation_only_repeat_required");
+    let raw_gate = report
+        .diagnostic_gate_summaries
+        .iter()
+        .find(|summary| summary.gate_id == "raw_plausible")
+        .unwrap();
+    assert_eq!(raw_gate.interval_count, 20);
+    assert_eq!(raw_gate.rmssd_error_ms, Some(0.0));
+    assert!(
+        raw_gate
+            .quality_flags
+            .iter()
+            .any(|flag| flag == "diagnostic_only_not_used_for_pass")
+    );
+}
+
+#[test]
+fn k18_hrv_validation_uses_observed_end_but_clips_k18_sample_time() {
+    let store = OpenVitalsStore::open_in_memory().unwrap();
+    import_rr_reference_validation_sequence(&store, 40, 1_000.0);
+
+    import_k18_rr_frame_at(&store, "2026-05-27T04:00:21Z", 1_779_854_405, 75, &[800]);
+    for second in 10..15 {
+        import_k18_rr_frame_at(
+            &store,
+            &format!("2026-05-27T04:00:{}Z", second + 12),
+            1_779_854_400 + second as u32,
+            60,
+            &[1_000],
+        );
+    }
+    import_k18_rr_frame_at(&store, "2026-05-27T04:00:27Z", 1_779_854_425, 75, &[800]);
+
+    let report = run_k18_hrv_validation_for_store_observed(
+        &store,
+        "2026-05-27T04:00:10Z",
+        "2026-05-27T04:00:20Z",
+        "2026-05-27T04:00:40Z",
+        K18HrvValidationOptions {
+            min_k18_intervals: 5,
+            min_reference_intervals: 5,
+            rmssd_tolerance_ms: 1.0,
+            sdnn_tolerance_ms: 1.0,
+            mean_nn_tolerance_ms: 1.0,
+            binned_mae_tolerance_ms: 1.0,
+            min_binned_correlation: 0.0,
+            bin_seconds: 1,
+            max_frame_summaries: 8,
+        },
+    )
+    .unwrap();
+
+    assert!(report.pass, "{:?}", report.issues);
+    assert_eq!(report.k18_frame_count, 7);
+    assert_eq!(report.k18_rr_frame_count, 5);
+    assert_eq!(report.raw_interval_count, 5);
+    assert_eq!(report.gated_interval_count, 5);
+    assert_eq!(report.rr_reference_overlap_count, 5);
+    assert_eq!(
+        report.comparison_window_start.as_deref(),
+        Some("2026-05-27T04:00:10Z")
+    );
+    assert_eq!(
+        report.comparison_window_end.as_deref(),
+        Some("2026-05-27T04:00:14Z")
+    );
+    assert_eq!(report.gated_k18_summary.mean_nn_ms, Some(1_000.0));
+    assert_eq!(report.reference_summary.mean_nn_ms, Some(1_000.0));
+}
+
+#[test]
+fn k18_hrv_validation_rejects_warning_rows_before_parity() {
+    let store = OpenVitalsStore::open_in_memory().unwrap();
+    import_k18_rr_frame_at(&store, "2026-05-27T04:00:00Z", 1_779_854_400, 60, &[1_000]);
+    import_k18_rr_frame_at(&store, "2026-05-27T04:00:01Z", 1_779_854_401, 60, &[500]);
+    import_rr_reference_validation_sequence(&store, 2, 1_000.0);
+
+    let report = run_k18_hrv_validation_for_store(
+        &store,
+        "2026-05-27T04:00:00Z",
+        "2026-05-27T04:00:05Z",
+        K18HrvValidationOptions {
+            min_k18_intervals: 2,
+            min_reference_intervals: 1,
+            rmssd_tolerance_ms: 1.0,
+            sdnn_tolerance_ms: 1.0,
+            mean_nn_tolerance_ms: 1.0,
+            binned_mae_tolerance_ms: 1.0,
+            min_binned_correlation: 0.0,
+            bin_seconds: 1,
+            max_frame_summaries: 4,
+        },
+    )
+    .unwrap();
+
+    assert!(!report.pass);
+    assert_eq!(report.raw_interval_count, 2);
+    assert_eq!(report.gated_interval_count, 1);
+    assert_eq!(report.rejected_warning_frame_count, 1);
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| issue == "not_enough_quality_gated_k18_intervals")
+    );
+    assert!(report.frame_summaries.iter().any(|summary| {
+        summary
+            .warnings
+            .iter()
+            .any(|warning| warning == "normal_history_k18_rr_heart_rate_mismatch")
+            && !summary.accepted_by_quality_gate
+    }));
+    let raw_gate = report
+        .diagnostic_gate_summaries
+        .iter()
+        .find(|summary| summary.gate_id == "raw_plausible")
+        .unwrap();
+    assert_eq!(raw_gate.interval_count, 2);
+    assert_eq!(raw_gate.warning_frame_count, 1);
+    assert_eq!(raw_gate.accepted_rejected_by_current_gate_frame_count, 1);
+    assert!(
+        raw_gate
+            .quality_flags
+            .iter()
+            .any(|flag| flag == "includes_parser_warning_frames")
+    );
+}
+
+#[test]
+fn k18_hrv_validation_rejects_interval_hr_mismatch_when_frame_mean_matches() {
+    let store = OpenVitalsStore::open_in_memory().unwrap();
+    import_k18_rr_frame_at(
+        &store,
+        "2026-05-27T04:00:00Z",
+        1_779_854_400,
+        63,
+        &[461, 1_437],
+    );
+    import_k18_rr_frame_at(&store, "2026-05-27T04:00:01Z", 1_779_854_401, 60, &[1_000]);
+    import_rr_reference_validation_sequence(&store, 3, 1_000.0);
+
+    let report = run_k18_hrv_validation_for_store(
+        &store,
+        "2026-05-27T04:00:00Z",
+        "2026-05-27T04:00:05Z",
+        K18HrvValidationOptions {
+            min_k18_intervals: 2,
+            min_reference_intervals: 1,
+            rmssd_tolerance_ms: 1.0,
+            sdnn_tolerance_ms: 1.0,
+            mean_nn_tolerance_ms: 1.0,
+            binned_mae_tolerance_ms: 1.0,
+            min_binned_correlation: 0.0,
+            bin_seconds: 1,
+            max_frame_summaries: 4,
+        },
+    )
+    .unwrap();
+
+    assert!(!report.pass);
+    assert_eq!(report.raw_interval_count, 3);
+    assert_eq!(report.gated_interval_count, 1);
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| issue == "not_enough_quality_gated_k18_intervals")
+    );
+    assert!(report.frame_summaries.iter().any(|summary| {
+        summary.rr_intervals_ms == vec![461.0, 1_437.0]
+            && summary.warnings.is_empty()
+            && summary
+                .quality_flags
+                .iter()
+                .any(|flag| flag == "normal_history_k18_rr_interval_heart_rate_mismatch")
+            && !summary.accepted_by_quality_gate
+    }));
+    let bounded_gate = report
+        .diagnostic_gate_summaries
+        .iter()
+        .find(|summary| summary.gate_id == "bounded_plausible_560_1300")
+        .unwrap();
+    assert_eq!(bounded_gate.interval_count, 1);
+}
+
+#[test]
+fn k18_hrv_validation_reports_local_continuity_diagnostic_candidate() {
+    let store = OpenVitalsStore::open_in_memory().unwrap();
+    import_k18_rr_validation_sequence(&store, 12, 1_779_854_400, 60, 1_000);
+    import_k18_rr_frame_at(&store, "2026-05-27T04:00:12Z", 1_779_854_412, 60, &[800]);
+    import_rr_reference_validation_sequence(&store, 13, 1_000.0);
+
+    let report = run_k18_hrv_validation_for_store(
+        &store,
+        "2026-05-27T04:00:00Z",
+        "2026-05-27T04:00:20Z",
+        K18HrvValidationOptions {
+            min_k18_intervals: 13,
+            min_reference_intervals: 1,
+            rmssd_tolerance_ms: 1.0,
+            sdnn_tolerance_ms: 1.0,
+            mean_nn_tolerance_ms: 1.0,
+            binned_mae_tolerance_ms: 1.0,
+            min_binned_correlation: 0.0,
+            bin_seconds: 1,
+            max_frame_summaries: 16,
+        },
+    )
+    .unwrap();
+
+    assert!(!report.pass);
+    assert_eq!(report.gated_interval_count, 12);
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|issue| issue == "not_enough_quality_gated_k18_intervals")
+    );
+    let local_gate = report
+        .diagnostic_gate_summaries
+        .iter()
+        .find(|summary| summary.gate_id == "local_continuity_260ms")
+        .unwrap();
+    assert_eq!(local_gate.interval_count, 13);
+    assert_eq!(local_gate.accepted_rejected_by_current_gate_frame_count, 1);
+    assert_eq!(local_gate.heart_rate_mismatch_frame_count, 1);
+    assert!(
+        local_gate
+            .quality_flags
+            .iter()
+            .any(|flag| flag == "accepts_frames_rejected_by_current_gate")
+    );
+}
+
+#[test]
+fn k18_hrv_validation_reports_low_motion_rest_segment_diagnostic() {
+    let store = OpenVitalsStore::open_in_memory().unwrap();
+    for second in 0..300 {
+        import_k18_rr_frame_at(
+            &store,
+            &format!("2026-05-27T04:{:02}:{:02}Z", second / 60, second % 60),
+            1_779_854_400 + second as u32,
+            60,
+            &[1_000],
+        );
+    }
+    for minute in 0..5 {
+        import_historical_k21_motion_frame_at_with_device_timestamp(
+            &store,
+            "user-owned-live-notification",
+            &format!("2026-05-27T04:{minute:02}:00Z"),
+            1_779_854_400 + (minute * 60) as u32,
+        );
+    }
+    import_rr_reference_validation_sequence(&store, 300, 1_000.0);
+
+    let report = run_k18_hrv_validation_for_store(
+        &store,
+        "2026-05-27T04:00:00Z",
+        "2026-05-27T04:05:30Z",
+        K18HrvValidationOptions {
+            min_k18_intervals: 200,
+            min_reference_intervals: 200,
+            rmssd_tolerance_ms: 1.0,
+            sdnn_tolerance_ms: 1.0,
+            mean_nn_tolerance_ms: 1.0,
+            binned_mae_tolerance_ms: 1.0,
+            min_binned_correlation: 0.0,
+            bin_seconds: 5,
+            max_frame_summaries: 4,
+        },
+    )
+    .unwrap();
+
+    assert!(report.pass, "{:?}", report.issues);
+    let segment = report
+        .diagnostic_rest_segment_summaries
+        .iter()
+        .find(|segment| segment.selected_by_non_oracle_rest_gate)
+        .unwrap();
+    assert_eq!(segment.gate_id, "bounded_plausible_560_1300");
+    assert!(!segment.passes_k18_only_segment_quality);
+    assert!(segment.reference_validation_pass);
+    assert_eq!(segment.motion_sample_count, 5);
+    assert_eq!(segment.current_gate_interval_count, 300);
+    assert_eq!(segment.candidate_interval_count, 300);
+    assert_eq!(segment.reference_interval_count, 300);
+    assert_eq!(segment.accepted_rejected_by_current_gate_interval_count, 0);
+    assert_eq!(
+        segment.accepted_rejected_by_current_gate_interval_fraction,
+        Some(0.0)
+    );
+    assert_eq!(segment.max_candidate_sample_gap_seconds, Some(1.0));
+    assert_eq!(segment.rmssd_error_ms, Some(0.0));
+    assert!(
+        segment
+            .quality_flags
+            .iter()
+            .any(|flag| flag == "selected_by_non_oracle_rest_gate")
+    );
+    assert!(
+        segment
+            .quality_flags
+            .iter()
+            .any(|flag| flag == "reference_validation_pass")
+    );
+    assert!(
+        segment
+            .quality_flags
+            .iter()
+            .any(|flag| flag == "rest_segment_candidate_rmssd_below_quality_floor")
+    );
+}
+
+#[test]
+fn k18_export_readiness_waits_for_late_quality_gated_rr_sample_time() {
+    let store = OpenVitalsStore::open_in_memory().unwrap();
+    import_k18_rr_frame_at(&store, "2026-05-27T04:00:00Z", 1_779_854_400, 60, &[1_000]);
+    import_k18_rr_frame_at(&store, "2026-05-27T04:04:00Z", 1_779_854_419, 60, &[1_000]);
+
+    let options = K18ExportReadinessOptions {
+        catch_up_grace_seconds: 1,
+        min_k18_rr_frames: 1,
+        min_k18_rr_intervals: 1,
+    };
+    let waiting = run_k18_export_readiness_for_store(
+        &store,
+        "2026-05-27T04:00:00Z",
+        "2026-05-27T04:00:20Z",
+        "2026-05-27T04:01:00Z",
+        options,
+    )
+    .unwrap();
+
+    assert!(!waiting.pass);
+    assert_eq!(waiting.readiness_status, "waiting_for_k18_catch_up");
+    assert!(
+        waiting
+            .issues
+            .iter()
+            .any(|issue| issue == "quality_gated_k18_rr_sample_time_behind_target")
+    );
+
+    let ready = run_k18_export_readiness_for_store(
+        &store,
+        "2026-05-27T04:00:00Z",
+        "2026-05-27T04:00:20Z",
+        "2026-05-27T04:05:00Z",
+        options,
+    )
+    .unwrap();
+
+    assert!(ready.pass, "{:?}", ready.issues);
+    assert_eq!(ready.readiness_status, "ready_to_export");
+    assert_eq!(ready.target_source, "requested_end_time");
+    assert_eq!(
+        ready.latest_quality_gated_k18_rr_sample_time.as_deref(),
+        Some("2026-05-27T04:00:19Z")
+    );
 }
 
 #[test]
@@ -1203,7 +1783,7 @@ fn sleep_feature_score_report_builds_local_sleep_from_trusted_motion_features() 
     let output = result.output.unwrap();
     assert_close(output.efficiency_fraction, 0.75);
     assert_close(output.sleep_debt_minutes, 60.0);
-    assert_close(output.score_0_to_100, 80.75);
+    assert_close(output.score_0_to_100, 86.66281566461771);
 }
 
 #[test]
@@ -1679,7 +2259,7 @@ fn sleep_feature_score_report_smooths_short_non_wake_stage_islands() {
     );
     assert_eq!(
         window.provenance["stage_smoothing_policy"],
-        "merge_short_non_awake_stage_islands_between_matching_non_awake_neighbors"
+        "merge_short_non_awake_stage_islands_between_contiguous_non_awake_neighbors"
     );
     assert_eq!(
         window.provenance["minimum_smoothed_stage_duration_minutes"],
@@ -1950,15 +2530,15 @@ fn recovery_feature_score_report_builds_local_recovery_from_trusted_feature_repo
         "device_sensor"
     );
     let input = report.recovery_input.unwrap();
-    assert_close(input.hrv_rmssd_ms, 25.0);
-    assert_close(input.hrv_baseline_rmssd_ms, 50.0);
-    assert_close(input.resting_hr_bpm, 54.5);
-    assert_close(input.resting_hr_baseline_bpm, 55.0);
-    assert_close(input.respiratory_rate_rpm, 14.0);
-    assert_close(input.respiratory_rate_baseline_rpm, 14.0);
-    assert_close(input.skin_temp_delta_c, 0.0);
-    assert_close(input.sleep_score_0_to_100, 80.75);
-    assert_close(input.prior_strain_0_to_21, 5.151225377542748);
+    assert_close(input.hrv_rmssd_ms.unwrap(), 25.0);
+    assert_close(input.hrv_baseline_rmssd_ms.unwrap(), 50.0);
+    assert_close(input.resting_hr_bpm.unwrap(), 54.5);
+    assert_close(input.resting_hr_baseline_bpm.unwrap(), 55.0);
+    assert_close(input.respiratory_rate_rpm.unwrap(), 14.0);
+    assert_close(input.respiratory_rate_baseline_rpm.unwrap(), 14.0);
+    assert_close(input.skin_temp_delta_c.unwrap(), 0.0);
+    assert_close(input.sleep_score_0_to_100.unwrap(), 86.66281566461771);
+    assert_close(input.prior_strain_0_to_21.unwrap(), 5.1028730361220855);
     let result = report.score_result.unwrap();
     assert_eq!(
         result.provenance["provided_vitals"]["source"],
@@ -1975,11 +2555,11 @@ fn recovery_feature_score_report_builds_local_recovery_from_trusted_feature_repo
             .any(|flag| flag == "provided_resp_temp_inputs_not_packet_derived")
     );
     let output = result.output.unwrap();
-    assert_close(output.score_0_to_100, 54.47822132129922);
+    assert_close(output.score_0_to_100, 55.87459940831722);
 }
 
 #[test]
-fn recovery_feature_score_report_blocks_manual_vitals_even_with_provenance() {
+fn recovery_feature_score_report_ignores_manual_vitals_but_keeps_partial_core_score() {
     let store = OpenVitalsStore::open_in_memory().unwrap();
     import_recovery_feature_inputs(&store);
 
@@ -2022,15 +2602,8 @@ fn recovery_feature_score_report_blocks_manual_vitals_even_with_provenance() {
     )
     .unwrap();
 
-    assert!(!report.pass);
-    assert!(report.recovery_input.is_none());
-    assert!(report.score_result.is_none());
-    assert!(
-        report
-            .issues
-            .iter()
-            .any(|issue| issue == "provided_resp_temp_inputs_not_packet_derived")
-    );
+    assert!(report.pass, "{:?}", report.issues);
+    assert!(report.next_actions.is_empty(), "{:?}", report.next_actions);
     let provided = report.provided_vitals.as_ref().unwrap();
     assert!(!provided.trusted_metric_input);
     assert!(
@@ -2039,10 +2612,42 @@ fn recovery_feature_score_report_blocks_manual_vitals_even_with_provenance() {
             .iter()
             .any(|flag| flag == "provided_resp_temp_inputs_not_packet_derived")
     );
+    let input = report.recovery_input.as_ref().unwrap();
+    assert!(input.respiratory_rate_rpm.is_none());
+    assert!(input.respiratory_rate_baseline_rpm.is_none());
+    assert!(input.skin_temp_delta_c.is_none());
+    let result = report.score_result.as_ref().unwrap();
+    assert!(
+        result
+            .quality_flags
+            .iter()
+            .any(|flag| flag == "provided_resp_temp_inputs_not_packet_derived")
+    );
+    assert!(
+        result
+            .quality_flags
+            .iter()
+            .any(|flag| flag == "recovery_secondary_inputs_missing")
+    );
+    let output = result.output.as_ref().unwrap();
+    assert_eq!(output.score_status, "partial");
+    assert_close(output.component_coverage, 0.85);
+    assert!(
+        output
+            .missing_inputs
+            .iter()
+            .any(|input| input == "respiratory_rate_rpm")
+    );
+    assert!(
+        output
+            .missing_inputs
+            .iter()
+            .any(|input| input == "skin_temp_delta_c")
+    );
 }
 
 #[test]
-fn recovery_feature_score_report_requires_provided_resp_temp_until_score_promotion_is_verified() {
+fn recovery_feature_score_report_allows_missing_secondary_vitals_as_partial_score() {
     let store = OpenVitalsStore::open_in_memory().unwrap();
     import_recovery_feature_inputs(&store);
 
@@ -2085,26 +2690,27 @@ fn recovery_feature_score_report_requires_provided_resp_temp_until_score_promoti
     )
     .unwrap();
 
-    assert!(!report.pass);
-    assert!(
-        report
-            .next_actions
-            .iter()
-            .any(|action| action.reason == "provided_resp_temp_inputs_missing")
-    );
+    assert!(report.pass, "{:?}", report.issues);
+    assert!(report.next_actions.is_empty(), "{:?}", report.next_actions);
     assert!(report.provided_vitals.is_none());
-    assert!(report.recovery_input.is_none());
-    assert!(report.score_result.is_none());
+    let input = report.recovery_input.as_ref().unwrap();
+    assert!(input.respiratory_rate_rpm.is_none());
+    assert!(input.respiratory_rate_baseline_rpm.is_none());
+    assert!(input.skin_temp_delta_c.is_none());
+    let result = report.score_result.as_ref().unwrap();
     assert!(
-        report
-            .issues
+        result
+            .quality_flags
             .iter()
-            .any(|issue| issue == "provided_resp_temp_inputs_missing")
+            .any(|flag| flag == "recovery_secondary_inputs_missing")
     );
+    let output = result.output.as_ref().unwrap();
+    assert_eq!(output.score_status, "partial");
+    assert_close(output.component_coverage, 0.85);
 }
 
 #[test]
-fn recovery_feature_score_report_blocks_unproven_manual_vitals() {
+fn recovery_feature_score_report_ignores_unproven_manual_vitals() {
     let store = OpenVitalsStore::open_in_memory().unwrap();
     import_recovery_feature_inputs(&store);
 
@@ -2144,21 +2750,8 @@ fn recovery_feature_score_report_blocks_unproven_manual_vitals() {
     )
     .unwrap();
 
-    assert!(!report.pass);
-    assert!(report.recovery_input.is_none());
-    assert!(report.score_result.is_none());
-    assert!(
-        report
-            .issues
-            .iter()
-            .any(|issue| issue == "provided_resp_temp_provenance_untrusted")
-    );
-    assert!(
-        report
-            .issues
-            .iter()
-            .any(|issue| issue == "provided_resp_temp_inputs_not_packet_derived")
-    );
+    assert!(report.pass, "{:?}", report.issues);
+    assert!(report.next_actions.is_empty(), "{:?}", report.next_actions);
     let provided = report.provided_vitals.as_ref().unwrap();
     assert!(!provided.trusted_metric_input);
     assert!(
@@ -2167,6 +2760,32 @@ fn recovery_feature_score_report_blocks_unproven_manual_vitals() {
             .iter()
             .any(|flag| flag == "provided_resp_temp_provenance_untrusted")
     );
+    assert!(
+        provided
+            .quality_flags
+            .iter()
+            .any(|flag| flag == "provided_resp_temp_inputs_not_packet_derived")
+    );
+    let input = report.recovery_input.as_ref().unwrap();
+    assert!(input.respiratory_rate_rpm.is_none());
+    assert!(input.respiratory_rate_baseline_rpm.is_none());
+    assert!(input.skin_temp_delta_c.is_none());
+    let result = report.score_result.as_ref().unwrap();
+    assert!(
+        result
+            .quality_flags
+            .iter()
+            .any(|flag| flag == "provided_resp_temp_provenance_untrusted")
+    );
+    assert!(
+        result
+            .quality_flags
+            .iter()
+            .any(|flag| flag == "provided_resp_temp_inputs_not_packet_derived")
+    );
+    let output = result.output.as_ref().unwrap();
+    assert_eq!(output.score_status, "partial");
+    assert_close(output.component_coverage, 0.85);
 }
 
 #[test]
@@ -2231,7 +2850,7 @@ fn strain_feature_score_report_builds_local_strain_from_trusted_features() {
     let output = result.output.unwrap();
     assert_close(output.zone_load, 60.0);
     assert_close(output.average_hr_reserve_fraction, 0.5);
-    assert_close(output.score_0_to_21, 5.151225377542748);
+    assert_close(output.score_0_to_21, 5.1028730361220855);
 }
 
 #[test]
@@ -2355,15 +2974,15 @@ fn stress_feature_score_report_builds_local_stress_from_trusted_features() {
         &[800, 825, 800],
         "2026-05-27T12:01:00Z",
     );
-    for captured_at in [
-        "2026-05-24T04:00:00Z",
-        "2026-05-25T04:00:00Z",
-        "2026-05-26T04:00:00Z",
+    for (captured_at, rr_candidates) in [
+        ("2026-05-24T04:00:00Z", [800, 850, 800]),
+        ("2026-05-25T04:00:00Z", [810, 860, 810]),
+        ("2026-05-26T04:00:00Z", [820, 870, 820]),
     ] {
         import_r17_frame_at(
             &store,
             "user-owned-live-notification",
-            &[800, 850, 800],
+            &rr_candidates,
             captured_at,
         );
     }
@@ -2512,15 +3131,15 @@ fn import_recovery_feature_inputs(store: &OpenVitalsStore) {
         &[800, 825, 800],
         "2026-05-28T04:00:00Z",
     );
-    for captured_at in [
-        "2026-05-25T04:00:00Z",
-        "2026-05-26T04:00:00Z",
-        "2026-05-27T04:00:00Z",
+    for (captured_at, rr_candidates) in [
+        ("2026-05-25T04:00:00Z", [800, 850, 800]),
+        ("2026-05-26T04:00:00Z", [810, 860, 810]),
+        ("2026-05-27T04:00:00Z", [820, 870, 820]),
     ] {
         import_r17_frame_at(
             store,
             "user-owned-live-notification",
-            &[800, 850, 800],
+            &rr_candidates,
             captured_at,
         );
     }
@@ -2703,6 +3322,83 @@ fn import_historical_k21_motion_frame_at_with_device_timestamp(
 
 fn import_history_frame(store: &OpenVitalsStore, sensitivity: &str, marker_value: u8) {
     import_history_frame_at(store, sensitivity, marker_value, "2026-05-27T13:00:00Z");
+}
+
+fn import_k18_rr_validation_sequence(
+    store: &OpenVitalsStore,
+    seconds: usize,
+    start_timestamp_seconds: u32,
+    heart_rate_bpm: u8,
+    rr_interval_ms: u16,
+) {
+    for second in 0..seconds {
+        import_k18_rr_frame_at(
+            store,
+            &format!("2026-05-27T04:00:{second:02}Z"),
+            start_timestamp_seconds + second as u32,
+            heart_rate_bpm,
+            &[rr_interval_ms],
+        );
+    }
+}
+
+fn import_k18_rr_frame_at(
+    store: &OpenVitalsStore,
+    captured_at: &str,
+    timestamp_seconds: u32,
+    heart_rate_bpm: u8,
+    rr_intervals_ms: &[u16],
+) {
+    import_history_frame_with_hex(
+        store,
+        "user-owned-live-notification",
+        heart_rate_bpm,
+        captured_at,
+        historical_k18_frame_hex_with_rr_and_timestamp(
+            heart_rate_bpm,
+            rr_intervals_ms,
+            timestamp_seconds,
+        ),
+    );
+}
+
+fn import_rr_reference_validation_sequence(
+    store: &OpenVitalsStore,
+    seconds: usize,
+    rr_interval_ms: f64,
+) {
+    store
+        .start_capture_session(CaptureSessionInput {
+            session_id: "rr-reference.metric-features",
+            source: "desktop.rr_reference_capture",
+            started_at_unix_ms: 1_779_854_400_000,
+            device_model: "BLE Heart Rate Reference",
+            active_device_id: Some("rr-reference-test"),
+            provenance_json: r#"{"test":true}"#,
+        })
+        .unwrap();
+
+    for second in 0..seconds {
+        let sample_id = format!("rr-reference.metric-features.{second}");
+        let captured_at = format!("2026-05-27T04:{:02}:{:02}Z", second / 60, second % 60);
+        let report = store
+            .insert_rr_reference_samples(&[RrReferenceSampleInput {
+                sample_id: &sample_id,
+                session_id: "rr-reference.metric-features",
+                captured_at: &captured_at,
+                device_name: "BLE Heart Rate Reference",
+                device_id: "rr-reference-test",
+                heart_rate_bpm: Some(60.0),
+                rr_interval_ms,
+                notification_sequence: second as i64,
+                rr_index: 0,
+                contact_detected: Some(true),
+                energy_expended_j: None,
+                provenance_json: r#"{"test":true}"#,
+            }])
+            .unwrap();
+        assert_eq!(report.inserted_count, 1);
+    }
 }
 
 fn import_history_frame_at(
@@ -2937,6 +3633,44 @@ fn historical_k18_frame_hex(marker_value: u8) -> String {
         0xff,
     ];
     payload.resize(24, 0);
+    hex::encode(build_v5_payload_frame(&payload))
+}
+
+fn historical_k18_frame_hex_with_rr(heart_rate_bpm: u8, rr_intervals_ms: &[u16]) -> String {
+    let mut payload = vec![0; (16 + rr_intervals_ms.len() * 2).max(24)];
+    payload[0] = PACKET_TYPE_HISTORICAL_DATA;
+    payload[1] = 18;
+    payload[2] = 1;
+    put_u32(&mut payload, 3, 0x01020304);
+    put_u32(&mut payload, 7, 0x11223344);
+    put_u16(&mut payload, 11, 0x5566);
+    payload[13] = 0xaa;
+    payload[14] = heart_rate_bpm;
+    payload[15] = rr_intervals_ms.len() as u8;
+    for (index, value) in rr_intervals_ms.iter().enumerate() {
+        put_u16(&mut payload, 16 + index * 2, *value);
+    }
+    hex::encode(build_v5_payload_frame(&payload))
+}
+
+fn historical_k18_frame_hex_with_rr_and_timestamp(
+    heart_rate_bpm: u8,
+    rr_intervals_ms: &[u16],
+    timestamp_seconds: u32,
+) -> String {
+    let mut payload = vec![0; (16 + rr_intervals_ms.len() * 2).max(24)];
+    payload[0] = PACKET_TYPE_HISTORICAL_DATA;
+    payload[1] = 18;
+    payload[2] = 1;
+    put_u32(&mut payload, 3, 0x01020304);
+    put_u32(&mut payload, 7, timestamp_seconds);
+    put_u16(&mut payload, 11, 0x0000);
+    payload[13] = 0xaa;
+    payload[14] = heart_rate_bpm;
+    payload[15] = rr_intervals_ms.len() as u8;
+    for (index, value) in rr_intervals_ms.iter().enumerate() {
+        put_u16(&mut payload, 16 + index * 2, *value);
+    }
     hex::encode(build_v5_payload_frame(&payload))
 }
 

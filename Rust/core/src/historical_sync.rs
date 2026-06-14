@@ -37,6 +37,7 @@ pub enum HistoricalSyncState {
     Idle,
     Connected,
     RangeRequested,
+    ReadPointerSet,
     Transferring,
     AckPending,
     Complete,
@@ -64,6 +65,7 @@ pub enum HistoricalSyncAckDisposition {
 pub enum HistoricalSyncPayloadExpectation {
     Empty,
     ZeroByte,
+    ValidatedReadPointer,
     HistoryEndAck {
         disposition: HistoricalSyncAckDisposition,
     },
@@ -74,6 +76,7 @@ pub enum HistoricalSyncPayloadExpectation {
 pub enum HistoricalSyncPlanStepKind {
     Connect,
     GetDataRange,
+    SetReadPointer,
     SendHistoricalData,
     ConsumeMetadata,
     ConsumeReading,
@@ -150,6 +153,18 @@ pub struct HistoricalSyncResumePlan {
     pub resume_from_state: Option<HistoricalSyncState>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct HistoricalSyncDeviceCursorPlan {
+    #[serde(default)]
+    pub requested: bool,
+    #[serde(default)]
+    pub after_unix_ms: Option<i64>,
+    #[serde(default)]
+    pub evidence_validated: bool,
+    #[serde(default)]
+    pub command_payload_hex: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HistoricalSyncDryRunInput {
     pub schema: String,
@@ -160,6 +175,8 @@ pub struct HistoricalSyncDryRunInput {
     pub safety_gate_ready: bool,
     #[serde(default = "default_true")]
     pub request_data_range: bool,
+    #[serde(default)]
+    pub device_cursor: HistoricalSyncDeviceCursorPlan,
     #[serde(default)]
     pub retry: HistoricalSyncRetryPlan,
     #[serde(default)]
@@ -210,6 +227,8 @@ pub struct HistoricalSyncDryRunReport {
     pub safety_gate_ready: bool,
     #[serde(default)]
     pub request_data_range: bool,
+    #[serde(default)]
+    pub device_cursor: HistoricalSyncDeviceCursorPlan,
     pub state: HistoricalSyncState,
     pub state_trace: Vec<HistoricalSyncState>,
     pub steps: Vec<HistoricalSyncPlanStep>,
@@ -489,6 +508,32 @@ pub fn run_historical_sync_dry_run(
             &mut blocked_count,
         );
         push_issue_once(&mut issues, "safety_gate_locked");
+        return finish_report(
+            input,
+            input_valid,
+            state,
+            state_trace,
+            steps,
+            planned_command_count,
+            blocked_count,
+            failed_count,
+            retry_count,
+            timeout_count,
+            cancel_count,
+            resume_count,
+            issues,
+        );
+    }
+
+    if input.device_cursor.requested && !input.device_cursor.evidence_validated {
+        push_blocked(
+            &mut steps,
+            &mut state_trace,
+            &mut state,
+            "device_cursor_command_33_payload_unvalidated",
+            &mut blocked_count,
+        );
+        push_issue_once(&mut issues, "device_cursor_command_33_payload_unvalidated");
         return finish_report(
             input,
             input_valid,
@@ -1151,7 +1196,41 @@ fn validate_input(input: &HistoricalSyncDryRunInput, issues: &mut Vec<String>) -
             valid = false;
         }
     }
+    if input.device_cursor.requested {
+        match input.device_cursor.after_unix_ms {
+            Some(value) if value < 0 => {
+                push_issue_once(issues, "device_cursor_timestamp_must_be_non_negative");
+                valid = false;
+            }
+            Some(_) => {}
+            None => {
+                push_issue_once(issues, "device_cursor_timestamp_required");
+                valid = false;
+            }
+        }
+
+        if input.device_cursor.evidence_validated {
+            match input.device_cursor.command_payload_hex.as_deref() {
+                Some(value) if is_valid_hex_payload(value) => {}
+                Some(_) => {
+                    push_issue_once(issues, "device_cursor_payload_hex_invalid");
+                    valid = false;
+                }
+                None => {
+                    push_issue_once(issues, "device_cursor_payload_hex_required");
+                    valid = false;
+                }
+            }
+        }
+    }
     valid
+}
+
+fn is_valid_hex_payload(value: &str) -> bool {
+    let normalized: String = value.chars().filter(|ch| !ch.is_whitespace()).collect();
+    !normalized.is_empty()
+        && normalized.len() % 2 == 0
+        && normalized.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn start_transfer_attempt(
@@ -1184,6 +1263,25 @@ fn start_transfer_attempt(
             HistoricalSyncPlanStepKind::GetDataRange,
             HistoricalSyncState::RangeRequested,
             "optional_get_data_range",
+            input.generation,
+            None,
+        );
+        *planned_command_count += 1;
+    }
+
+    if input.device_cursor.requested {
+        let note = input
+            .device_cursor
+            .after_unix_ms
+            .map(|after_unix_ms| format!("validated_read_pointer_after_unix_ms={after_unix_ms}"))
+            .unwrap_or_else(|| "validated_read_pointer".to_string());
+        push_command_step(
+            steps,
+            state_trace,
+            &mut current_state,
+            HistoricalSyncPlanStepKind::SetReadPointer,
+            HistoricalSyncState::ReadPointerSet,
+            note.as_str(),
             input.generation,
             None,
         );
@@ -1307,6 +1405,11 @@ fn push_command_step(
             Some(34),
             Some(HistoricalSyncSafetyGate::ReadOnly),
             Some(payload_expectation_for_generation(generation)),
+        ),
+        HistoricalSyncPlanStepKind::SetReadPointer => (
+            Some(33),
+            Some(HistoricalSyncSafetyGate::UserVisibleStateChange),
+            Some(HistoricalSyncPayloadExpectation::ValidatedReadPointer),
         ),
         HistoricalSyncPlanStepKind::SendHistoricalData => (
             Some(22),
@@ -1468,6 +1571,7 @@ fn finish_report(
         device_connected: input.device_connected,
         safety_gate_ready: input.safety_gate_ready,
         request_data_range: input.request_data_range,
+        device_cursor: input.device_cursor.clone(),
         state,
         state_trace,
         steps,
@@ -1531,6 +1635,26 @@ fn issue_action(issue: &str) -> String {
             "Enable the resume plan before accepting ResumeRequested events.".to_string()
         }
         "resume_without_block" => "Resume only after the plan is blocked or cancelled.".to_string(),
+        "device_cursor_timestamp_required" => {
+            "Provide the last accepted sample timestamp before requesting device-side cursor sync."
+                .to_string()
+        }
+        "device_cursor_timestamp_must_be_non_negative" => {
+            "Use a non-negative Unix millisecond timestamp for device-side cursor sync."
+                .to_string()
+        }
+        "device_cursor_payload_hex_required" => {
+            "Attach a validated command 33 read-pointer payload before planning cursor sync."
+                .to_string()
+        }
+        "device_cursor_payload_hex_invalid" => {
+            "Use an even-length hex payload captured from validated command 33 read-pointer evidence."
+                .to_string()
+        }
+        "device_cursor_command_33_payload_unvalidated" => {
+            "Capture and validate the command 33 read-pointer payload for the target timestamp before enabling device-side cursor sync."
+                .to_string()
+        }
         "malformed_response" => {
             "Fix the response parser or capture the malformed frame again.".to_string()
         }

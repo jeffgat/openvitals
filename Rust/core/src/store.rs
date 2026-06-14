@@ -10,7 +10,7 @@ use crate::{
     protocol::{DeviceType, ParsedFrame},
 };
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 15;
+pub const CURRENT_SCHEMA_VERSION: i64 = 16;
 pub const DEFAULT_RAW_EVIDENCE_PAYLOAD_RETENTION_LIMIT_BYTES: i64 = 512 * 1024 * 1024;
 const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -171,6 +171,35 @@ pub struct RawEvidenceInput<'a> {
     pub payload: &'a [u8],
     pub sensitivity: &'a str,
     pub capture_session_id: Option<&'a str>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BandSyncFrameIdentityInput<'a> {
+    pub sync_identity: &'a str,
+    pub device_key: &'a str,
+    pub scope: &'a str,
+    pub packet_type: i64,
+    pub packet_k: Option<i64>,
+    pub device_timestamp_seconds: i64,
+    pub device_timestamp_subseconds: Option<i64>,
+    pub payload_sha256: &'a str,
+    pub evidence_id: &'a str,
+    pub frame_id: &'a str,
+    pub capture_session_id: Option<&'a str>,
+    pub first_captured_at: &'a str,
+}
+
+#[derive(Debug, Clone)]
+pub struct BandSyncCheckpointInput<'a> {
+    pub device_key: &'a str,
+    pub scope: &'a str,
+    pub latest_device_timestamp_seconds: i64,
+    pub latest_device_timestamp_subseconds: Option<i64>,
+    pub latest_sync_identity: &'a str,
+    pub latest_capture_session_id: Option<&'a str>,
+    pub latest_captured_at: &'a str,
+    pub accepted_frame_count_delta: i64,
+    pub duplicate_frame_count_delta: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -951,6 +980,19 @@ pub struct DebugEventRow {
     pub data_json: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DebugDataClearReport {
+    pub schema: String,
+    pub deleted_debug_events: i64,
+    pub deleted_debug_commands: i64,
+    pub deleted_debug_sessions: i64,
+    pub deleted_metric_debug_features: i64,
+    pub deleted_rr_reference_samples: i64,
+    pub deleted_decoded_frames: i64,
+    pub deleted_raw_evidence: i64,
+    pub deleted_capture_sessions: i64,
+}
+
 impl OpenVitalsStore {
     pub fn open(path: &Path) -> OpenVitalsResult<Self> {
         let conn = Connection::open(path)?;
@@ -1033,6 +1075,47 @@ impl OpenVitalsStore {
                 parser_version TEXT NOT NULL,
                 warnings_json TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS band_sync_frame_identities (
+                sync_identity TEXT PRIMARY KEY,
+                device_key TEXT NOT NULL,
+                scope TEXT NOT NULL,
+                packet_type INTEGER NOT NULL,
+                packet_k INTEGER,
+                device_timestamp_seconds INTEGER NOT NULL,
+                device_timestamp_subseconds INTEGER,
+                payload_sha256 TEXT NOT NULL,
+                evidence_id TEXT NOT NULL REFERENCES raw_evidence(evidence_id) ON DELETE CASCADE,
+                frame_id TEXT NOT NULL REFERENCES decoded_frames(frame_id) ON DELETE CASCADE,
+                capture_session_id TEXT,
+                first_captured_at TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_band_sync_frame_identities_by_frame
+                ON band_sync_frame_identities(frame_id);
+            CREATE INDEX IF NOT EXISTS idx_band_sync_frame_identities_by_device_time
+                ON band_sync_frame_identities(
+                    device_key,
+                    scope,
+                    device_timestamp_seconds,
+                    device_timestamp_subseconds
+                );
+
+            CREATE TABLE IF NOT EXISTS band_sync_checkpoints (
+                device_key TEXT NOT NULL,
+                scope TEXT NOT NULL,
+                latest_device_timestamp_seconds INTEGER NOT NULL,
+                latest_device_timestamp_subseconds INTEGER,
+                latest_sync_identity TEXT NOT NULL,
+                latest_capture_session_id TEXT,
+                latest_captured_at TEXT NOT NULL,
+                accepted_frame_count INTEGER NOT NULL DEFAULT 0,
+                duplicate_frame_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                PRIMARY KEY (device_key, scope)
             );
 
             CREATE TABLE IF NOT EXISTS algorithm_definitions (
@@ -1512,7 +1595,8 @@ impl OpenVitalsStore {
             INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (13);
             INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (14);
             INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (15);
-            PRAGMA user_version = 15;
+            INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (16);
+            PRAGMA user_version = 16;
             "#,
         )?;
         self.ensure_raw_evidence_columns()?;
@@ -2053,6 +2137,159 @@ impl OpenVitalsStore {
         Ok(changed > 0)
     }
 
+    pub fn band_sync_identity_exists(&self, sync_identity: &str) -> OpenVitalsResult<bool> {
+        validate_required("sync_identity", sync_identity)?;
+        let existing: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT 1 FROM band_sync_frame_identities WHERE sync_identity = ?1",
+                params![sync_identity],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(existing.is_some())
+    }
+
+    pub fn insert_band_sync_frame_identity(
+        &self,
+        input: BandSyncFrameIdentityInput<'_>,
+    ) -> OpenVitalsResult<bool> {
+        validate_band_sync_frame_identity_input(&input)?;
+        let mut statement = self.conn.prepare_cached(
+            r#"
+            INSERT OR IGNORE INTO band_sync_frame_identities (
+                sync_identity,
+                device_key,
+                scope,
+                packet_type,
+                packet_k,
+                device_timestamp_seconds,
+                device_timestamp_subseconds,
+                payload_sha256,
+                evidence_id,
+                frame_id,
+                capture_session_id,
+                first_captured_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            "#,
+        )?;
+        let changed = statement.execute(params![
+            input.sync_identity,
+            input.device_key,
+            input.scope,
+            input.packet_type,
+            input.packet_k,
+            input.device_timestamp_seconds,
+            input.device_timestamp_subseconds,
+            input.payload_sha256,
+            input.evidence_id,
+            input.frame_id,
+            input.capture_session_id,
+            input.first_captured_at,
+        ])?;
+        Ok(changed > 0)
+    }
+
+    pub fn upsert_band_sync_checkpoint(
+        &self,
+        input: BandSyncCheckpointInput<'_>,
+    ) -> OpenVitalsResult<bool> {
+        self.write_band_sync_checkpoint(input)
+    }
+
+    pub fn record_band_sync_duplicate(
+        &self,
+        input: BandSyncCheckpointInput<'_>,
+    ) -> OpenVitalsResult<bool> {
+        self.write_band_sync_checkpoint(input)
+    }
+
+    fn write_band_sync_checkpoint(
+        &self,
+        input: BandSyncCheckpointInput<'_>,
+    ) -> OpenVitalsResult<bool> {
+        validate_band_sync_checkpoint_input(&input)?;
+        let existing = self
+            .conn
+            .query_row(
+                r#"
+                SELECT
+                    latest_device_timestamp_seconds,
+                    latest_device_timestamp_subseconds
+                FROM band_sync_checkpoints
+                WHERE device_key = ?1 AND scope = ?2
+                "#,
+                params![input.device_key, input.scope],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<i64>>(1)?)),
+            )
+            .optional()?;
+        let should_advance = existing.map_or(true, |(seconds, subseconds)| {
+            sync_checkpoint_timestamp_is_newer(
+                input.latest_device_timestamp_seconds,
+                input.latest_device_timestamp_subseconds,
+                seconds,
+                subseconds,
+            )
+        });
+
+        if existing.is_none() || should_advance {
+            self.conn.execute(
+                r#"
+                INSERT INTO band_sync_checkpoints (
+                    device_key,
+                    scope,
+                    latest_device_timestamp_seconds,
+                    latest_device_timestamp_subseconds,
+                    latest_sync_identity,
+                    latest_capture_session_id,
+                    latest_captured_at,
+                    accepted_frame_count,
+                    duplicate_frame_count
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                ON CONFLICT(device_key, scope) DO UPDATE SET
+                    latest_device_timestamp_seconds = excluded.latest_device_timestamp_seconds,
+                    latest_device_timestamp_subseconds = excluded.latest_device_timestamp_subseconds,
+                    latest_sync_identity = excluded.latest_sync_identity,
+                    latest_capture_session_id = excluded.latest_capture_session_id,
+                    latest_captured_at = excluded.latest_captured_at,
+                    accepted_frame_count = band_sync_checkpoints.accepted_frame_count + excluded.accepted_frame_count,
+                    duplicate_frame_count = band_sync_checkpoints.duplicate_frame_count + excluded.duplicate_frame_count,
+                    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                "#,
+                params![
+                    input.device_key,
+                    input.scope,
+                    input.latest_device_timestamp_seconds,
+                    input.latest_device_timestamp_subseconds,
+                    input.latest_sync_identity,
+                    input.latest_capture_session_id,
+                    input.latest_captured_at,
+                    input.accepted_frame_count_delta,
+                    input.duplicate_frame_count_delta,
+                ],
+            )?;
+            return Ok(should_advance);
+        }
+
+        self.conn.execute(
+            r#"
+            UPDATE band_sync_checkpoints
+            SET
+                accepted_frame_count = accepted_frame_count + ?3,
+                duplicate_frame_count = duplicate_frame_count + ?4,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            WHERE device_key = ?1 AND scope = ?2
+            "#,
+            params![
+                input.device_key,
+                input.scope,
+                input.accepted_frame_count_delta,
+                input.duplicate_frame_count_delta,
+            ],
+        )?;
+        Ok(false)
+    }
+
     pub fn start_capture_session(&self, input: CaptureSessionInput<'_>) -> OpenVitalsResult<bool> {
         validate_required("session_id", input.session_id)?;
         validate_required("source", input.source)?;
@@ -2337,6 +2574,39 @@ impl OpenVitalsStore {
             .map_err(OpenVitalsError::from)
     }
 
+    pub fn rr_reference_samples_for_sessions_overlapping(
+        &self,
+        start: &str,
+        end: &str,
+    ) -> OpenVitalsResult<Vec<RrReferenceSampleRow>> {
+        let window_samples = self.rr_reference_samples_between(start, end)?;
+        let session_ids = window_samples
+            .iter()
+            .map(|sample| sample.session_id.clone())
+            .collect::<BTreeSet<_>>();
+        if session_ids.is_empty() {
+            return Ok(window_samples);
+        }
+
+        let mut seen_sample_ids = BTreeSet::new();
+        let mut session_samples = Vec::new();
+        for session_id in session_ids {
+            for sample in self.rr_reference_samples_for_session(&session_id)? {
+                if seen_sample_ids.insert(sample.sample_id.clone()) {
+                    session_samples.push(sample);
+                }
+            }
+        }
+        session_samples.sort_by(|left, right| {
+            left.captured_at
+                .cmp(&right.captured_at)
+                .then(left.notification_sequence.cmp(&right.notification_sequence))
+                .then(left.rr_index.cmp(&right.rr_index))
+                .then(left.sample_id.cmp(&right.sample_id))
+        });
+        Ok(session_samples)
+    }
+
     pub fn rr_reference_samples_for_session(
         &self,
         session_id: &str,
@@ -2384,6 +2654,40 @@ impl OpenVitalsStore {
         Ok(rr_reference_summary_from_samples(
             session_id, start, end, &samples,
         ))
+    }
+
+    pub fn clear_debug_data(&self) -> OpenVitalsResult<DebugDataClearReport> {
+        let report = self.immediate_transaction(|store| {
+            let deleted_debug_events = store.conn.execute("DELETE FROM debug_events", [])? as i64;
+            let deleted_debug_commands =
+                store.conn.execute("DELETE FROM debug_commands", [])? as i64;
+            let deleted_debug_sessions =
+                store.conn.execute("DELETE FROM debug_sessions", [])? as i64;
+            let deleted_metric_debug_features = store
+                .conn
+                .execute("DELETE FROM metric_debug_features", [])?
+                as i64;
+            let deleted_rr_reference_samples =
+                store.conn.execute("DELETE FROM rr_reference_samples", [])? as i64;
+            let deleted_decoded_frames =
+                store.conn.execute("DELETE FROM decoded_frames", [])? as i64;
+            let deleted_raw_evidence = store.conn.execute("DELETE FROM raw_evidence", [])? as i64;
+            let deleted_capture_sessions =
+                store.conn.execute("DELETE FROM capture_sessions", [])? as i64;
+            Ok(DebugDataClearReport {
+                schema: "open_vitals.debug-data-clear-result.v1".to_string(),
+                deleted_debug_events,
+                deleted_debug_commands,
+                deleted_debug_sessions,
+                deleted_metric_debug_features,
+                deleted_rr_reference_samples,
+                deleted_decoded_frames,
+                deleted_raw_evidence,
+                deleted_capture_sessions,
+            })
+        })?;
+        self.conn.execute_batch("VACUUM")?;
+        Ok(report)
     }
 
     pub fn insert_activity_session(
@@ -6930,6 +7234,65 @@ fn validate_optional_non_negative_i64(name: &str, value: Option<i64>) -> OpenVit
     Ok(())
 }
 
+fn validate_band_sync_frame_identity_input(
+    input: &BandSyncFrameIdentityInput<'_>,
+) -> OpenVitalsResult<()> {
+    validate_required("sync_identity", input.sync_identity)?;
+    validate_required("device_key", input.device_key)?;
+    validate_required("scope", input.scope)?;
+    validate_required("payload_sha256", input.payload_sha256)?;
+    validate_required("evidence_id", input.evidence_id)?;
+    validate_required("frame_id", input.frame_id)?;
+    validate_required("first_captured_at", input.first_captured_at)?;
+    validate_optional_required("capture_session_id", input.capture_session_id)?;
+    validate_non_negative("packet_type", input.packet_type)?;
+    validate_optional_non_negative_i64("packet_k", input.packet_k)?;
+    validate_non_negative("device_timestamp_seconds", input.device_timestamp_seconds)?;
+    validate_optional_non_negative_i64(
+        "device_timestamp_subseconds",
+        input.device_timestamp_subseconds,
+    )?;
+    Ok(())
+}
+
+fn validate_band_sync_checkpoint_input(
+    input: &BandSyncCheckpointInput<'_>,
+) -> OpenVitalsResult<()> {
+    validate_required("device_key", input.device_key)?;
+    validate_required("scope", input.scope)?;
+    validate_required("latest_sync_identity", input.latest_sync_identity)?;
+    validate_required("latest_captured_at", input.latest_captured_at)?;
+    validate_optional_required("latest_capture_session_id", input.latest_capture_session_id)?;
+    validate_non_negative(
+        "latest_device_timestamp_seconds",
+        input.latest_device_timestamp_seconds,
+    )?;
+    validate_optional_non_negative_i64(
+        "latest_device_timestamp_subseconds",
+        input.latest_device_timestamp_subseconds,
+    )?;
+    validate_non_negative(
+        "accepted_frame_count_delta",
+        input.accepted_frame_count_delta,
+    )?;
+    validate_non_negative(
+        "duplicate_frame_count_delta",
+        input.duplicate_frame_count_delta,
+    )?;
+    Ok(())
+}
+
+fn sync_checkpoint_timestamp_is_newer(
+    candidate_seconds: i64,
+    candidate_subseconds: Option<i64>,
+    existing_seconds: i64,
+    existing_subseconds: Option<i64>,
+) -> bool {
+    candidate_seconds > existing_seconds
+        || (candidate_seconds == existing_seconds
+            && candidate_subseconds.unwrap_or(-1) > existing_subseconds.unwrap_or(-1))
+}
+
 fn validate_optional_finite_f64(name: &str, value: Option<f64>) -> OpenVitalsResult<()> {
     if let Some(value) = value {
         if !value.is_finite() {
@@ -8024,6 +8387,8 @@ pub fn known_tables() -> &'static [&'static str] {
         "open_vitals_schema_migrations",
         "raw_evidence",
         "decoded_frames",
+        "band_sync_frame_identities",
+        "band_sync_checkpoints",
         "algorithm_definitions",
         "algorithm_runs",
         "metric_values",

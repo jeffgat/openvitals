@@ -39,6 +39,7 @@ Swift evidence 2026-06-01: `HealthView.swift`, `AppRouter.swift`, `xcodebuildmcp
 - [x] Add HRV row from `hrvFeatureSummary()`.
 - [x] Add HRV provenance from `hrvFeatureProvenanceSummary()`.
 - [x] Keep HRV/Recovery unavailable until packet-derived beat intervals are validated; readiness copy should describe missing beat-interval evidence rather than implying one packet family is authoritative.
+- [x] Decode K18 historical RR intervals as diagnostic candidates using the observed v18 layout; keep them untrusted and out of HRV/Recovery score inputs until an owned iOS export validates them against RR reference evidence.
 - [x] Add Resting HR row from `restingHeartRateFeatureSummary()`.
 - [x] Add Resting HR provenance from `restingHeartRateFeatureProvenanceSummary()`.
 - [x] Add Window row from `windowFeatureSummary()`.
@@ -62,10 +63,13 @@ Swift evidence 2026-06-01: `HealthView.swift`, `AppRouter.swift`, `xcodebuildmcp
 - [x] Add Sleep change row from `sleepV1WhyChangedSummary()`.
 - [x] Add Sleep component breakdown rows from `sleepV1ComponentBreakdownRows()`.
 - [x] Use `open_vitals.sleep.v0` for packet-derived sleep scoring until the sleep v1 release gate has validated architecture/stage semantics.
+- [x] Apply the 2026-06-14 score audit to sleep scoring: duration adequacy, continuity/restfulness, timing consistency, disturbance rate, latency, and diagnostic stage/autonomic fields are now reported with component scores and weights.
 - [x] Add Recovery score row from `recoveryFeatureScoreSummary()`.
 - [x] Add Recovery vitals row from `recoveryProvidedVitalsSummary()`.
 - [x] Add editable recovery vitals inputs: respiratory rate, respiratory baseline, skin temp delta.
+- [x] Apply the 2026-06-14 score audit to recovery scoring: missing secondary respiratory-rate or temperature inputs now produce partial scores with `score_status`, missing-input metadata, component coverage, and confidence instead of blocking core HRV/RHR/Sleep/Load recovery.
 - [x] Add Strain score row from `strainFeatureScoreSummary()`.
+- [x] Apply the 2026-06-14 score audit to strain scoring: score components are normalized to 0-100 before the 0-21 output scale, and results expose cardiovascular-only strain type, confidence, HR-zone load, top-5-minute HR reserve, missing inputs, component scores, and weights.
 - [x] Add Stress score row from `stressFeatureScoreSummary()`.
 - [x] Add provenance for sleep, recovery, strain, and stress via `packetScoreProvenanceSummary(family)`.
 - [x] Add Next Action row from `packetDerivedScoreNextActionSummary()`.

@@ -738,7 +738,11 @@ extension HealthDataStore {
     guard !usesPreviewPacketData else {
       return nil
     }
-    return Self.doubleValue(Self.map(packetScoreReports["recovery"], "score_result", "output")?["score_0_to_100"])
+    guard let output = Self.map(packetScoreReports["recovery"], "score_result", "output"),
+          output["score_status"] as? String != "blocked" else {
+      return nil
+    }
+    return Self.doubleValue(output["score_0_to_100"])
   }
 
   func recoveryScoreTrend(base trend: HealthTrendModel, currentScore: Double) -> HealthTrendModel {

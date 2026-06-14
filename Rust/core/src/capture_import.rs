@@ -2,14 +2,19 @@ use std::{collections::BTreeSet, fs, path::Path, time::Instant};
 
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::{
     OpenVitalsError, OpenVitalsResult,
     fixtures::{CAPTURED_FRAME_BATCH_SCHEMA, FRAME_HEX_SCHEMA, FixtureIndexReport, IndexedFixture},
-    protocol::{DeviceType, decode_hex_with_whitespace, parse_frame},
+    protocol::{
+        DeviceType, PACKET_TYPE_HISTORICAL_DATA, PACKET_TYPE_HISTORICAL_IMU_DATA_STREAM,
+        ParsedFrame, ParsedPayload, decode_hex_with_whitespace, parse_frame,
+    },
     store::{
-        CaptureSessionInput, DEFAULT_RAW_EVIDENCE_PAYLOAD_RETENTION_LIMIT_BYTES, DecodedFrameInput,
-        OpenVitalsStore, RawEvidenceInput, RawEvidencePayloadRetentionReport,
+        BandSyncCheckpointInput, BandSyncFrameIdentityInput, CaptureSessionInput,
+        DEFAULT_RAW_EVIDENCE_PAYLOAD_RETENTION_LIMIT_BYTES, DecodedFrameInput, OpenVitalsStore,
+        RawEvidenceInput, RawEvidencePayloadRetentionReport,
     },
     timeline::{PacketTimelineRow, packet_timeline_from_decoded_frames},
 };
@@ -109,6 +114,10 @@ pub struct CapturedFrameBatchImportReport {
     pub raw_existing: usize,
     pub frames_inserted: usize,
     pub frames_existing: usize,
+    #[serde(default)]
+    pub historical_duplicate_skipped: usize,
+    #[serde(default)]
+    pub historical_checkpoint_advanced: bool,
     pub results: Vec<CapturedFrameImportResult>,
     pub timeline_rows: Vec<PacketTimelineRow>,
     pub raw_payload_retention: RawEvidencePayloadRetentionReport,
@@ -214,9 +223,31 @@ pub struct CapturedFrameImportResult {
     pub sequence: Option<u8>,
     pub command_or_event: Option<u8>,
     pub parsed_payload_kind: Option<String>,
+    #[serde(default)]
+    pub sync_identity: Option<String>,
+    #[serde(default)]
+    pub sync_device_timestamp_seconds: Option<u32>,
+    #[serde(default)]
+    pub sync_device_timestamp_subseconds: Option<u16>,
+    #[serde(default)]
+    pub skipped_duplicate: bool,
+    #[serde(default)]
+    pub sync_checkpoint_advanced: bool,
     pub issues: Vec<String>,
     #[serde(default)]
     pub next_actions: Vec<CaptureImportNextAction>,
+}
+
+#[derive(Debug, Clone)]
+struct CapturedFrameSyncIdentity {
+    sync_identity: String,
+    device_key: String,
+    scope: &'static str,
+    packet_type: u8,
+    packet_k: Option<u8>,
+    timestamp_seconds: u32,
+    timestamp_subseconds: Option<u16>,
+    payload_sha256: String,
 }
 
 pub fn import_captured_frame_batch(
@@ -262,6 +293,8 @@ fn import_captured_frame_batch_with_output_options_in_transaction(
     let mut raw_existing = 0;
     let mut frames_inserted = 0;
     let mut frames_existing = 0;
+    let mut historical_duplicate_skipped = 0;
+    let mut historical_checkpoint_advanced = false;
     let mut decoded_rows = Vec::new();
 
     if options.parser_version.trim().is_empty() {
@@ -274,7 +307,9 @@ fn import_captured_frame_batch_with_output_options_in_transaction(
     for frame in frames {
         let result =
             import_captured_frame_timed(store, frame, options.parser_version, &mut timing)?;
-        if result.imported_raw {
+        if result.skipped_duplicate {
+            historical_duplicate_skipped += 1;
+        } else if result.imported_raw {
             raw_inserted += 1;
         } else if result
             .issues
@@ -283,9 +318,12 @@ fn import_captured_frame_batch_with_output_options_in_transaction(
         {
             raw_existing += 1;
         }
+        if result.sync_checkpoint_advanced {
+            historical_checkpoint_advanced = true;
+        }
         if result.imported_frame {
             frames_inserted += 1;
-        } else if result.parse_ok && result.issues.is_empty() {
+        } else if result.parse_ok && result.issues.is_empty() && !result.skipped_duplicate {
             frames_existing += 1;
         }
         if !result.issues.is_empty() {
@@ -342,6 +380,8 @@ fn import_captured_frame_batch_with_output_options_in_transaction(
         raw_existing,
         frames_inserted,
         frames_existing,
+        historical_duplicate_skipped,
+        historical_checkpoint_advanced,
         results,
         timeline_rows,
         raw_payload_retention,
@@ -436,8 +476,10 @@ pub fn import_capture_sqlite(
         .iter()
         .filter(|result| !result.parse_ok)
         .count();
-    let raw_import_completed =
-        frame_batch_import.raw_inserted + frame_batch_import.raw_existing == rows.len();
+    let raw_import_completed = frame_batch_import.raw_inserted
+        + frame_batch_import.raw_existing
+        + frame_batch_import.historical_duplicate_skipped
+        == rows.len();
     let decode_pass = frame_batch_import.pass;
     if !raw_import_completed && !rows.is_empty() {
         issues.push("not all capture sqlite frames were preserved as raw evidence".to_string());
@@ -573,6 +615,11 @@ fn import_captured_frame_timed(
                 sequence: None,
                 command_or_event: None,
                 parsed_payload_kind: None,
+                sync_identity: None,
+                sync_device_timestamp_seconds: None,
+                sync_device_timestamp_subseconds: None,
+                skipped_duplicate: false,
+                sync_checkpoint_advanced: false,
                 next_actions: capture_import_next_actions(&frame.evidence_id, &[error.to_string()]),
                 issues: vec![error.to_string()],
             });
@@ -582,52 +629,6 @@ fn import_captured_frame_timed(
         .hex_decode_us
         .saturating_add(elapsed_us_u64(hex_decode_started));
 
-    let raw_insert_started = Instant::now();
-    let imported_raw = match store.insert_raw_evidence(RawEvidenceInput {
-        evidence_id: &frame.evidence_id,
-        source: &frame.source,
-        captured_at: &frame.captured_at,
-        device_model: &frame.device_model,
-        payload: &raw_bytes,
-        sensitivity: &frame.sensitivity,
-        capture_session_id: frame.capture_session_id.as_deref(),
-    }) {
-        Ok(imported) => imported,
-        Err(error) => {
-            issues.push(format!("raw evidence insert failed: {error}"));
-            if frame.capture_session_id.is_some() {
-                match store.insert_raw_evidence(RawEvidenceInput {
-                    evidence_id: &frame.evidence_id,
-                    source: &frame.source,
-                    captured_at: &frame.captured_at,
-                    device_model: &frame.device_model,
-                    payload: &raw_bytes,
-                    sensitivity: &frame.sensitivity,
-                    capture_session_id: None,
-                }) {
-                    Ok(imported) => {
-                        issues.push(
-                            "raw evidence inserted without capture_session_id after session-scoped insert failed"
-                                .to_string(),
-                        );
-                        imported
-                    }
-                    Err(fallback_error) => {
-                        issues.push(format!(
-                            "raw evidence fallback insert without capture_session_id failed: {fallback_error}"
-                        ));
-                        false
-                    }
-                }
-            } else {
-                false
-            }
-        }
-    };
-    timing.raw_insert_us = timing
-        .raw_insert_us
-        .saturating_add(elapsed_us_u64(raw_insert_started));
-
     let frame_parse_started = Instant::now();
     let parsed = match parse_frame(frame.device_type, &raw_bytes) {
         Ok(parsed) => parsed,
@@ -636,6 +637,12 @@ fn import_captured_frame_timed(
                 .frame_parse_us
                 .saturating_add(elapsed_us_u64(frame_parse_started));
             issues.push(error.to_string());
+            let raw_insert_started = Instant::now();
+            let imported_raw =
+                insert_raw_evidence_with_session_fallback(store, frame, &raw_bytes, &mut issues)?;
+            timing.raw_insert_us = timing
+                .raw_insert_us
+                .saturating_add(elapsed_us_u64(raw_insert_started));
             return Ok(CapturedFrameImportResult {
                 evidence_id: frame.evidence_id.clone(),
                 frame_id,
@@ -647,6 +654,11 @@ fn import_captured_frame_timed(
                 sequence: None,
                 command_or_event: None,
                 parsed_payload_kind: None,
+                sync_identity: None,
+                sync_device_timestamp_seconds: None,
+                sync_device_timestamp_subseconds: None,
+                skipped_duplicate: false,
+                sync_checkpoint_advanced: false,
                 next_actions: capture_import_next_actions(&frame.evidence_id, &issues),
                 issues,
             });
@@ -655,6 +667,49 @@ fn import_captured_frame_timed(
     timing.frame_parse_us = timing
         .frame_parse_us
         .saturating_add(elapsed_us_u64(frame_parse_started));
+
+    let sync_identity = historical_sync_identity(frame, &raw_bytes, &parsed);
+    if let Some(identity) = sync_identity.as_ref()
+        && store.band_sync_identity_exists(&identity.sync_identity)?
+    {
+        let checkpoint_advanced = store.record_band_sync_duplicate(BandSyncCheckpointInput {
+            device_key: &identity.device_key,
+            scope: identity.scope,
+            latest_device_timestamp_seconds: i64::from(identity.timestamp_seconds),
+            latest_device_timestamp_subseconds: identity.timestamp_subseconds.map(i64::from),
+            latest_sync_identity: &identity.sync_identity,
+            latest_capture_session_id: frame.capture_session_id.as_deref(),
+            latest_captured_at: &frame.captured_at,
+            accepted_frame_count_delta: 0,
+            duplicate_frame_count_delta: 1,
+        })?;
+        return Ok(CapturedFrameImportResult {
+            evidence_id: frame.evidence_id.clone(),
+            frame_id,
+            imported_raw: false,
+            imported_frame: false,
+            parse_ok: true,
+            packet_type: parsed.packet_type,
+            packet_type_name: parsed.packet_type_name.clone(),
+            sequence: parsed.sequence,
+            command_or_event: parsed.command_or_event,
+            parsed_payload_kind: parsed.parsed_payload.as_ref().map(parsed_payload_kind),
+            sync_identity: Some(identity.sync_identity.clone()),
+            sync_device_timestamp_seconds: Some(identity.timestamp_seconds),
+            sync_device_timestamp_subseconds: identity.timestamp_subseconds,
+            skipped_duplicate: true,
+            sync_checkpoint_advanced: checkpoint_advanced,
+            next_actions: Vec::new(),
+            issues: Vec::new(),
+        });
+    }
+
+    let raw_insert_started = Instant::now();
+    let imported_raw =
+        insert_raw_evidence_with_session_fallback(store, frame, &raw_bytes, &mut issues)?;
+    timing.raw_insert_us = timing
+        .raw_insert_us
+        .saturating_add(elapsed_us_u64(raw_insert_started));
 
     let decoded_insert_started = Instant::now();
     let imported_frame = match store.insert_decoded_frame(DecodedFrameInput {
@@ -673,6 +728,41 @@ fn import_captured_frame_timed(
         .decoded_insert_us
         .saturating_add(elapsed_us_u64(decoded_insert_started));
 
+    let mut sync_checkpoint_advanced = false;
+    if imported_frame && let Some(identity) = sync_identity.as_ref() {
+        let identity_inserted =
+            store.insert_band_sync_frame_identity(BandSyncFrameIdentityInput {
+                sync_identity: &identity.sync_identity,
+                device_key: &identity.device_key,
+                scope: identity.scope,
+                packet_type: i64::from(identity.packet_type),
+                packet_k: identity.packet_k.map(i64::from),
+                device_timestamp_seconds: i64::from(identity.timestamp_seconds),
+                device_timestamp_subseconds: identity.timestamp_subseconds.map(i64::from),
+                payload_sha256: &identity.payload_sha256,
+                evidence_id: &frame.evidence_id,
+                frame_id: &frame_id,
+                capture_session_id: frame.capture_session_id.as_deref(),
+                first_captured_at: &frame.captured_at,
+            })?;
+        if identity_inserted {
+            sync_checkpoint_advanced =
+                store.upsert_band_sync_checkpoint(BandSyncCheckpointInput {
+                    device_key: &identity.device_key,
+                    scope: identity.scope,
+                    latest_device_timestamp_seconds: i64::from(identity.timestamp_seconds),
+                    latest_device_timestamp_subseconds: identity
+                        .timestamp_subseconds
+                        .map(i64::from),
+                    latest_sync_identity: &identity.sync_identity,
+                    latest_capture_session_id: frame.capture_session_id.as_deref(),
+                    latest_captured_at: &frame.captured_at,
+                    accepted_frame_count_delta: 1,
+                    duplicate_frame_count_delta: 0,
+                })?;
+        }
+    }
+
     Ok(CapturedFrameImportResult {
         evidence_id: frame.evidence_id.clone(),
         frame_id,
@@ -684,9 +774,162 @@ fn import_captured_frame_timed(
         sequence: parsed.sequence,
         command_or_event: parsed.command_or_event,
         parsed_payload_kind: parsed.parsed_payload.as_ref().map(parsed_payload_kind),
+        sync_identity: sync_identity
+            .as_ref()
+            .map(|identity| identity.sync_identity.clone()),
+        sync_device_timestamp_seconds: sync_identity
+            .as_ref()
+            .map(|identity| identity.timestamp_seconds),
+        sync_device_timestamp_subseconds: sync_identity
+            .as_ref()
+            .and_then(|identity| identity.timestamp_subseconds),
+        skipped_duplicate: false,
+        sync_checkpoint_advanced,
         next_actions: capture_import_next_actions(&frame.evidence_id, &issues),
         issues,
     })
+}
+
+fn insert_raw_evidence_with_session_fallback(
+    store: &OpenVitalsStore,
+    frame: &CapturedFrameInput,
+    raw_bytes: &[u8],
+    issues: &mut Vec<String>,
+) -> OpenVitalsResult<bool> {
+    match store.insert_raw_evidence(RawEvidenceInput {
+        evidence_id: &frame.evidence_id,
+        source: &frame.source,
+        captured_at: &frame.captured_at,
+        device_model: &frame.device_model,
+        payload: raw_bytes,
+        sensitivity: &frame.sensitivity,
+        capture_session_id: frame.capture_session_id.as_deref(),
+    }) {
+        Ok(imported) => Ok(imported),
+        Err(error) => {
+            issues.push(format!("raw evidence insert failed: {error}"));
+            if frame.capture_session_id.is_some() {
+                match store.insert_raw_evidence(RawEvidenceInput {
+                    evidence_id: &frame.evidence_id,
+                    source: &frame.source,
+                    captured_at: &frame.captured_at,
+                    device_model: &frame.device_model,
+                    payload: raw_bytes,
+                    sensitivity: &frame.sensitivity,
+                    capture_session_id: None,
+                }) {
+                    Ok(imported) => {
+                        issues.push(
+                            "raw evidence inserted without capture_session_id after session-scoped insert failed"
+                                .to_string(),
+                        );
+                        Ok(imported)
+                    }
+                    Err(fallback_error) => {
+                        issues.push(format!(
+                            "raw evidence fallback insert without capture_session_id failed: {fallback_error}"
+                        ));
+                        Ok(false)
+                    }
+                }
+            } else {
+                Ok(false)
+            }
+        }
+    }
+}
+
+fn historical_sync_identity(
+    frame: &CapturedFrameInput,
+    raw_bytes: &[u8],
+    parsed: &ParsedFrame,
+) -> Option<CapturedFrameSyncIdentity> {
+    let packet_type = parsed.packet_type?;
+    if packet_type != PACKET_TYPE_HISTORICAL_DATA
+        && packet_type != PACKET_TYPE_HISTORICAL_IMU_DATA_STREAM
+    {
+        return None;
+    }
+
+    let ParsedPayload::DataPacket {
+        packet_k,
+        timestamp_seconds: Some(timestamp_seconds),
+        timestamp_subseconds,
+        body_hex,
+        ..
+    } = parsed.parsed_payload.as_ref()?
+    else {
+        return None;
+    };
+
+    let device_key = sync_device_key(frame);
+    let payload_sha256 = sha256_hex(raw_bytes);
+    let body_sha256 = sha256_hex(body_hex.as_bytes());
+    let packet_k_text = packet_k
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let timestamp_subseconds_text = timestamp_subseconds
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let sync_identity = format!(
+        "band-history:v1:{}:{}:{}:{}:{}:{}:{}:{}",
+        device_key,
+        device_type_name(parsed.device_type),
+        packet_type,
+        packet_k_text,
+        timestamp_seconds,
+        timestamp_subseconds_text,
+        payload_sha256,
+        body_sha256
+    );
+
+    Some(CapturedFrameSyncIdentity {
+        sync_identity,
+        device_key,
+        scope: "historical",
+        packet_type,
+        packet_k: *packet_k,
+        timestamp_seconds: *timestamp_seconds,
+        timestamp_subseconds: *timestamp_subseconds,
+        payload_sha256,
+    })
+}
+
+fn sync_device_key(frame: &CapturedFrameInput) -> String {
+    if let Some(identifier) = ios_device_identifier_from_evidence_id(&frame.evidence_id) {
+        return format!("ios:{identifier}");
+    }
+    let model = frame.device_model.trim();
+    if model.is_empty() {
+        "unknown-device".to_string()
+    } else {
+        format!("model:{model}")
+    }
+}
+
+fn ios_device_identifier_from_evidence_id(evidence_id: &str) -> Option<&str> {
+    let rest = evidence_id.strip_prefix("ios.")?;
+    let (identifier, _) = rest.split_once('.')?;
+    if identifier.len() >= 8 {
+        Some(identifier)
+    } else {
+        None
+    }
+}
+
+fn device_type_name(device_type: DeviceType) -> &'static str {
+    match device_type {
+        DeviceType::Gen4 => "GEN_4",
+        DeviceType::Maverick => "MAVERICK",
+        DeviceType::Puffin => "PUFFIN",
+        DeviceType::OpenVitals => "OPENVITALS",
+    }
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hex::encode(hasher.finalize())
 }
 
 fn import_frame_fixture(

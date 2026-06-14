@@ -208,6 +208,32 @@ final class OpenVitalsRRReferenceCapture: NSObject, ObservableObject {
     }
   }
 
+  func resetAfterStoredDebugClear() {
+    guard !isCapturing else {
+      return
+    }
+    pendingSamples = []
+    sessionID = nil
+    startedAt = nil
+    sampleCount = 0
+    notificationCount = 0
+    insertedSampleCount = 0
+    notificationSequence = 0
+    captureSessionStarted = false
+    captureSessionStartInProgress = false
+    captureSessionStartAttempts = 0
+    pendingFinishAfterStorage = false
+    pendingFinishEndedAt = nil
+    lastHeartRateBPM = nil
+    lastRRIntervalMS = nil
+    lastCapturedAt = nil
+    lastFlushStatus = "No RR samples stored"
+    summaryStatus = "No RR reference summary"
+    if !isScanning {
+      status = "Stored RR reference data cleared"
+    }
+  }
+
   private func ensureCentral() {
     if central == nil {
       central = CBCentralManager(delegate: self, queue: nil)

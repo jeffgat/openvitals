@@ -75,19 +75,22 @@ use crate::{
     },
     metric_features::{
         BeatIntervalCandidateScanOptions, BeatIntervalHrValidationOptions, HeartRateFeatureOptions,
-        HrvCaptureValidationOptions, HrvFeatureOptions, K20FieldDiscoveryOptions,
-        K20OpticalChannelScanOptions, K20WaveformTransformScanOptions, K26BeatFieldScanOptions,
-        MetricFeatureNextAction, MetricWindowFeatureOptions, MotionFeatureOptions,
-        OxygenSaturationCaptureValidationOptions, RecoveryFeatureScoreOptions,
-        RecoveryProvidedVitalsFeature, RecoverySensorDiscoveryOptions,
+        HrvCaptureValidationOptions, HrvFeatureOptions, K18ExportReadinessOptions,
+        K18HrvValidationOptions, K20FieldDiscoveryOptions, K20OpticalChannelScanOptions,
+        K20PeakInspectionOptions, K20RrSequenceValidationOptions, K20WaveformTransformScanOptions,
+        K26BeatFieldScanOptions, MetricFeatureNextAction, MetricWindowFeatureOptions,
+        MotionFeatureOptions, OxygenSaturationCaptureValidationOptions,
+        RecoveryFeatureScoreOptions, RecoveryProvidedVitalsFeature, RecoverySensorDiscoveryOptions,
         RecoverySensorDiscoveryReport, RespiratoryRateCaptureValidationOptions,
         RestingHeartRateFeatureOptions, SleepFeatureScoreOptions, SleepFeatureScoreReport,
         SleepStageKind, StrainFeatureScoreOptions, StressFeatureScoreOptions,
         TemperatureCaptureValidationOptions, VitalEventFeatureOptions,
         run_beat_interval_candidate_scan_for_store, run_beat_interval_hr_validation_for_store,
         run_heart_rate_feature_report_for_store, run_hrv_capture_validation_for_store,
-        run_hrv_feature_report_for_store, run_k20_field_discovery_for_store,
-        run_k20_optical_channel_scan_for_store, run_k20_waveform_transform_scan_for_store,
+        run_hrv_feature_report_for_store, run_k18_export_readiness_for_store,
+        run_k18_hrv_validation_for_store_observed, run_k20_field_discovery_for_store,
+        run_k20_optical_channel_scan_for_store, run_k20_peak_inspection_for_store,
+        run_k20_rr_sequence_validation_for_store, run_k20_waveform_transform_scan_for_store,
         run_k26_beat_field_scan_for_store, run_metric_window_feature_report_for_store,
         run_motion_feature_report_for_store, run_oxygen_saturation_capture_validation_for_store,
         run_recovery_feature_score_report_for_store,
@@ -126,7 +129,7 @@ use crate::{
     },
     protocol::{
         DataPacketBodySummary, DeviceType, I16SeriesSummary, ParsedFrame, ParsedPayload,
-        parse_frame_hex,
+        build_v5_command_frame, decode_hex_with_whitespace, parse_frame_hex,
     },
     recovery_rollup::{
         RecoverySensorDailyRollupOptions, RecoveryUnavailableDailyStatusOptions,
@@ -221,6 +224,14 @@ struct ParseFrameBatchArgs {
     frames: Vec<String>,
     #[serde(default = "default_device_type")]
     device_type: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BuildV5CommandFrameArgs {
+    sequence: u8,
+    command: u8,
+    #[serde(default)]
+    data_hex: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1003,6 +1014,122 @@ struct K20WaveformTransformScanArgs {
     max_ranked_transforms: Option<usize>,
     #[serde(default)]
     max_segment_summaries: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct K20RrSequenceValidationArgs {
+    database_path: String,
+    #[serde(default = "default_correlation_start")]
+    start: String,
+    #[serde(default = "default_correlation_end")]
+    end: String,
+    #[serde(default)]
+    min_owned_captures: Option<usize>,
+    #[serde(default)]
+    sample_rate_hz_values: Vec<f64>,
+    #[serde(default)]
+    min_peak_spacing_samples_values: Vec<usize>,
+    #[serde(default)]
+    smoothing_window_samples_values: Vec<usize>,
+    #[serde(default)]
+    threshold_stddev_multipliers: Vec<f64>,
+    #[serde(default)]
+    max_clock_offset_ms: Option<i64>,
+    #[serde(default)]
+    clock_offset_step_ms: Option<i64>,
+    #[serde(default)]
+    beat_match_tolerance_ms: Option<f64>,
+    #[serde(default)]
+    rmssd_tolerance_ms: Option<f64>,
+    #[serde(default)]
+    min_reference_beats: Option<usize>,
+    #[serde(default)]
+    min_matched_beats: Option<usize>,
+    #[serde(default)]
+    min_match_fraction: Option<f64>,
+    #[serde(default)]
+    max_ranked_sequences: Option<usize>,
+    #[serde(default)]
+    max_segment_summaries: Option<usize>,
+    #[serde(default)]
+    max_match_preview: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct K18HrvValidationArgs {
+    database_path: String,
+    #[serde(default = "default_correlation_start")]
+    start: String,
+    #[serde(default = "default_correlation_end")]
+    end: String,
+    #[serde(default)]
+    observed_end: Option<String>,
+    #[serde(default)]
+    min_k18_intervals: Option<usize>,
+    #[serde(default)]
+    min_reference_intervals: Option<usize>,
+    #[serde(default)]
+    rmssd_tolerance_ms: Option<f64>,
+    #[serde(default)]
+    sdnn_tolerance_ms: Option<f64>,
+    #[serde(default)]
+    mean_nn_tolerance_ms: Option<f64>,
+    #[serde(default)]
+    binned_mae_tolerance_ms: Option<f64>,
+    #[serde(default)]
+    min_binned_correlation: Option<f64>,
+    #[serde(default)]
+    bin_seconds: Option<usize>,
+    #[serde(default)]
+    max_frame_summaries: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct K18ExportReadinessArgs {
+    database_path: String,
+    #[serde(default = "default_correlation_start")]
+    start: String,
+    #[serde(default = "default_correlation_end")]
+    end: String,
+    #[serde(default)]
+    observed_end: Option<String>,
+    #[serde(default)]
+    catch_up_grace_seconds: Option<i64>,
+    #[serde(default)]
+    min_k18_rr_frames: Option<usize>,
+    #[serde(default)]
+    min_k18_rr_intervals: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct K20PeakInspectionArgs {
+    database_path: String,
+    #[serde(default = "default_correlation_start")]
+    start: String,
+    #[serde(default = "default_correlation_end")]
+    end: String,
+    #[serde(default)]
+    channel_offset: Option<usize>,
+    #[serde(default)]
+    sample_rate_hz: Option<f64>,
+    #[serde(default)]
+    min_peak_spacing_samples: Option<usize>,
+    #[serde(default)]
+    polarity: Option<String>,
+    #[serde(default)]
+    smoothing_window_samples: Option<usize>,
+    #[serde(default)]
+    threshold_stddev_multiplier: Option<f64>,
+    #[serde(default)]
+    clock_offset_ms: Option<i64>,
+    #[serde(default)]
+    beat_match_tolerance_ms: Option<f64>,
+    #[serde(default)]
+    window_radius_ms: Option<i64>,
+    #[serde(default)]
+    max_events: Option<usize>,
+    #[serde(default)]
+    max_segments: Option<usize>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2142,6 +2269,11 @@ struct DebugSessionSnapshotArgs {
     session_id: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct DebugClearDataArgs {
+    database_path: String,
+}
+
 pub fn core_version_payload() -> serde_json::Value {
     json!({
         "core_version": option_env!("CARGO_PKG_VERSION").unwrap_or("unknown"),
@@ -2420,6 +2552,24 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
                 .map(|value| bridge_ok(&request.request_id, value))
                 .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error))
         }
+        "metrics.k20_rr_sequence_validation" => {
+            request_args::<K20RrSequenceValidationArgs>(&request)
+                .and_then(k20_rr_sequence_validation_bridge)
+                .map(|value| bridge_ok(&request.request_id, value))
+                .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error))
+        }
+        "metrics.k18_hrv_validation" => request_args::<K18HrvValidationArgs>(&request)
+            .and_then(k18_hrv_validation_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "metrics.k18_export_readiness" => request_args::<K18ExportReadinessArgs>(&request)
+            .and_then(k18_export_readiness_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "metrics.k20_peak_inspection" => request_args::<K20PeakInspectionArgs>(&request)
+            .and_then(k20_peak_inspection_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "metrics.k20_field_discovery" => request_args::<K20FieldDiscoveryArgs>(&request)
             .and_then(k20_field_discovery_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
@@ -2820,12 +2970,20 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
             .and_then(debug_session_snapshot_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "debug.clear_data" => request_args::<DebugClearDataArgs>(&request)
+            .and_then(debug_clear_data_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "protocol.parse_frame_hex" => request_args::<ParseFrameArgs>(&request)
             .and_then(parse_frame_hex_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "protocol.parse_frame_hex_batch" => request_args::<ParseFrameBatchArgs>(&request)
             .and_then(parse_frame_hex_batch_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "protocol.build_v5_command_frame" => request_args::<BuildV5CommandFrameArgs>(&request)
+            .and_then(build_v5_command_frame_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "timeline.from_decoded_frames" => request_args::<TimelineArgs>(&request)
@@ -2932,6 +3090,25 @@ fn parse_frame_hex_batch_bridge(args: ParseFrameBatchArgs) -> OpenVitalsResult<s
     Ok(json!({
         "frame_count": args.frames.len(),
         "results": results,
+    }))
+}
+
+fn build_v5_command_frame_bridge(
+    args: BuildV5CommandFrameArgs,
+) -> OpenVitalsResult<serde_json::Value> {
+    let data = if args.data_hex.trim().is_empty() {
+        Vec::new()
+    } else {
+        decode_hex_with_whitespace(&args.data_hex)?
+    };
+    let frame = build_v5_command_frame(args.sequence, args.command, &data);
+    Ok(json!({
+        "schema": "open_vitals.v5-command-frame.v1",
+        "device_type": "OPENVITALS",
+        "sequence": args.sequence,
+        "command": args.command,
+        "data_hex": hex::encode(&data),
+        "frame_hex": hex::encode(frame),
     }))
 }
 
@@ -5123,6 +5300,187 @@ fn k20_waveform_transform_scan_bridge(
     })
 }
 
+fn k20_rr_sequence_validation_bridge(
+    args: K20RrSequenceValidationArgs,
+) -> OpenVitalsResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let defaults = K20RrSequenceValidationOptions::default();
+    let report = run_k20_rr_sequence_validation_for_store(
+        &store,
+        &args.start,
+        &args.end,
+        K20RrSequenceValidationOptions {
+            min_owned_captures_per_summary: args
+                .min_owned_captures
+                .unwrap_or(DEFAULT_MIN_OWNED_CAPTURES_PER_SUMMARY),
+            sample_rate_hz_values: if args.sample_rate_hz_values.is_empty() {
+                defaults.sample_rate_hz_values.clone()
+            } else {
+                args.sample_rate_hz_values
+            },
+            min_peak_spacing_samples_values: if args.min_peak_spacing_samples_values.is_empty() {
+                defaults.min_peak_spacing_samples_values.clone()
+            } else {
+                args.min_peak_spacing_samples_values
+            },
+            smoothing_window_samples_values: if args.smoothing_window_samples_values.is_empty() {
+                defaults.smoothing_window_samples_values.clone()
+            } else {
+                args.smoothing_window_samples_values
+            },
+            threshold_stddev_multipliers: if args.threshold_stddev_multipliers.is_empty() {
+                defaults.threshold_stddev_multipliers.clone()
+            } else {
+                args.threshold_stddev_multipliers
+            },
+            max_clock_offset_ms: args
+                .max_clock_offset_ms
+                .unwrap_or(defaults.max_clock_offset_ms),
+            clock_offset_step_ms: args
+                .clock_offset_step_ms
+                .unwrap_or(defaults.clock_offset_step_ms),
+            beat_match_tolerance_ms: args
+                .beat_match_tolerance_ms
+                .unwrap_or(defaults.beat_match_tolerance_ms),
+            rmssd_tolerance_ms: args
+                .rmssd_tolerance_ms
+                .unwrap_or(defaults.rmssd_tolerance_ms),
+            min_reference_beats: args
+                .min_reference_beats
+                .unwrap_or(defaults.min_reference_beats),
+            min_matched_beats: args.min_matched_beats.unwrap_or(defaults.min_matched_beats),
+            min_match_fraction: args
+                .min_match_fraction
+                .unwrap_or(defaults.min_match_fraction),
+            max_ranked_sequences: args
+                .max_ranked_sequences
+                .unwrap_or(defaults.max_ranked_sequences),
+            max_segment_summaries: args
+                .max_segment_summaries
+                .unwrap_or(defaults.max_segment_summaries),
+            max_match_preview: args.max_match_preview.unwrap_or(defaults.max_match_preview),
+        },
+    )?;
+    serde_json::to_value(report).map_err(|error| {
+        OpenVitalsError::message(format!(
+            "cannot serialize K20 RR sequence validation report: {error}"
+        ))
+    })
+}
+
+fn k18_hrv_validation_bridge(args: K18HrvValidationArgs) -> OpenVitalsResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let defaults = K18HrvValidationOptions::default();
+    let observed_end = args.observed_end.unwrap_or_else(|| args.end.clone());
+    let report = run_k18_hrv_validation_for_store_observed(
+        &store,
+        &args.start,
+        &args.end,
+        &observed_end,
+        K18HrvValidationOptions {
+            min_k18_intervals: args.min_k18_intervals.unwrap_or(defaults.min_k18_intervals),
+            min_reference_intervals: args
+                .min_reference_intervals
+                .unwrap_or(defaults.min_reference_intervals),
+            rmssd_tolerance_ms: args
+                .rmssd_tolerance_ms
+                .unwrap_or(defaults.rmssd_tolerance_ms),
+            sdnn_tolerance_ms: args.sdnn_tolerance_ms.unwrap_or(defaults.sdnn_tolerance_ms),
+            mean_nn_tolerance_ms: args
+                .mean_nn_tolerance_ms
+                .unwrap_or(defaults.mean_nn_tolerance_ms),
+            binned_mae_tolerance_ms: args
+                .binned_mae_tolerance_ms
+                .unwrap_or(defaults.binned_mae_tolerance_ms),
+            min_binned_correlation: args
+                .min_binned_correlation
+                .unwrap_or(defaults.min_binned_correlation),
+            bin_seconds: args.bin_seconds.unwrap_or(defaults.bin_seconds),
+            max_frame_summaries: args
+                .max_frame_summaries
+                .unwrap_or(defaults.max_frame_summaries),
+        },
+    )?;
+    serde_json::to_value(report).map_err(|error| {
+        OpenVitalsError::message(format!(
+            "cannot serialize K18 HRV validation report: {error}"
+        ))
+    })
+}
+
+fn k18_export_readiness_bridge(
+    args: K18ExportReadinessArgs,
+) -> OpenVitalsResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let defaults = K18ExportReadinessOptions::default();
+    let observed_end = args.observed_end.unwrap_or_else(|| args.end.clone());
+    let report = run_k18_export_readiness_for_store(
+        &store,
+        &args.start,
+        &args.end,
+        &observed_end,
+        K18ExportReadinessOptions {
+            catch_up_grace_seconds: args
+                .catch_up_grace_seconds
+                .unwrap_or(defaults.catch_up_grace_seconds),
+            min_k18_rr_frames: args.min_k18_rr_frames.unwrap_or(defaults.min_k18_rr_frames),
+            min_k18_rr_intervals: args
+                .min_k18_rr_intervals
+                .unwrap_or(defaults.min_k18_rr_intervals),
+        },
+    )?;
+    serde_json::to_value(report).map_err(|error| {
+        OpenVitalsError::message(format!(
+            "cannot serialize K18 export readiness report: {error}"
+        ))
+    })
+}
+
+fn k20_peak_inspection_bridge(args: K20PeakInspectionArgs) -> OpenVitalsResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let defaults = K20PeakInspectionOptions::default();
+    let polarity = args
+        .polarity
+        .as_deref()
+        .map(|value| match value.trim().to_ascii_lowercase().as_str() {
+            "negative" | "neg" | "-" => "negative",
+            _ => "positive",
+        })
+        .unwrap_or(defaults.polarity);
+    let report = run_k20_peak_inspection_for_store(
+        &store,
+        &args.database_path,
+        &args.start,
+        &args.end,
+        K20PeakInspectionOptions {
+            channel_offset: args.channel_offset.unwrap_or(defaults.channel_offset),
+            sample_rate_hz: args.sample_rate_hz.unwrap_or(defaults.sample_rate_hz),
+            min_peak_spacing_samples: args
+                .min_peak_spacing_samples
+                .unwrap_or(defaults.min_peak_spacing_samples),
+            polarity,
+            smoothing_window_samples: args
+                .smoothing_window_samples
+                .unwrap_or(defaults.smoothing_window_samples),
+            threshold_stddev_multiplier: args
+                .threshold_stddev_multiplier
+                .unwrap_or(defaults.threshold_stddev_multiplier),
+            clock_offset_ms: args.clock_offset_ms.unwrap_or(defaults.clock_offset_ms),
+            beat_match_tolerance_ms: args
+                .beat_match_tolerance_ms
+                .unwrap_or(defaults.beat_match_tolerance_ms),
+            window_radius_ms: args.window_radius_ms.unwrap_or(defaults.window_radius_ms),
+            max_events: args.max_events.unwrap_or(defaults.max_events),
+            max_segments: args.max_segments.unwrap_or(defaults.max_segments),
+        },
+    )?;
+    serde_json::to_value(report).map_err(|error| {
+        OpenVitalsError::message(format!(
+            "cannot serialize K20 peak inspection report: {error}"
+        ))
+    })
+}
+
 fn k20_field_discovery_bridge(args: K20FieldDiscoveryArgs) -> OpenVitalsResult<serde_json::Value> {
     let store = open_bridge_store(&args.database_path)?;
     let report = run_k20_field_discovery_for_store(
@@ -6669,8 +7027,13 @@ fn recovery_feature_score_bridge(
                 .output
                 .as_ref()
                 .map(|output| output.score_0_to_100)
-                .unwrap_or(recovery_input.sleep_score_0_to_100);
-            recovery_input.sleep_score_0_to_100 = sleep_v1_score;
+                .or(recovery_input.sleep_score_0_to_100)
+                .unwrap_or(0.0);
+            recovery_input.sleep_score_0_to_100 = Some(sleep_v1_score);
+            recovery_input.sleep_debt_minutes = sleep_v1_result
+                .output
+                .as_ref()
+                .map(|output| output.rolling_sleep_debt_minutes);
             let mut recovery_result = open_vitals_recovery_v0(&recovery_input);
             if let Some(vitals) = report.provided_vitals.as_ref() {
                 recovery_result
@@ -9108,6 +9471,14 @@ fn debug_session_snapshot_bridge(
     let snapshot = debug_session_snapshot(&store, &args.session_id)?;
     serde_json::to_value(snapshot).map_err(|error| {
         OpenVitalsError::message(format!("cannot serialize debug session snapshot: {error}"))
+    })
+}
+
+fn debug_clear_data_bridge(args: DebugClearDataArgs) -> OpenVitalsResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let report = store.clear_debug_data()?;
+    serde_json::to_value(report).map_err(|error| {
+        OpenVitalsError::message(format!("cannot serialize debug data clear report: {error}"))
     })
 }
 
