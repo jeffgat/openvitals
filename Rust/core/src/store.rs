@@ -5234,6 +5234,59 @@ impl OpenVitalsStore {
             .map_err(OpenVitalsError::from)
     }
 
+    pub fn raw_evidence_time_bounds(
+        &self,
+    ) -> OpenVitalsResult<(i64, Option<String>, Option<String>)> {
+        self.conn
+            .query_row(
+                r#"
+                SELECT COUNT(*), MIN(captured_at), MAX(captured_at)
+                FROM raw_evidence
+                WHERE captured_at != ''
+                "#,
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                },
+            )
+            .map_err(OpenVitalsError::from)
+    }
+
+    pub fn decoded_health_packet_time_bounds(
+        &self,
+    ) -> OpenVitalsResult<(i64, Option<String>, Option<String>)> {
+        self.conn
+            .query_row(
+                r#"
+                SELECT
+                    COUNT(DISTINCT raw_evidence.evidence_id),
+                    MIN(raw_evidence.captured_at),
+                    MAX(raw_evidence.captured_at)
+                FROM raw_evidence
+                INNER JOIN decoded_frames ON decoded_frames.evidence_id = raw_evidence.evidence_id
+                WHERE raw_evidence.captured_at != ''
+                    AND decoded_frames.packet_type_name IN (
+                        'HISTORICAL_DATA',
+                        'REALTIME_DATA',
+                        'REALTIME_RAW_DATA'
+                    )
+                "#,
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                },
+            )
+            .map_err(OpenVitalsError::from)
+    }
+
     pub fn raw_evidence_payload_bytes(&self) -> OpenVitalsResult<i64> {
         Ok(self.conn.query_row(
             r#"

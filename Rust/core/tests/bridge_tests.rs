@@ -7554,6 +7554,83 @@ fn bridge_runs_storage_check_against_app_database_path() {
 }
 
 #[test]
+fn bridge_reports_raw_evidence_bounds_for_home_score_date_alignment() {
+    let tempdir = tempfile::tempdir().unwrap();
+    let db = tempdir.path().join("open_vitals.sqlite");
+    let store = OpenVitalsStore::open(&db).unwrap();
+    let packet_frame = k10_motion_frame_hex();
+    let packet_raw = hex::decode(&packet_frame).unwrap();
+    let packet_parsed = parse_frame_hex(DeviceType::OpenVitals, &packet_frame).unwrap();
+    store
+        .insert_raw_evidence(RawEvidenceInput {
+            evidence_id: "score-date-packet",
+            source: "synthetic.fixture",
+            captured_at: "2026-06-15T05:24:18.117Z",
+            device_model: "OpenVitals test device",
+            payload: &packet_raw,
+            sensitivity: "synthetic",
+            capture_session_id: None,
+        })
+        .unwrap();
+    store
+        .insert_decoded_frame(open_vitals_core::store::DecodedFrameInput {
+            frame_id: "score-date-packet-frame",
+            evidence_id: "score-date-packet",
+            parsed: &packet_parsed,
+            parser_version: "bridge-test",
+        })
+        .unwrap();
+
+    let command_raw = hex::decode(GET_HELLO_RESPONSE_FRAME).unwrap();
+    let command_parsed = parse_frame_hex(DeviceType::OpenVitals, GET_HELLO_RESPONSE_FRAME).unwrap();
+    store
+        .insert_raw_evidence(RawEvidenceInput {
+            evidence_id: "score-date-command",
+            source: "synthetic.fixture",
+            captured_at: "2026-06-15T12:00:00Z",
+            device_model: "OpenVitals test device",
+            payload: &command_raw,
+            sensitivity: "synthetic",
+            capture_session_id: None,
+        })
+        .unwrap();
+    store
+        .insert_decoded_frame(open_vitals_core::store::DecodedFrameInput {
+            frame_id: "score-date-command-frame",
+            evidence_id: "score-date-command",
+            parsed: &command_parsed,
+            parser_version: "bridge-test",
+        })
+        .unwrap();
+    drop(store);
+
+    let response = request(serde_json::json!({
+        "schema": "open_vitals.bridge.request.v1",
+        "request_id": "raw-evidence-bounds-1",
+        "method": "storage.raw_evidence_bounds",
+        "args": {
+            "database_path": db
+        }
+    }));
+
+    assert!(response.ok, "{:?}", response.error);
+    let result = response.result.unwrap();
+    assert_eq!(result["schema"], "open_vitals.raw-evidence-bounds.v1");
+    assert_eq!(result["raw_evidence_count"], 2);
+    assert_eq!(result["first_captured_at"], "2026-06-15T05:24:18.117Z");
+    assert_eq!(result["last_captured_at"], "2026-06-15T12:00:00Z");
+    assert_eq!(result["packet_evidence_count"], 1);
+    assert_eq!(
+        result["first_packet_captured_at"],
+        "2026-06-15T05:24:18.117Z"
+    );
+    assert_eq!(
+        result["last_packet_captured_at"],
+        "2026-06-15T05:24:18.117Z"
+    );
+}
+
+#[test]
 fn bridge_records_debug_session_command_events_for_debug_tab_stream() {
     let tempdir = tempfile::tempdir().unwrap();
     let db = tempdir.path().join("open_vitals.sqlite");

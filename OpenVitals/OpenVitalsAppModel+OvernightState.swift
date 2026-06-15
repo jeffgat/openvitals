@@ -28,8 +28,63 @@ extension OpenVitalsAppModel {
     updateOvernightGuardWarning()
   }
 
+  func refreshOvernightStorageState(
+    reason: String,
+    snapshot: OvernightRawSpoolSnapshot? = nil,
+    record: Bool = false
+  ) -> OvernightGuardStorageState {
+    let activeSnapshot = snapshot ?? overnightRawSpool.snapshot
+    let state = Self.overnightGuardStorageState(
+      directoryURL: activeSnapshot.directoryURL ?? overnightGuardSession?.directoryURL,
+      spoolBytes: Int64(activeSnapshot.totalByteCount)
+    )
+    overnightGuardStorageStatus = state.status
+    overnightGuardStorageSummary = state.summary
+    if let warning = state.runtimeWarning {
+      overnightGuardStorageWarning = "Storage warning: \(warning)."
+      if record {
+        recordOvernightWatchdogWarningIfNeeded(
+          title: "storage.\(state.status)",
+          body: "\(reason) | \(state.summary) | \(warning)",
+          lastLoggedAt: &overnightGuardLastStorageWarningAt,
+          now: Date()
+        )
+      }
+    } else {
+      overnightGuardStorageWarning = nil
+    }
+    updateOvernightGuardWarning()
+    return state
+  }
+
+  @discardableResult
+  func enforceOvernightStorageBudget(
+    reason: String,
+    snapshot: OvernightRawSpoolSnapshot? = nil
+  ) -> Bool {
+    let state = refreshOvernightStorageState(reason: reason, snapshot: snapshot, record: true)
+    guard overnightGuardActive, let stopReason = state.runtimeStopReason else {
+      return true
+    }
+
+    overnightGuardStorageWarning = "Storage safety stop: \(stopReason)."
+    overnightGuardStatus = "Stopped for storage safety: \(stopReason)"
+    updateOvernightGuardWarning()
+    ble.record(
+      level: .warn,
+      source: "overnight.guard",
+      title: "storage_safety_stop",
+      body: "\(reason) | \(state.summary) | \(stopReason)"
+    )
+    completeOvernightGuard(reason: "storage_safety_stop", stopHealthCapture: true)
+    return false
+  }
+
   func updateOvernightGuardWarning() {
     var warnings = ["Keep other apps for this device closed until OpenVitals final sync/export finishes."]
+    if let overnightGuardStorageWarning {
+      warnings.append(overnightGuardStorageWarning)
+    }
     if let overnightGuardPowerWarning {
       warnings.append(overnightGuardPowerWarning)
     }
@@ -145,6 +200,9 @@ extension OpenVitalsAppModel {
     if overnightGuardRawSpoolWarning != nil {
       inactiveWarnings.append("raw spool")
     }
+    if overnightGuardStorageWarning != nil {
+      inactiveWarnings.append("storage")
+    }
     if overnightGuardSQLiteMirrorWarning != nil {
       inactiveWarnings.append("sqlite mirror")
     }
@@ -171,6 +229,9 @@ extension OpenVitalsAppModel {
       }
       if ble.connectionState != "ready" {
         return ("blocked", "Not sleep-ready | connect device (\(ble.connectionState)) and start Overnight Guard")
+      }
+      if overnightGuardStorageStatus == "blocked" {
+        return ("blocked", "Not sleep-ready | storage \(overnightGuardStorageSummary)")
       }
       return ("pending", "Not sleep-ready | start Overnight Guard")
     }
@@ -200,6 +261,9 @@ extension OpenVitalsAppModel {
     }
     if overnightGuardPowerWarning != nil {
       warnings.append("power")
+    }
+    if overnightGuardStorageWarning != nil {
+      warnings.append("storage")
     }
     if overnightGuardWatchdogWarning != nil {
       warnings.append("watchdog")
@@ -316,6 +380,41 @@ extension OpenVitalsAppModel {
     let commands = ByteCountFormatter.string(fromByteCount: Int64(snapshot.commandWriteByteCount), countStyle: .file)
     let events = ByteCountFormatter.string(fromByteCount: Int64(snapshot.eventLogByteCount), countStyle: .file)
     return "\(total) total | raw \(raw) | range \(range) | commands \(commands) | events \(events)"
+  }
+
+  static func overnightGuardStorageState(
+    directoryURL: URL? = nil,
+    spoolBytes: Int64 = 0
+  ) -> OvernightGuardStorageState {
+    let rootURL = directoryURL?.deletingLastPathComponent() ?? overnightGuardRootDirectoryURL()
+    try? FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+    let availableBytes = overnightAvailableCapacityBytes(at: rootURL)
+    return OvernightGuardStorageState(
+      availableBytes: availableBytes,
+      spoolBytes: spoolBytes,
+      minimumStartFreeBytes: overnightGuardMinimumFreeBytesToStart,
+      warningFreeBytes: overnightGuardFreeSpaceWarningBytes,
+      criticalFreeBytes: overnightGuardFreeSpaceCriticalBytes,
+      spoolWarningBytes: overnightGuardSpoolWarningBytes,
+      spoolHardLimitBytes: overnightGuardSpoolHardLimitBytes
+    )
+  }
+
+  static func overnightAvailableCapacityBytes(at url: URL) -> Int64? {
+    let keys: Set<URLResourceKey> = [
+      .volumeAvailableCapacityForImportantUsageKey,
+      .volumeAvailableCapacityKey,
+    ]
+    guard let values = try? url.resourceValues(forKeys: keys) else {
+      return nil
+    }
+    if let importantCapacity = values.volumeAvailableCapacityForImportantUsage {
+      return importantCapacity
+    }
+    if let capacity = values.volumeAvailableCapacity {
+      return Int64(capacity)
+    }
+    return nil
   }
 
   static func overnightRecoveredSpoolSizeSummary(_ recovered: OvernightGuardRecoveredSession) -> String {

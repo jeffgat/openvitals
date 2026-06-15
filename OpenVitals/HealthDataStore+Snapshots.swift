@@ -6,7 +6,8 @@ import UIKit
 extension HealthDataStore {
   func runPacketScores(for date: Date = Date(), completion: (() -> Void)? = nil) {
     guard !packetScoreIsRunning else {
-      packetScoreStatus = "Bridge score run already running..."
+      pendingPacketScoreDate = date
+      packetScoreStatus = "Bridge score run already running; queued selected date..."
       completion?()
       return
     }
@@ -36,6 +37,13 @@ extension HealthDataStore {
         }
         self.refreshHealthDashboardSnapshots()
         completion?()
+        if let pendingDate = self.pendingPacketScoreDate {
+          self.pendingPacketScoreDate = nil
+          let pendingWindow = Self.dailyMetricWindow(containing: pendingDate)
+          if pendingWindow.dateKey != self.packetScoreWindow.dateKey {
+            self.runPacketScores(for: pendingDate)
+          }
+        }
       }
     }
   }
@@ -45,7 +53,13 @@ extension HealthDataStore {
     recomputeIfMissing: Bool = false
   ) {
     let scoreWindow = Self.dailyMetricWindow(containing: date)
-    guard packetScoreReports.isEmpty || packetScoreWindow.dateKey != scoreWindow.dateKey || packetScoreStatus == "No run" else {
+    let shouldLoadPersistedReports = packetScoreReports.isEmpty || packetScoreWindow.dateKey != scoreWindow.dateKey || packetScoreStatus == "No run"
+    guard shouldLoadPersistedReports else {
+      if recomputeIfMissing,
+         !packetScoreIsRunning,
+         !Self.strainScoreReportIsDisplayable(packetScoreReports["strain"], in: scoreWindow) {
+        runPacketScores(for: date)
+      }
       return
     }
     guard FileManager.default.fileExists(atPath: databasePath) else {
@@ -231,6 +245,22 @@ extension HealthDataStore {
         }
       }
       return .success(reports)
+    } catch {
+      return .failure(error)
+    }
+  }
+
+  nonisolated static func rawEvidenceBoundsBridgeReport(
+    databasePath: String
+  ) -> Result<[String: Any], Error> {
+    let bridge = OpenVitalsRustBridge()
+    do {
+      return .success(try bridge.request(
+        method: "storage.raw_evidence_bounds",
+        args: [
+          "database_path": databasePath,
+        ]
+      ))
     } catch {
       return .failure(error)
     }

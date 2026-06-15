@@ -391,7 +391,7 @@ struct HealthRouteContentView: View {
   var body: some View {
     switch route {
     case .healthMonitor:
-      HealthMonitorView(store: store)
+      HealthMonitorView(store: store, selectedDate: selectedDate)
     case .sleep, .recovery, .strain, .stress:
       HealthMetricFamilyView(route: route, store: store, externalSelectedDate: selectedDate)
     case .cardioLoad:
@@ -498,6 +498,7 @@ struct HealthMetricCard: View {
 
 struct HealthMonitorView: View {
   @ObservedObject var store: HealthDataStore
+  var selectedDate: Binding<Date>?
   @State private var selectedTrend: HealthMetricSnapshot?
 
   private let columns = [
@@ -567,8 +568,16 @@ struct HealthMonitorView: View {
     .openVitalsScreenBackground()
     .navigationTitle("Health Monitor")
     .task {
-      store.refreshHeartRateTimeline()
-      store.refreshPacketInputsIfNeeded()
+      let date = selectedDate?.wrappedValue ?? Date()
+      store.refreshHeartRateTimeline(for: date)
+      store.refreshPacketInputsIfNeeded(for: date)
+    }
+    .onChange(of: selectedDate?.wrappedValue) { _, newValue in
+      guard let newValue else {
+        return
+      }
+      store.refreshHeartRateTimeline(for: newValue)
+      store.refreshPacketInputsIfNeeded(for: newValue)
     }
     .sheet(item: $selectedTrend) { snapshot in
       if snapshot.id == "resting-hr" || snapshot.id == "resting-hrv" {

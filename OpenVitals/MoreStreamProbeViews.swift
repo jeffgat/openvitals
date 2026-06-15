@@ -1467,6 +1467,12 @@ struct MoreStreamProbePlanView: View {
           status: model.overnightGuardSpoolPath == "No overnight spool" ? .pending : .ready
         )
         MoreInfoRow(
+          title: "Storage",
+          value: model.overnightGuardStorageSummary,
+          systemImage: "internaldrive",
+          status: bedtimeStorageStatus
+        )
+        MoreInfoRow(
           title: "Final Export",
           value: model.overnightGuardExportStatus,
           systemImage: "square.and.arrow.up",
@@ -1841,6 +1847,19 @@ struct MoreStreamProbePlanView: View {
     model.overnightGuardTargetSummary.contains("K18 0 | K24 0 | K25 0 | K26 0 | packet47 0 | event17 0 | event29 0 | metadata49 0 | metadata56 0") ? .pending : .ready
   }
 
+  private var bedtimeStorageStatus: MoreStatusKind {
+    switch model.overnightGuardStorageStatus {
+    case "ready":
+      return .ready
+    case "blocked":
+      return .blocked
+    case "stale":
+      return .stale
+    default:
+      return .pending
+    }
+  }
+
   private var bedtimeExportStatus: MoreStatusKind {
     if model.overnightGuardExportInProgress {
       return .inProgress
@@ -1870,6 +1889,7 @@ struct MoreStreamProbePlanView: View {
       || store.guidedReferenceProbeInProgress
       || store.localExportInProgress
       || model.overnightGuardExportInProgress
+      || model.overnightGuardStorageStatus == "blocked"
   }
 
   private var bedtimeStartDetail: String {
@@ -1884,6 +1904,9 @@ struct MoreStreamProbePlanView: View {
     }
     if store.localExportInProgress || model.overnightGuardExportInProgress {
       return "Wait for the current export to finish before starting bedtime collection."
+    }
+    if model.overnightGuardStorageStatus == "blocked" {
+      return "Free storage is below the bedtime capture minimum."
     }
     return "Starts the lean guard for tonight: raw spool, range polls, watchdog, and final sync/export without the heavy decoded packet capture."
   }

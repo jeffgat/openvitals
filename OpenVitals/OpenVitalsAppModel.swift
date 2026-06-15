@@ -43,6 +43,8 @@ final class OpenVitalsAppModel: ObservableObject {
   @Published var overnightGuardSpoolPath = "No overnight spool"
   @Published var overnightGuardSpoolSizeSummary = "No overnight spool size"
   @Published var overnightGuardSQLiteMirrorSummary = "SQLite mirror not started"
+  @Published var overnightGuardStorageStatus = "pending"
+  @Published var overnightGuardStorageSummary = "Storage not checked"
   @Published var overnightGuardPowerSummary = "Power not checked"
   @Published var overnightGuardWatchdogSummary = "Watchdog not checked"
   @Published var overnightGuardWarning = "Keep other apps for this device closed until OpenVitals final sync/export finishes."
@@ -112,11 +114,13 @@ final class OpenVitalsAppModel: ObservableObject {
   var overnightGuardRawSpoolWarning: String?
   var overnightGuardBLELogWarning: String?
   var overnightGuardSQLiteMirrorWarning: String?
+  var overnightGuardStorageWarning: String?
   var overnightGuardWroteInitialRawNotificationStatus = false
   var overnightGuardWroteInitialSQLiteMirrorStatus = false
   var overnightGuardLastRawStaleWarningAt = Date.distantPast
   var overnightGuardLastRangeSuccessWarningAt = Date.distantPast
   var overnightGuardLastTargetMissingWarningAt = Date.distantPast
+  var overnightGuardLastStorageWarningAt = Date.distantPast
   var activityDetectionIdleWorkItem: DispatchWorkItem?
   var movementPacketValidation = MovementPacketValidation()
   var movementPacketValidationTimeoutWorkItem: DispatchWorkItem?
@@ -318,6 +322,11 @@ final class OpenVitalsAppModel: ObservableObject {
   static let overnightGuardRangeSuccessWarningDelay: TimeInterval = 2 * 60
   static let overnightGuardTargetMissingWarningDelay: TimeInterval = 30 * 60
   static let overnightGuardWarningRepeatInterval: TimeInterval = 15 * 60
+  static let overnightGuardMinimumFreeBytesToStart: Int64 = 2 * 1024 * 1024 * 1024
+  static let overnightGuardFreeSpaceWarningBytes: Int64 = 4 * 1024 * 1024 * 1024
+  static let overnightGuardFreeSpaceCriticalBytes: Int64 = 1 * 1024 * 1024 * 1024
+  static let overnightGuardSpoolWarningBytes: Int64 = 256 * 1024 * 1024
+  static let overnightGuardSpoolHardLimitBytes: Int64 = 750 * 1024 * 1024
 
   init(startBLE: Bool = true) {
     ble = OpenVitalsBLEClient(startCentral: startBLE)

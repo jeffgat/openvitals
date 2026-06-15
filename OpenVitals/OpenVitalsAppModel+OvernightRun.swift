@@ -32,6 +32,27 @@ extension OpenVitalsAppModel {
     let sessionID = "ios.overnight-guard.\(UUID().uuidString)"
     let startedAt = Date()
     let directoryURL = Self.overnightGuardDirectoryURL(sessionID: sessionID)
+    let storage = Self.overnightGuardStorageState(directoryURL: directoryURL)
+    overnightGuardStorageStatus = storage.status
+    overnightGuardStorageSummary = storage.summary
+    if let startBlockedReason = storage.startBlockedReason {
+      overnightGuardStorageWarning = "Storage warning: \(startBlockedReason)."
+      overnightGuardStatus = "Start blocked: \(startBlockedReason)"
+      updateOvernightGuardWarning()
+      refreshOvernightReadiness(reason: "start_storage_blocked", record: true)
+      ble.record(
+        level: .warn,
+        source: "overnight.guard",
+        title: "start.storage_blocked",
+        body: storage.summary
+      )
+      return
+    }
+    if let warning = storage.runtimeWarning {
+      overnightGuardStorageWarning = "Storage warning: \(warning)."
+    } else {
+      overnightGuardStorageWarning = nil
+    }
     let startPower = Self.currentOvernightPowerState()
     let decodedCaptureEnabled = decodedCaptureDuration != nil
     do {
@@ -47,6 +68,7 @@ extension OpenVitalsAppModel {
           "capture_profile": decodedCaptureEnabled ? "decoded_physiology_capture" : "lean_raw_spool",
           "decoded_capture_enabled": decodedCaptureEnabled,
           "decoded_capture_duration_seconds": decodedCaptureDuration.map { Int($0.rounded()) } ?? NSNull(),
+          "storage": storage.jsonObject,
           "power": startPower.jsonObject,
           "roadmap": "docs/56-overnight-band-sync-roadmap.md",
         ]
@@ -77,6 +99,7 @@ extension OpenVitalsAppModel {
       overnightGuardLastRawStaleWarningAt = .distantPast
       overnightGuardLastRangeSuccessWarningAt = .distantPast
       overnightGuardLastTargetMissingWarningAt = .distantPast
+      overnightGuardLastStorageWarningAt = .distantPast
       overnightGuardRawNotificationCount = 0
       overnightGuardRangePollCount = 0
       overnightGuardRangeTelemetryCount = 0
@@ -88,6 +111,7 @@ extension OpenVitalsAppModel {
       overnightGuardLastPacketSummary = "Waiting for raw BLE notifications"
       overnightGuardSpoolPath = snapshot.rawNotificationsURL?.path ?? directoryURL.path
       overnightGuardSpoolSizeSummary = Self.overnightSpoolSizeSummary(snapshot)
+      _ = refreshOvernightStorageState(reason: "started", snapshot: snapshot, record: true)
       applyOvernightPowerState(startPower)
       overnightGuardExportStatus = "No overnight export"
       overnightGuardExportURL = nil
@@ -133,6 +157,9 @@ extension OpenVitalsAppModel {
       overnightGuardStatus = "Final sync blocked: \(ble.historicalSyncStatus)"
       ble.record(level: .warn, source: "overnight.guard", title: "final_sync.blocked", body: overnightGuardStatus)
       writeOvernightGuardStatus(reason: "final_sync_blocked")
+      return
+    }
+    guard enforceOvernightStorageBudget(reason: "final_sync_preflight") else {
       return
     }
 
@@ -186,6 +213,9 @@ extension OpenVitalsAppModel {
     }
     guard let sessionID = overnightGuardSession?.id else {
       overnightGuardExportStatus = "No overnight guard session to export"
+      return
+    }
+    guard preflightOvernightGuardExport(reason: "last_session_export") else {
       return
     }
     beginOvernightGuardCriticalBackgroundTask(reason: "last_session_export")
@@ -292,6 +322,9 @@ extension OpenVitalsAppModel {
             warningStatus: "Recording with event log warning"
           )
         }
+        guard self.enforceOvernightStorageBudget(reason: "event_log", snapshot: snapshot) else {
+          return
+        }
         self.refreshOvernightReadiness(reason: "event_log")
         self.writeOvernightGuardStatus(reason: "event_log")
       }
@@ -316,6 +349,9 @@ extension OpenVitalsAppModel {
     }
     overnightGuardSpoolSizeSummary = Self.overnightSpoolSizeSummary(snapshot)
     overnightGuardLastPacketSummary = "\(event.characteristicUUID) \(event.value.count) bytes @ \(event.capturedAt.formatted(date: .omitted, time: .standard))"
+    guard enforceOvernightStorageBudget(reason: "raw_notification", snapshot: snapshot) else {
+      return
+    }
     if snapshot.lastError != nil {
       applyOvernightRawSpoolWarning(
         from: snapshot,
@@ -342,6 +378,9 @@ extension OpenVitalsAppModel {
       overnightGuardSuccessfulRangePollCount += 1
     }
     overnightGuardSpoolSizeSummary = Self.overnightSpoolSizeSummary(snapshot)
+    guard enforceOvernightStorageBudget(reason: "range_telemetry", snapshot: snapshot) else {
+      return
+    }
     let pageSummary = telemetry.pagesBehind.map { "pages_behind \($0)" } ?? telemetry.resultName
     if snapshot.lastError != nil {
       applyOvernightRawSpoolWarning(
@@ -362,6 +401,9 @@ extension OpenVitalsAppModel {
     }
     overnightGuardCommandWriteCount = snapshot.commandWriteCount
     overnightGuardSpoolSizeSummary = Self.overnightSpoolSizeSummary(snapshot)
+    guard enforceOvernightStorageBudget(reason: "command_write", snapshot: snapshot) else {
+      return
+    }
     if snapshot.lastError != nil {
       applyOvernightRawSpoolWarning(
         from: snapshot,
@@ -382,10 +424,16 @@ extension OpenVitalsAppModel {
     }
     let workItem = DispatchWorkItem { [weak self] in
       Task { @MainActor in
-        _ = self?.refreshOvernightPowerState(reason: "heartbeat", record: true)
-        self?.refreshOvernightWatchdogState(reason: "heartbeat")
-        self?.writeOvernightGuardStatus(reason: "heartbeat")
-        self?.scheduleOvernightGuardHeartbeat()
+        guard let self else {
+          return
+        }
+        _ = self.refreshOvernightPowerState(reason: "heartbeat", record: true)
+        guard self.enforceOvernightStorageBudget(reason: "heartbeat") else {
+          return
+        }
+        self.refreshOvernightWatchdogState(reason: "heartbeat")
+        self.writeOvernightGuardStatus(reason: "heartbeat")
+        self.scheduleOvernightGuardHeartbeat()
       }
     }
     overnightGuardHeartbeatWorkItem = workItem
@@ -576,6 +624,9 @@ extension OpenVitalsAppModel {
       writeOvernightGuardStatus(reason: "final_export_already_running")
       return
     }
+    guard preflightOvernightGuardExport(reason: reason) else {
+      return
+    }
 
     overnightGuardExportInProgress = true
     beginOvernightGuardCriticalBackgroundTask(reason: "final_export_\(reason)")
@@ -651,10 +702,31 @@ extension OpenVitalsAppModel {
     }
   }
 
+  func preflightOvernightGuardExport(reason: String) -> Bool {
+    let state = refreshOvernightStorageState(reason: "export_preflight_\(reason)", record: true)
+    guard state.startBlockedReason == nil else {
+      let blocker = state.startBlockedReason ?? "storage unavailable"
+      overnightGuardExportStatus = "Final export blocked: \(blocker)"
+      overnightGuardStorageWarning = "Storage warning: \(blocker)."
+      updateOvernightGuardWarning()
+      refreshOvernightReadiness(reason: "final_export_storage_blocked", record: true)
+      writeOvernightGuardStatus(reason: "final_export_storage_blocked")
+      ble.record(
+        level: .warn,
+        source: "overnight.guard",
+        title: "final_export.storage_blocked",
+        body: "\(reason) | \(state.summary)"
+      )
+      return false
+    }
+    return true
+  }
+
   func overnightGuardManifestSummary(reason: String) -> [String: Any] {
     let power = refreshOvernightPowerState(reason: "manifest_\(reason)")
-    refreshOvernightReadiness(reason: "manifest_\(reason)")
     let snapshot = overnightRawSpool.snapshot
+    let storage = refreshOvernightStorageState(reason: "manifest_\(reason)", snapshot: snapshot)
+    refreshOvernightReadiness(reason: "manifest_\(reason)")
     return [
       "reason": reason,
       "guard_active": overnightGuardActive,
@@ -692,6 +764,10 @@ extension OpenVitalsAppModel {
       "event56_count": overnightGuardTargetCounts.metadata56,
       "last_packet": overnightGuardLastPacketSummary,
       "spool_size": overnightGuardSpoolSizeSummary,
+      "storage": storage.jsonObject,
+      "storage_status": overnightGuardStorageStatus,
+      "storage_summary": overnightGuardStorageSummary,
+      "storage_warning": overnightGuardStorageWarning ?? NSNull(),
       "raw_spool_warning": overnightGuardRawSpoolWarning ?? NSNull(),
       "ble_log_warning": overnightGuardBLELogWarning ?? NSNull(),
       "sqlite_mirror": overnightGuardSQLiteMirrorSummary,
@@ -710,6 +786,7 @@ extension OpenVitalsAppModel {
       return
     }
     let power = refreshOvernightPowerState(reason: reason)
+    _ = refreshOvernightStorageState(reason: reason)
     refreshOvernightReadiness(reason: reason)
     enqueueOvernightSQLiteSession(finalStatus: overnightGuardActive ? "active" : reason, notes: reason)
     let lines = [
@@ -738,6 +815,9 @@ extension OpenVitalsAppModel {
       "targets=\(overnightGuardTargetSummary)",
       "last_packet=\(overnightGuardLastPacketSummary)",
       "spool_size=\(overnightGuardSpoolSizeSummary)",
+      "storage_status=\(overnightGuardStorageStatus)",
+      "storage=\(overnightGuardStorageSummary)",
+      "storage_warning=\(overnightGuardStorageWarning ?? "none")",
       "raw_spool_warning=\(overnightGuardRawSpoolWarning ?? "none")",
       "ble_log_warning=\(overnightGuardBLELogWarning ?? "none")",
       "sqlite_mirror=\(overnightGuardSQLiteMirrorSummary)",

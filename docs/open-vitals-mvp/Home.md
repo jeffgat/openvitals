@@ -50,6 +50,7 @@ Current product cut 2026-06-10: Home keeps the Sleep, Recovery, and Strain top s
 - [x] Preserve strain denominator semantics: normalize only `/21` strain values to percent and do not double-normalize percent snapshots.
 - [x] Drive persisted score loading and score recompute from the selected score date.
 - [x] Hide stale persisted strain score runs that do not overlap the selected local day.
+- [x] Align the initial Home score date to the latest local packet-evidence day when Today has no packet evidence, so a stale sync does not leave valid previous-day Strain hidden behind an empty Today window.
 - [ ] Show HRV summary from Flutter `todayHrvScoreSummary()` where it improves the daily snapshot.
 - [ ] Parse score values into numeric + status + provenance fields instead of displaying only raw summary strings.
 - [ ] Tapping Sleep opens Health > Sleep detail.
@@ -79,6 +80,7 @@ Current product cut 2026-06-10: Home keeps the Sleep, Recovery, and Strain top s
 ## Health Monitor Preview
 
 - [ ] Show Respiratory Rate, Resting HR, and Resting HRV only.
+- [x] Run Health Monitor packet inputs against the selected Home score date so Resting HR does not stay on today's empty window while viewing Yesterday.
 - [ ] Keep Oxygen Saturation hidden until packet proof is ready.
 - [ ] Link card to Health > Health Monitor.
 - [ ] Include preview/stale state if any child metric is missing.

@@ -47,10 +47,12 @@ final class HealthDataStore: ObservableObject {
   var packetInputReports: [String: [String: Any]] = [:]
   var packetScoreReports: [String: [String: Any]] = [:]
   var referenceComparisonReports: [String: [String: Any]] = [:]
+  var packetInputWindow = HealthDataStore.currentDailyMetricWindow()
   var packetScoreWindow = HealthDataStore.currentDailyMetricWindow()
   var packetInputRefreshWorkItem: DispatchWorkItem?
   var packetInputRunID: UUID?
   var packetScoreRunID: UUID?
+  var pendingPacketScoreDate: Date?
   var heartRateTimelineRefreshID: UUID?
   var heartRateSeriesUpdateObserver: NSObjectProtocol?
   var hrvSeriesUpdateObserver: NSObjectProtocol?
@@ -147,6 +149,7 @@ final class HealthDataStore: ObservableObject {
     packetInputRefreshWorkItem = nil
     packetInputRunID = nil
     packetScoreRunID = nil
+    pendingPacketScoreDate = nil
     heartRateTimelineRefreshID = nil
     packetInputReports = [:]
     packetScoreReports = [:]
@@ -175,11 +178,29 @@ final class HealthDataStore: ObservableObject {
     refreshBridgeCatalogs()
   }
 
-  func refreshPacketInputsIfNeeded() {
-    guard packetInputReports.isEmpty, packetInputStatus == "No run" else {
+  func refreshPacketInputsIfNeeded(for date: Date = Date()) {
+    let inputWindow = Self.dailyMetricWindow(containing: date)
+    guard packetInputReports.isEmpty || packetInputWindow.dateKey != inputWindow.dateKey || packetInputStatus == "No run" else {
       return
     }
-    runPacketInputs()
+    runPacketInputs(for: date)
+  }
+
+  func latestPacketEvidenceDate(completion: @escaping (Date?) -> Void) {
+    let databasePath = databasePath
+    packetInputQueue.async {
+      let result = Self.rawEvidenceBoundsBridgeReport(databasePath: databasePath)
+      let latestDateValue: Any?
+      switch result {
+      case .success(let report):
+        latestDateValue = report["last_packet_captured_at"] ?? report["last_captured_at"]
+      case .failure:
+        latestDateValue = nil
+      }
+      DispatchQueue.main.async {
+        completion(Self.bridgeDate(latestDateValue))
+      }
+    }
   }
 
   func refreshHealthMetrics(for date: Date = Date()) {
@@ -192,7 +213,7 @@ final class HealthDataStore: ObservableObject {
     healthMetricRefreshStatus = "Extracting packet-derived inputs..."
     refreshBridgeCatalogs()
     refreshHeartRateTimeline()
-    runPacketInputs { [weak self] in
+    runPacketInputs(for: date) { [weak self] in
       guard let self else {
         return
       }
@@ -302,7 +323,7 @@ final class HealthDataStore: ObservableObject {
     selectedAlgorithmByFamily[family] = algorithmID
   }
 
-  func runPacketInputs(completion: (() -> Void)? = nil) {
+  func runPacketInputs(for date: Date = Date(), completion: (() -> Void)? = nil) {
     guard !packetInputIsRunning else {
       packetInputStatus = "Packet-derived input extraction already running..."
       completion?()
@@ -310,13 +331,15 @@ final class HealthDataStore: ObservableObject {
     }
     packetInputRefreshWorkItem?.cancel()
     let runID = UUID()
+    let inputWindow = Self.dailyMetricWindow(containing: date)
     packetInputRunID = runID
+    packetInputWindow = inputWindow
     packetInputIsRunning = true
     let databasePath = databasePath
     packetInputStatus = "Extracting packet-derived inputs..."
 
     packetInputQueue.async { [weak self] in
-      let result = HealthDataStore.packetInputBridgeReports(databasePath: databasePath)
+      let result = HealthDataStore.packetInputBridgeReports(databasePath: databasePath, date: date)
       DispatchQueue.main.async { [weak self] in
         guard let self, self.packetInputRunID == runID else {
           return

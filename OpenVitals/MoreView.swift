@@ -69,7 +69,9 @@ struct MoreView: View {
     .navigationBarTitleDisplayMode(.inline)
     .toolbarBackground(.hidden, for: .navigationBar)
     .navigationDestination(for: MoreRoute.self) { route in
-      destination(for: route)
+      MoreRouteDestinationView(route: route, healthStore: healthStore, store: store) {
+        router.openHealth(.algorithms)
+      }
     }
     .onAppear {
       model.recordUIAction("page.opened", detail: "More")
@@ -92,8 +94,32 @@ struct MoreView: View {
     }
   }
 
+  private var profileSummary: String {
+    let height = MoreProfileFormatting.heightText(millimeters: profileHeightMm, unitSystemRaw: profileUnitSystemRaw)
+    let weight = MoreProfileFormatting.weightText(grams: profileWeightGrams, unitSystemRaw: profileUnitSystemRaw)
+    let parts = [height, weight].filter { !$0.isEmpty }
+    return parts.isEmpty ? "Update profile" : parts.joined(separator: " | ")
+  }
+}
+
+struct MoreRouteDestinationView: View {
+  let route: MoreRoute
+  @ObservedObject var healthStore: HealthDataStore
+  @ObservedObject var store: MoreDataStore
+  let openHealthAlgorithms: () -> Void
+
+  private var routeStatus: MoreRouteStatus {
+    store.routeStatus(ble: model.ble, model: model)
+  }
+
+  @EnvironmentObject private var model: OpenVitalsAppModel
+
+  var body: some View {
+    destination
+  }
+
   @ViewBuilder
-  private func destination(for route: MoreRoute) -> some View {
+  private var destination: some View {
     switch route {
     case .device:
       DeviceView()
@@ -112,9 +138,7 @@ struct MoreView: View {
     case .streamProbePlan:
       MoreStreamProbePlanView(store: store)
     case .algorithms:
-      MoreAlgorithmsView(store: store, healthStore: healthStore) {
-        router.openHealth(.algorithms)
-      }
+      MoreAlgorithmsView(store: store, healthStore: healthStore, openHealthAlgorithms: openHealthAlgorithms)
     case .debug:
       MoreDebugView(healthStore: healthStore, store: store)
     case .appearance:
@@ -128,12 +152,5 @@ struct MoreView: View {
     case .developer:
       MoreDeveloperView(routes: MoreRoute.developerToolRoutes, routeStatus: routeStatus)
     }
-  }
-
-  private var profileSummary: String {
-    let height = MoreProfileFormatting.heightText(millimeters: profileHeightMm, unitSystemRaw: profileUnitSystemRaw)
-    let weight = MoreProfileFormatting.weightText(grams: profileWeightGrams, unitSystemRaw: profileUnitSystemRaw)
-    let parts = [height, weight].filter { !$0.isEmpty }
-    return parts.isEmpty ? "Update profile" : parts.joined(separator: " | ")
   }
 }

@@ -80,6 +80,9 @@ extension OpenVitalsAppModel {
     overnightGuardExportURL = nil
     overnightGuardExportManifestURL = nil
     overnightGuardCanExportLastSession = false
+    overnightGuardStorageStatus = "pending"
+    overnightGuardStorageSummary = "Storage not checked"
+    overnightGuardStorageWarning = nil
     ble.record(source: "ui.debug", title: "local_app_data.wiped", body: "remembered_ble_device_kept")
   }
 

@@ -67,6 +67,7 @@ extension OpenVitalsAppModel {
       overnightGuardTargetSummary = overnightGuardTargetCounts.summary
       overnightGuardSpoolPath = recovered.rawNotificationsURL.path
       overnightGuardSpoolSizeSummary = Self.overnightSpoolSizeSummary(snapshot)
+      _ = refreshOvernightStorageState(reason: "resume", snapshot: snapshot, record: true)
       applyOvernightSQLiteMirrorSnapshot(overnightSQLiteMirror.snapshot)
       overnightGuardLastPacketSummary = recovered.lastNotificationAt
         .map { "Resumed prior session | last raw \($0.formatted(date: .omitted, time: .standard))" }
@@ -108,6 +109,13 @@ extension OpenVitalsAppModel {
       overnightGuardTargetSummary = recovered.targetCounts.summary
       overnightGuardSpoolPath = recovered.rawNotificationsURL.path
       overnightGuardSpoolSizeSummary = Self.overnightRecoveredSpoolSizeSummary(recovered)
+      let recoveredStorage = Self.overnightGuardStorageState(
+        directoryURL: recovered.directoryURL,
+        spoolBytes: Int64(recovered.rawByteCount + recovered.historicalRangePollByteCount + recovered.commandWriteByteCount + recovered.eventLogByteCount)
+      )
+      overnightGuardStorageStatus = recoveredStorage.status
+      overnightGuardStorageSummary = recoveredStorage.summary
+      overnightGuardStorageWarning = recoveredStorage.runtimeWarning.map { "Storage warning: \($0)." }
       applyOvernightSQLiteMirrorSnapshot(overnightSQLiteMirror.snapshot)
       overnightGuardLastPacketSummary = "Recovered prior session | last heartbeat \(Self.overnightRecoveredStatusSummary(recovered))"
       overnightGuardStatus = "Recovered unclean overnight guard | raw \(recovered.notificationCount)"

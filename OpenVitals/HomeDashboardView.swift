@@ -9,6 +9,7 @@ struct HomeDashboardView: View {
   @State private var selectedHealthMonitorTrend: HealthMetricSnapshot?
   @State private var scoreSyncIsPreparing = false
   @State private var scoreSyncWaitingForBand = false
+  @State private var alignedToLatestEvidenceDate = false
 
   var body: some View {
     let dashboard = dashboardMetrics
@@ -87,10 +88,11 @@ struct HomeDashboardView: View {
     }
     .task {
       healthStore.loadBridgeCatalogsIfNeeded()
-      healthStore.loadPersistedPacketScoresIfNeeded(for: selectedDate, recomputeIfMissing: true)
+      alignToLatestEvidenceDateIfNeeded()
+      refreshDailyScores(for: selectedDate)
     }
     .onChange(of: selectedDate) { _, newValue in
-      healthStore.loadPersistedPacketScoresIfNeeded(for: newValue, recomputeIfMissing: true)
+      refreshDailyScores(for: newValue)
     }
     .onChange(of: model.ble.historicalSyncStatus) { _, newValue in
       handleHomeScoreSyncStatusChange(newValue)
@@ -251,9 +253,39 @@ struct HomeDashboardView: View {
     if status == "synced" {
       scoreSyncWaitingForBand = false
       scoreSyncIsPreparing = false
+      alignedToLatestEvidenceDate = false
+      alignToLatestEvidenceDateIfNeeded()
     } else if status == "failed" {
       scoreSyncWaitingForBand = false
       scoreSyncIsPreparing = false
+    }
+  }
+
+  private func refreshDailyScores(for date: Date) {
+    healthStore.refreshPacketInputsIfNeeded(for: date)
+    healthStore.runPacketScores(for: date)
+  }
+
+  private func alignToLatestEvidenceDateIfNeeded() {
+    guard !alignedToLatestEvidenceDate else {
+      return
+    }
+    alignedToLatestEvidenceDate = true
+    let calendar = Calendar.current
+    guard calendar.isDateInToday(selectedDate) else {
+      return
+    }
+
+    healthStore.latestPacketEvidenceDate { latestEvidenceDate in
+      guard let latestEvidenceDate else {
+        return
+      }
+      let selectedDay = calendar.startOfDay(for: selectedDate)
+      let latestEvidenceDay = calendar.startOfDay(for: latestEvidenceDate)
+      guard latestEvidenceDay < selectedDay else {
+        return
+      }
+      selectedDate = latestEvidenceDate
     }
   }
 
@@ -261,7 +293,7 @@ struct HomeDashboardView: View {
     let snapshots = healthStore.healthDashboardExploreSnapshots
     let sleep = homeSnapshot(for: .sleep, in: snapshots)
     let recovery = homeSnapshot(for: .recovery, in: snapshots)
-    let strain = homeSnapshot(for: .strain, in: snapshots)
+    let strain = healthStore.strainSnapshot(for: selectedDate)
     return HomeDashboardMetrics(
       scoreSnapshots: [
         ScoreDateTimeline.datedSnapshot(from: sleep, date: selectedDate),

@@ -247,6 +247,11 @@ struct StorageCheckArgs {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct RawEvidenceBoundsArgs {
+    database_path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct PersistedScoreReportsArgs {
     database_path: String,
     #[serde(default = "default_correlation_start")]
@@ -2996,6 +3001,10 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
             .and_then(storage_check_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
             .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
+        "storage.raw_evidence_bounds" => request_args::<RawEvidenceBoundsArgs>(&request)
+            .and_then(raw_evidence_bounds_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "settings.apply_default_algorithm_preferences" => {
             request_args::<ApplyDefaultPreferencesArgs>(&request)
                 .and_then(apply_default_preferences_bridge)
@@ -3313,6 +3322,26 @@ fn storage_check_bridge(args: StorageCheckArgs) -> OpenVitalsResult<serde_json::
     })?;
     serde_json::to_value(report).map_err(|error| {
         OpenVitalsError::message(format!("cannot serialize storage report: {error}"))
+    })
+}
+
+fn raw_evidence_bounds_bridge(args: RawEvidenceBoundsArgs) -> OpenVitalsResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let (raw_evidence_count, first_captured_at, last_captured_at) =
+        store.raw_evidence_time_bounds()?;
+    let (packet_evidence_count, first_packet_captured_at, last_packet_captured_at) =
+        store.decoded_health_packet_time_bounds()?;
+    serde_json::to_value(json!({
+        "schema": "open_vitals.raw-evidence-bounds.v1",
+        "raw_evidence_count": raw_evidence_count,
+        "first_captured_at": first_captured_at,
+        "last_captured_at": last_captured_at,
+        "packet_evidence_count": packet_evidence_count,
+        "first_packet_captured_at": first_packet_captured_at,
+        "last_packet_captured_at": last_packet_captured_at,
+    }))
+    .map_err(|error| {
+        OpenVitalsError::message(format!("cannot serialize raw evidence bounds: {error}"))
     })
 }
 

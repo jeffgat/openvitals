@@ -123,6 +123,85 @@ struct OvernightGuardSession {
   let decodedCaptureEnabled: Bool
 }
 
+struct OvernightGuardStorageState {
+  let availableBytes: Int64?
+  let spoolBytes: Int64
+  let minimumStartFreeBytes: Int64
+  let warningFreeBytes: Int64
+  let criticalFreeBytes: Int64
+  let spoolWarningBytes: Int64
+  let spoolHardLimitBytes: Int64
+
+  var status: String {
+    if startBlockedReason != nil || runtimeStopReason != nil {
+      return "blocked"
+    }
+    if runtimeWarning != nil {
+      return "stale"
+    }
+    return "ready"
+  }
+
+  var startBlockedReason: String? {
+    guard let availableBytes else {
+      return nil
+    }
+    guard availableBytes < minimumStartFreeBytes else {
+      return nil
+    }
+    return "only \(Self.byteText(availableBytes)) free; need at least \(Self.byteText(minimumStartFreeBytes)) before bedtime capture"
+  }
+
+  var runtimeStopReason: String? {
+    if let availableBytes, availableBytes < criticalFreeBytes {
+      return "free space fell below \(Self.byteText(criticalFreeBytes))"
+    }
+    if spoolBytes >= spoolHardLimitBytes {
+      return "overnight spool reached \(Self.byteText(spoolHardLimitBytes)) cap"
+    }
+    return nil
+  }
+
+  var runtimeWarning: String? {
+    if let runtimeStopReason {
+      return runtimeStopReason
+    }
+    if let availableBytes, availableBytes < warningFreeBytes {
+      return "free space below \(Self.byteText(warningFreeBytes))"
+    }
+    if spoolBytes >= spoolWarningBytes {
+      return "overnight spool above \(Self.byteText(spoolWarningBytes))"
+    }
+    return nil
+  }
+
+  var summary: String {
+    let freeText = availableBytes.map(Self.byteText) ?? "unknown"
+    return "free \(freeText) | spool \(Self.byteText(spoolBytes)) / \(Self.byteText(spoolHardLimitBytes)) cap"
+  }
+
+  var jsonObject: [String: Any] {
+    [
+      "status": status,
+      "available_bytes": availableBytes ?? NSNull(),
+      "spool_bytes": spoolBytes,
+      "minimum_start_free_bytes": minimumStartFreeBytes,
+      "warning_free_bytes": warningFreeBytes,
+      "critical_free_bytes": criticalFreeBytes,
+      "spool_warning_bytes": spoolWarningBytes,
+      "spool_hard_limit_bytes": spoolHardLimitBytes,
+      "summary": summary,
+      "start_blocked_reason": startBlockedReason ?? NSNull(),
+      "runtime_warning": runtimeWarning ?? NSNull(),
+      "runtime_stop_reason": runtimeStopReason ?? NSNull(),
+    ]
+  }
+
+  static func byteText(_ bytes: Int64) -> String {
+    ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+  }
+}
+
 struct OvernightGuardRecoveredSession {
   let id: String
   let startedAt: Date

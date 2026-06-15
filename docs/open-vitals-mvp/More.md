@@ -9,6 +9,7 @@ MVP rule: More owns operational surfaces: device, connection lab, capture/import
 - [ ] Create a dedicated `MoreView.swift` or split `MorePlaceholderView` out of `AppShellView.swift`.
 - [ ] Keep this tab behind the Swift `More` tab item.
 - [ ] Define child routes: Device, Connection Lab, Capture, Debug, Local Store, Health Sync, Raw Export, Stream Probe Plan, Algorithms, Privacy, Support/About.
+- [x] Expose Developer as the middle bottom tab and point it at the same Developer route normally opened from More.
 - [ ] Keep operational rows compact and list-based.
 - [ ] Add status badges for ready, pending, blocked, unavailable, stale.
 - [ ] Add previews for default, connected, and debug-heavy states.
@@ -121,6 +122,7 @@ MVP rule: More owns operational surfaces: device, connection lab, capture/import
 - [x] Add K18 row-context diagnostics for relaxed bounded intervals versus local current-gated medians so row-excursion rules can be evaluated before promotion.
 - [x] Add a Clear Debug Data action that removes stored debug sessions, probe/capture evidence, RR reference rows, and generated export bundles from the device.
 - [x] Add a storage-capped Bedtime Export lane to Stream Probe Plan that starts Overnight Guard in lean raw-spool mode, runs the morning final historical sync, and exposes the scoped bundle/manifest share links for sleep-like capture validation.
+- [x] Add Bedtime Export storage preflight and runtime safety stops: the lane now surfaces free-space/spool status, blocks start/export below the minimum free-space threshold, and gracefully stops collection before critical free-space or spool-cap limits can threaten the device.
 - [x] Keep the route analysis-only; live device command sends remain blocked behind command validation, explicit user intent, dry-run bytes, and rollback expectations.
 - [ ] Add a validated command execution flow only after command evidence and UI confirmations are ready.
 
