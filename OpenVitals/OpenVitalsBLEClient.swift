@@ -79,6 +79,7 @@ final class OpenVitalsBLEClient: NSObject, ObservableObject, @unchecked Sendable
   var onLiveHeartRate: ((Int, String, Date) -> Void)?
   var onHRVSample: ((Double, Int, String, Date) -> Void)?
   var onConnectionStateChange: ((String) -> Void)?
+  var onAutomaticHistoricalSyncRequested: ((String) -> Void)?
   var onHistoricalSyncProgress: ((OpenVitalsHistoricalSyncProgress) -> Void)?
   var onHistoricalRangeTelemetry: ((OpenVitalsHistoricalRangeTelemetry) -> Void)?
   var onMessage: ((OpenVitalsMessage) -> Void)?

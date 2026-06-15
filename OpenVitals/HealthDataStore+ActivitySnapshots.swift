@@ -433,7 +433,11 @@ extension HealthDataStore {
     guard !usesPreviewPacketData else {
       return nil
     }
-    return Self.doubleValue(Self.map(packetScoreReports["strain"], "score_result", "output")?["score_0_to_21"])
+    let report = packetScoreReports["strain"]
+    guard Self.strainScoreReportIsDisplayable(report, in: packetScoreWindow) else {
+      return nil
+    }
+    return Self.doubleValue(Self.map(report, "score_result", "output")?["score_0_to_21"])
   }
 
   func strainSnapshot(base snapshot: HealthMetricSnapshot) -> HealthMetricSnapshot {
@@ -450,7 +454,7 @@ extension HealthDataStore {
     return replacingHealthMonitorSnapshot(
       snapshot,
       value: scoreText,
-      unit: "",
+      unit: "%",
       status: Self.strainStatusLabel(score: Self.strainPercent(rawScore)),
       freshness: "Latest",
       provenance: "metrics.strain_score_from_features",

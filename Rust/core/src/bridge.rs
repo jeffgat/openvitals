@@ -1082,6 +1082,8 @@ struct K18HrvValidationArgs {
     bin_seconds: Option<usize>,
     #[serde(default)]
     max_frame_summaries: Option<usize>,
+    #[serde(default)]
+    max_segment_summaries: Option<usize>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -5399,6 +5401,9 @@ fn k18_hrv_validation_bridge(args: K18HrvValidationArgs) -> OpenVitalsResult<ser
             max_frame_summaries: args
                 .max_frame_summaries
                 .unwrap_or(defaults.max_frame_summaries),
+            max_segment_summaries: args
+                .max_segment_summaries
+                .unwrap_or(defaults.max_segment_summaries),
         },
     )?;
     serde_json::to_value(report).map_err(|error| {

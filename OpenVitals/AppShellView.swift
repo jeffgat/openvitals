@@ -18,6 +18,9 @@ struct AppShellView: View {
       }
     }
     .tint(OpenVitalsTheme.accent)
+    .onChange(of: model.ble.historicalSyncStatus) { _, newValue in
+      handleHistoricalSyncStatusChange(newValue)
+    }
   }
 
   private var tabSelection: Binding<OpenVitalsAppTab> {
@@ -79,6 +82,40 @@ struct AppShellView: View {
 
   private func openHomeHealthRoute(_ route: HealthRoute) {
     router.openHealth(route)
+  }
+
+  private func handleHistoricalSyncStatusChange(_ status: String) {
+    guard status == "synced" || status == "failed" else {
+      return
+    }
+
+    let captureSource = model.activeHealthPacketCapture?.source
+    if captureSource == OpenVitalsAppModel.dailyMetricSyncCaptureSource {
+      model.finishDailyMetricSyncCaptureIfNeeded {
+        if status == "synced" {
+          refreshMetricsAfterHistoricalSync()
+        }
+      }
+      return
+    }
+
+    if captureSource == OpenVitalsAppModel.automaticHistoricalSyncCaptureSource {
+      model.finishAutomaticHistoricalSyncCaptureIfNeeded {
+        if status == "synced" {
+          refreshMetricsAfterHistoricalSync()
+        }
+      }
+      return
+    }
+
+    if status == "synced" {
+      refreshMetricsAfterHistoricalSync()
+    }
+  }
+
+  private func refreshMetricsAfterHistoricalSync() {
+    healthStore.loadBridgeCatalogsIfNeeded()
+    healthStore.refreshHealthMetrics(for: homeSelectedDate)
   }
 }
 

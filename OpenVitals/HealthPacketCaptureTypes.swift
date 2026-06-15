@@ -120,6 +120,7 @@ struct OvernightGuardSession {
   let startedAt: Date
   let directoryURL: URL
   let rawNotificationsURL: URL?
+  let decodedCaptureEnabled: Bool
 }
 
 struct OvernightGuardRecoveredSession {
@@ -140,6 +141,7 @@ struct OvernightGuardRecoveredSession {
   let historicalRangePollByteCount: Int
   let commandWriteByteCount: Int
   let eventLogByteCount: Int
+  let decodedCaptureEnabled: Bool
   let directoryURL: URL
   let rawNotificationsURL: URL
   let crashMarkerURL: URL?

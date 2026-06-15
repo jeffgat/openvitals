@@ -290,6 +290,47 @@ extension HealthDataStore {
     boolValue(report?["pass"]) == true ? "pass" : "blocked"
   }
 
+  static func sleepScoreReportIsDisplayable(_ report: [String: Any]?) -> Bool {
+    guard boolValue(report?["pass"]) == true,
+          map(report, "sleep_window") != nil,
+          map(report, "score_result", "output") != nil else {
+      return false
+    }
+    return true
+  }
+
+  static func strainScoreReportIsDisplayable(_ report: [String: Any]?) -> Bool {
+    guard boolValue(report?["pass"]) == true,
+          doubleValue(map(report, "score_result", "output")?["score_0_to_21"]) != nil else {
+      return false
+    }
+    return scoreReportOverlapsCurrentDailyWindow(report)
+  }
+
+  static func strainScoreReportIsDisplayable(
+    _ report: [String: Any]?,
+    in window: DailyMetricWindow
+  ) -> Bool {
+    guard boolValue(report?["pass"]) == true,
+          doubleValue(map(report, "score_result", "output")?["score_0_to_21"]) != nil else {
+      return false
+    }
+    return scoreReportOverlaps(report, window: window)
+  }
+
+  static func scoreReportOverlapsCurrentDailyWindow(_ report: [String: Any]?) -> Bool {
+    scoreReportOverlaps(report, window: currentDailyMetricWindow())
+  }
+
+  static func scoreReportOverlaps(_ report: [String: Any]?, window: DailyMetricWindow) -> Bool {
+    guard let report,
+          let start = bridgeDate(map(report, "score_result")?["start_time"] ?? report["start_time"]),
+          let end = bridgeDate(map(report, "score_result")?["end_time"] ?? report["end_time"]) else {
+      return false
+    }
+    return start < window.end && end > window.start
+  }
+
   static func referenceComparisonStatus(from report: [String: Any]) -> String {
     let status = passStatus(report)
     let deltas = array(report["deltas"]).count

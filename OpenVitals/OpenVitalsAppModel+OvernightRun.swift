@@ -4,6 +4,18 @@ import UIKit
 
 extension OpenVitalsAppModel {
   func startOvernightGuard() {
+    startOvernightGuard(decodedCaptureDuration: Self.overnightGuardDuration)
+  }
+
+  func startOvernightGuard(duration: TimeInterval) {
+    startOvernightGuard(decodedCaptureDuration: duration)
+  }
+
+  func startLeanOvernightGuard() {
+    startOvernightGuard(decodedCaptureDuration: nil)
+  }
+
+  private func startOvernightGuard(decodedCaptureDuration: TimeInterval?) {
     ble.record(source: "overnight.guard", title: "start.requested")
     guard !overnightGuardActive else {
       overnightGuardStatus = "Already recording overnight guard"
@@ -21,6 +33,7 @@ extension OpenVitalsAppModel {
     let startedAt = Date()
     let directoryURL = Self.overnightGuardDirectoryURL(sessionID: sessionID)
     let startPower = Self.currentOvernightPowerState()
+    let decodedCaptureEnabled = decodedCaptureDuration != nil
     do {
       let snapshot = try overnightRawSpool.start(
         sessionID: sessionID,
@@ -31,6 +44,9 @@ extension OpenVitalsAppModel {
           "connection_state": ble.connectionState,
           "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
           "database_path": HealthDataStore.defaultDatabasePath(),
+          "capture_profile": decodedCaptureEnabled ? "decoded_physiology_capture" : "lean_raw_spool",
+          "decoded_capture_enabled": decodedCaptureEnabled,
+          "decoded_capture_duration_seconds": decodedCaptureDuration.map { Int($0.rounded()) } ?? NSNull(),
           "power": startPower.jsonObject,
           "roadmap": "docs/56-overnight-band-sync-roadmap.md",
         ]
@@ -39,7 +55,8 @@ extension OpenVitalsAppModel {
         id: sessionID,
         startedAt: startedAt,
         directoryURL: directoryURL,
-        rawNotificationsURL: snapshot.rawNotificationsURL
+        rawNotificationsURL: snapshot.rawNotificationsURL,
+        decodedCaptureEnabled: decodedCaptureEnabled
       )
       overnightGuardActive = true
       overnightGuardFinalSyncPending = false
@@ -78,15 +95,17 @@ extension OpenVitalsAppModel {
       overnightGuardExportManifestError = nil
       overnightGuardExportInProgress = false
       overnightGuardCanExportLastSession = false
-      overnightGuardStatus = "Recording overnight guard"
+      overnightGuardStatus = decodedCaptureEnabled
+        ? "Recording overnight guard"
+        : "Recording lean overnight guard"
       refreshOvernightReadiness(reason: "started", record: true)
       enqueueOvernightSQLiteSession(finalStatus: "active", notes: "started")
       ble.record(source: "overnight.guard", title: "start.ok", body: "\(sessionID) path=\(overnightGuardSpoolPath)")
       ble.record(source: "overnight.guard", title: "power_state", body: "reason=started \(startPower.summary)")
 
-      if activeHealthPacketCapture == nil {
+      if let decodedCaptureDuration, activeHealthPacketCapture == nil {
         overnightGuardStartedHealthCapture = true
-        startPhysiologyPacketCapture(duration: Self.overnightGuardDuration, source: "overnight_guard")
+        startPhysiologyPacketCapture(duration: decodedCaptureDuration, source: "overnight_guard")
       } else {
         ble.startPhysiologySignalCapture()
       }

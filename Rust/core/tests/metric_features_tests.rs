@@ -665,6 +665,7 @@ fn k18_hrv_validation_compares_quality_gated_rr_against_reference() {
             min_binned_correlation: 0.0,
             bin_seconds: 2,
             max_frame_summaries: 4,
+            max_segment_summaries: 16,
         },
     )
     .unwrap();
@@ -740,6 +741,7 @@ fn k18_hrv_validation_uses_observed_end_but_clips_k18_sample_time() {
             min_binned_correlation: 0.0,
             bin_seconds: 1,
             max_frame_summaries: 8,
+            max_segment_summaries: 16,
         },
     )
     .unwrap();
@@ -783,6 +785,7 @@ fn k18_hrv_validation_rejects_warning_rows_before_parity() {
             min_binned_correlation: 0.0,
             bin_seconds: 1,
             max_frame_summaries: 4,
+            max_segment_summaries: 16,
         },
     )
     .unwrap();
@@ -847,6 +850,7 @@ fn k18_hrv_validation_rejects_interval_hr_mismatch_when_frame_mean_matches() {
             min_binned_correlation: 0.0,
             bin_seconds: 1,
             max_frame_summaries: 4,
+            max_segment_summaries: 16,
         },
     )
     .unwrap();
@@ -898,6 +902,7 @@ fn k18_hrv_validation_reports_local_continuity_diagnostic_candidate() {
             min_binned_correlation: 0.0,
             bin_seconds: 1,
             max_frame_summaries: 16,
+            max_segment_summaries: 16,
         },
     )
     .unwrap();
@@ -962,6 +967,7 @@ fn k18_hrv_validation_reports_low_motion_rest_segment_diagnostic() {
             min_binned_correlation: 0.0,
             bin_seconds: 5,
             max_frame_summaries: 4,
+            max_segment_summaries: 16,
         },
     )
     .unwrap();
@@ -973,7 +979,9 @@ fn k18_hrv_validation_reports_low_motion_rest_segment_diagnostic() {
         .find(|segment| segment.selected_by_non_oracle_rest_gate)
         .unwrap();
     assert_eq!(segment.gate_id, "bounded_plausible_560_1300");
-    assert!(!segment.passes_k18_only_segment_quality);
+    assert!(segment.passes_k18_only_segment_quality);
+    assert_eq!(segment.reference_label, "pass");
+    assert_eq!(segment.k18_only_decision, "pass");
     assert!(segment.reference_validation_pass);
     assert_eq!(segment.motion_sample_count, 5);
     assert_eq!(segment.current_gate_interval_count, 300);
@@ -986,6 +994,17 @@ fn k18_hrv_validation_reports_low_motion_rest_segment_diagnostic() {
     );
     assert_eq!(segment.max_candidate_sample_gap_seconds, Some(1.0));
     assert_eq!(segment.rmssd_error_ms, Some(0.0));
+    assert_eq!(segment.candidate_shape_summary.sample_time_count, 300);
+    assert_eq!(segment.candidate_shape_summary.sample_gap_over_3s_count, 0);
+    assert_eq!(
+        segment.candidate_shape_summary.covered_window_fraction,
+        Some(1.0)
+    );
+    assert_eq!(segment.motion_context_summary.first_minute.sample_count, 1);
+    assert_eq!(segment.motion_context_summary.last_minute.sample_count, 1);
+    assert_eq!(segment.row_context_summary.candidate_interval_count, 300);
+    assert_eq!(segment.row_context_summary.current_gate_interval_count, 300);
+    assert_eq!(segment.row_context_summary.relaxed_interval_count, 0);
     assert!(
         segment
             .quality_flags
@@ -998,11 +1017,43 @@ fn k18_hrv_validation_reports_low_motion_rest_segment_diagnostic() {
             .iter()
             .any(|flag| flag == "reference_validation_pass")
     );
-    assert!(
-        segment
-            .quality_flags
-            .iter()
-            .any(|flag| flag == "rest_segment_candidate_rmssd_below_quality_floor")
+    assert_eq!(segment.primary_failure_reason.as_deref(), Some("pass"));
+    assert_eq!(segment.failure_reasons, vec!["pass".to_string()]);
+    assert_eq!(segment.timebase_audit.common_bin_count, 60);
+    assert!(report.diagnostic_sliding_window_total_count >= 1);
+    assert_eq!(
+        report.diagnostic_sliding_window_returned_count,
+        report.diagnostic_sliding_window_summaries.len()
+    );
+    assert_eq!(
+        report
+            .diagnostic_sliding_window_decision_summary
+            .total_window_count,
+        1
+    );
+    assert_eq!(
+        report
+            .diagnostic_sliding_window_decision_summary
+            .true_accept_count,
+        1
+    );
+    assert_eq!(
+        report
+            .diagnostic_sliding_window_decision_summary
+            .false_accept_count,
+        0
+    );
+    assert_eq!(
+        report
+            .diagnostic_sliding_window_decision_summary
+            .k18_pass_precision_fraction,
+        Some(1.0)
+    );
+    assert_eq!(
+        report
+            .diagnostic_sliding_window_decision_summary
+            .promotion_status,
+        "validation_only_repeat_required"
     );
 }
 

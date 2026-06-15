@@ -297,10 +297,13 @@ extension HealthDataStore {
     return args
   }
 
-  nonisolated static func currentDailyMetricWindow() -> DailyMetricWindow {
-    var calendar = Calendar.autoupdatingCurrent
+  nonisolated static func dailyMetricWindow(
+    containing date: Date,
+    calendar inputCalendar: Calendar = .autoupdatingCurrent
+  ) -> DailyMetricWindow {
+    var calendar = inputCalendar
     calendar.locale = Locale(identifier: "en_US_POSIX")
-    let start = calendar.startOfDay(for: Date())
+    let start = calendar.startOfDay(for: date)
     let end = calendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
 
     let dateFormatter = DateFormatter()
@@ -323,6 +326,10 @@ extension HealthDataStore {
       startTimeUnixMS: Int64((start.timeIntervalSince1970 * 1000).rounded()),
       endTimeUnixMS: Int64((end.timeIntervalSince1970 * 1000).rounded())
     )
+  }
+
+  nonisolated static func currentDailyMetricWindow() -> DailyMetricWindow {
+    dailyMetricWindow(containing: Date())
   }
 
   nonisolated static func currentHourlyMetricWindow() -> DailyMetricWindow {

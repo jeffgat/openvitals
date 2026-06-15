@@ -22,6 +22,8 @@ Current product cut 2026-06-10: Home keeps the Sleep, Recovery, and Strain top s
 - [ ] Add date picker route/sheet equivalent to Flutter `TodayView._pickDate`.
 - [ ] Show busy/sync indicator when device or metric refresh is running.
 - [x] Keep Home score sync in a packet import session so historical packets can be persisted before score refresh.
+- [x] Route automatic BLE historical sync through a packet import session before refreshing packet-derived Home scores.
+- [x] Preserve unavailable packet-derived scores as `--` instead of coercing missing score text to `0`.
 - [x] Deduplicate repeated historical packet imports by stable device packet identity instead of BLE receive timestamp.
 - [x] Keep device-side timestamp cursor sync gated in Rust dry-run until command 33 read-pointer payload evidence is validated; current Home sync uses transfer plus local dedupe.
 - [ ] Add device toolbar button with connected/disconnected color state.
@@ -45,7 +47,9 @@ Current product cut 2026-06-10: Home keeps the Sleep, Recovery, and Strain top s
 - [ ] Add Recovery score card/gauge from Flutter `todayRecoveryScoreSummary()`.
 - [ ] Add Strain score card/gauge from Flutter `todayStrainScoreSummary()`.
 - [x] Add a single Home Sync button for Sleep, Recovery, and Strain that runs band historical sync before packet input and score refresh.
-- [ ] Preserve strain denominator semantics: Flutter normalizes strain from a 21-point scale to percent for some visuals.
+- [x] Preserve strain denominator semantics: normalize only `/21` strain values to percent and do not double-normalize percent snapshots.
+- [x] Drive persisted score loading and score recompute from the selected score date.
+- [x] Hide stale persisted strain score runs that do not overlap the selected local day.
 - [ ] Show HRV summary from Flutter `todayHrvScoreSummary()` where it improves the daily snapshot.
 - [ ] Parse score values into numeric + status + provenance fields instead of displaying only raw summary strings.
 - [ ] Tapping Sleep opens Health > Sleep detail.

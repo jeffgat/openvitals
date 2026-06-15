@@ -122,9 +122,8 @@ enum ScoreDateTimeline {
       return snapshot
     }
 
-    let today = calendar.startOfDay(for: Date())
     let selectedDay = calendar.startOfDay(for: date)
-    if snapshot.route == .recovery, snapshot.source.kind == .unavailable {
+    if snapshot.source.kind == .unavailable {
       return HealthMetricSnapshot(
         id: snapshot.id,
         route: snapshot.route,
@@ -141,32 +140,6 @@ enum ScoreDateTimeline {
         trend: snapshot.trend
       )
     }
-    guard calendar.isDate(selectedDay, inSameDayAs: today) else {
-      return HealthMetricSnapshot(
-        id: snapshot.id,
-        route: snapshot.route,
-        group: snapshot.group,
-        title: snapshot.title,
-        value: "--",
-        unit: snapshot.unit,
-        status: "No data",
-        freshness: dateLabel(for: selectedDay, calendar: calendar),
-        provenance: "No stored history for selected date",
-        source: .unavailable("selected date history not available"),
-        systemImage: snapshot.systemImage,
-        tint: snapshot.tint,
-        trend: HealthTrendModel(
-          id: snapshot.trend.id,
-          title: snapshot.trend.title,
-          rangeLabel: "No data",
-          summary: "No stored history",
-          analysis: "No stored metric history exists for this selected date yet.",
-          resources: snapshot.trend.resources,
-          points: []
-        )
-      )
-    }
-
     let score = baseScorePercent(for: snapshot)
 
     return HealthMetricSnapshot(

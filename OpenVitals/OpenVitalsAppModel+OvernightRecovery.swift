@@ -46,7 +46,8 @@ extension OpenVitalsAppModel {
         id: recovered.id,
         startedAt: recovered.startedAt,
         directoryURL: recovered.directoryURL,
-        rawNotificationsURL: recovered.rawNotificationsURL
+        rawNotificationsURL: recovered.rawNotificationsURL,
+        decodedCaptureEnabled: recovered.decodedCaptureEnabled
       )
       overnightGuardActive = true
         overnightGuardFinalSyncPending = false
@@ -95,7 +96,8 @@ extension OpenVitalsAppModel {
         id: recovered.id,
         startedAt: recovered.startedAt,
         directoryURL: recovered.directoryURL,
-        rawNotificationsURL: recovered.rawNotificationsURL
+        rawNotificationsURL: recovered.rawNotificationsURL,
+        decodedCaptureEnabled: recovered.decodedCaptureEnabled
       )
       overnightGuardRawNotificationCount = recovered.notificationCount
       overnightGuardRangeTelemetryCount = recovered.historicalRangePollCount
@@ -131,7 +133,7 @@ extension OpenVitalsAppModel {
       return
     }
     if !overnightGuardStartedHealthCapture {
-      if activeHealthPacketCapture == nil {
+      if overnightGuardSession?.decodedCaptureEnabled == true, activeHealthPacketCapture == nil {
         startPhysiologyPacketCapture(duration: Self.overnightGuardDuration, source: "overnight_guard_resume")
       } else {
         ble.startPhysiologySignalCapture()
@@ -180,6 +182,8 @@ extension OpenVitalsAppModel {
 
       let statusValues = readStatusValues(at: statusURL)
       let crashMarker = readJSONObject(at: crashMarkerURL)
+      let metadata = manifest["metadata"] as? [String: Any]
+      let decodedCaptureEnabled = overnightGuardBoolValue(metadata?["decoded_capture_enabled"]) ?? true
       let notificationCount = countJSONLRecords(at: rawURL)
         ?? overnightGuardIntValue(statusValues["notification_count"])
         ?? overnightGuardIntValue(manifest["notification_count"])
@@ -234,6 +238,7 @@ extension OpenVitalsAppModel {
         historicalRangePollByteCount: fileSize(at: rangePollsURL),
         commandWriteByteCount: fileSize(at: commandWritesURL),
         eventLogByteCount: fileSize(at: eventLogURL),
+        decodedCaptureEnabled: decodedCaptureEnabled,
         directoryURL: sessionURL,
         rawNotificationsURL: rawURL,
         crashMarkerURL: fileManager.fileExists(atPath: crashMarkerURL.path) ? crashMarkerURL : nil

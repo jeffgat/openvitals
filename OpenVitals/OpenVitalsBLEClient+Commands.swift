@@ -1006,7 +1006,12 @@ extension OpenVitalsBLEClient {
         return
       }
       self.pendingAutomaticHistoricalSyncReason = nil
-      self.beginHistoricalSync(trigger: reason, automatic: true)
+      if let onAutomaticHistoricalSyncRequested = self.onAutomaticHistoricalSyncRequested {
+        self.record(source: "ble.sync", title: "historical_sync.auto_delegated", body: reason)
+        onAutomaticHistoricalSyncRequested(reason)
+      } else {
+        self.beginHistoricalSync(trigger: reason, automatic: true)
+      }
     }
     readySyncWorkItem = workItem
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: workItem)

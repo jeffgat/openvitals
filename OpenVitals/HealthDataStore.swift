@@ -47,6 +47,7 @@ final class HealthDataStore: ObservableObject {
   var packetInputReports: [String: [String: Any]] = [:]
   var packetScoreReports: [String: [String: Any]] = [:]
   var referenceComparisonReports: [String: [String: Any]] = [:]
+  var packetScoreWindow = HealthDataStore.currentDailyMetricWindow()
   var packetInputRefreshWorkItem: DispatchWorkItem?
   var packetInputRunID: UUID?
   var packetScoreRunID: UUID?
@@ -181,7 +182,7 @@ final class HealthDataStore: ObservableObject {
     runPacketInputs()
   }
 
-  func refreshHealthMetrics() {
+  func refreshHealthMetrics(for date: Date = Date()) {
     guard !healthMetricWorkIsRunning else {
       healthMetricRefreshStatus = "Health metric refresh already running"
       return
@@ -196,7 +197,7 @@ final class HealthDataStore: ObservableObject {
         return
       }
       self.healthMetricRefreshStatus = "Recomputing packet-derived scores..."
-      self.runPacketScores { [weak self] in
+      self.runPacketScores(for: date) { [weak self] in
         guard let self else {
           return
         }

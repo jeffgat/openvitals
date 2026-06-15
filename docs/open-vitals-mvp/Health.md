@@ -40,6 +40,8 @@ Swift evidence 2026-06-01: `HealthView.swift`, `AppRouter.swift`, `xcodebuildmcp
 - [x] Add HRV provenance from `hrvFeatureProvenanceSummary()`.
 - [x] Keep HRV/Recovery unavailable until packet-derived beat intervals are validated; readiness copy should describe missing beat-interval evidence rather than implying one packet family is authoritative.
 - [x] Decode K18 historical RR intervals as diagnostic candidates using the observed v18 layout; keep them untrusted and out of HRV/Recovery score inputs until an owned iOS export validates them against RR reference evidence.
+- [x] Add K18 sliding 5-minute HRV validation windows with H6M/reference labels, K18-only pass/fail/unknown decisions, failure reasons, and timebase/coverage audits so rest-window parity work can be measured without promoting HRV.
+- [x] Add a K18 HRV corpus evaluator that aggregates saved validation reports into true accepts, false accepts, false rejects, precision/recall, failure reasons, and segment-shape medians before any HRV promotion.
 - [x] Add Resting HR row from `restingHeartRateFeatureSummary()`.
 - [x] Add Resting HR provenance from `restingHeartRateFeatureProvenanceSummary()`.
 - [x] Add Window row from `windowFeatureSummary()`.
@@ -70,6 +72,7 @@ Swift evidence 2026-06-01: `HealthView.swift`, `AppRouter.swift`, `xcodebuildmcp
 - [x] Apply the 2026-06-14 score audit to recovery scoring: missing secondary respiratory-rate or temperature inputs now produce partial scores with `score_status`, missing-input metadata, component coverage, and confidence instead of blocking core HRV/RHR/Sleep/Load recovery.
 - [x] Add Strain score row from `strainFeatureScoreSummary()`.
 - [x] Apply the 2026-06-14 score audit to strain scoring: score components are normalized to 0-100 before the 0-21 output scale, and results expose cardiovascular-only strain type, confidence, HR-zone load, top-5-minute HR reserve, missing inputs, component scores, and weights.
+- [x] Run daily strain scoring against the selected local-day window and keep stale persisted strain runs out of Health/Home surfaces.
 - [x] Add Stress score row from `stressFeatureScoreSummary()`.
 - [x] Add provenance for sleep, recovery, strain, and stress via `packetScoreProvenanceSummary(family)`.
 - [x] Add Next Action row from `packetDerivedScoreNextActionSummary()`.

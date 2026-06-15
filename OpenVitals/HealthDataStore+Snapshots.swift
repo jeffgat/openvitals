@@ -4,7 +4,7 @@ import SwiftUI
 import UIKit
 
 extension HealthDataStore {
-  func runPacketScores(completion: (() -> Void)? = nil) {
+  func runPacketScores(for date: Date = Date(), completion: (() -> Void)? = nil) {
     guard !packetScoreIsRunning else {
       packetScoreStatus = "Bridge score run already running..."
       completion?()
@@ -12,13 +12,15 @@ extension HealthDataStore {
     }
 
     let runID = UUID()
+    let scoreWindow = Self.dailyMetricWindow(containing: date)
     packetScoreRunID = runID
+    packetScoreWindow = scoreWindow
     packetScoreIsRunning = true
     packetScoreStatus = "Recomputing packet-derived scores..."
     let databasePath = databasePath
 
     packetScoreQueue.async {
-      let result = Self.packetScoreBridgeReports(databasePath: databasePath)
+      let result = Self.packetScoreBridgeReports(databasePath: databasePath, scoreDate: date)
       DispatchQueue.main.async { [weak self] in
         guard let self, self.packetScoreRunID == runID else {
           return
@@ -38,8 +40,12 @@ extension HealthDataStore {
     }
   }
 
-  func loadPersistedPacketScoresIfNeeded() {
-    guard packetScoreReports.isEmpty, packetScoreStatus == "No run" else {
+  func loadPersistedPacketScoresIfNeeded(
+    for date: Date = Date(),
+    recomputeIfMissing: Bool = false
+  ) {
+    let scoreWindow = Self.dailyMetricWindow(containing: date)
+    guard packetScoreReports.isEmpty || packetScoreWindow.dateKey != scoreWindow.dateKey || packetScoreStatus == "No run" else {
       return
     }
     guard FileManager.default.fileExists(atPath: databasePath) else {
@@ -49,12 +55,14 @@ extension HealthDataStore {
 
     let runID = UUID()
     packetScoreRunID = runID
+    packetScoreWindow = scoreWindow
+    packetScoreReports = [:]
     packetScoreIsRunning = true
     packetScoreStatus = "Loading persisted packet-derived scores..."
     let databasePath = databasePath
 
     packetScoreQueue.async {
-      let result = Self.persistedPacketScoreBridgeReports(databasePath: databasePath)
+      let result = Self.persistedPacketScoreBridgeReports(databasePath: databasePath, scoreDate: date)
       DispatchQueue.main.async { [weak self] in
         guard let self, self.packetScoreRunID == runID else {
           return
@@ -64,10 +72,20 @@ extension HealthDataStore {
         case .success(let reports):
           if reports.isEmpty {
             self.packetScoreStatus = "No persisted packet-derived scores"
+            if recomputeIfMissing {
+              self.runPacketScores(for: date)
+              return
+            }
           } else {
             self.packetScoreReports = reports
             self.refreshPrimarySleepFromScoreReport()
             self.packetScoreStatus = "Loaded persisted packet-derived scores"
+            if recomputeIfMissing,
+               !Self.strainScoreReportIsDisplayable(reports["strain"], in: scoreWindow) {
+              self.refreshHealthDashboardSnapshots()
+              self.runPacketScores(for: date)
+              return
+            }
           }
         case .failure(let error):
           self.packetScoreStatus = "Persisted score load blocked: \(Self.shortError(error))"
@@ -118,25 +136,52 @@ extension HealthDataStore {
     }
   }
 
-  nonisolated static func packetScoreBridgeReports(databasePath: String) -> Result<[String: [String: Any]], Error> {
+  nonisolated static func packetScoreBridgeReports(
+    databasePath: String,
+    scoreDate: Date = Date()
+  ) -> Result<[String: [String: Any]], Error> {
     let bridge = OpenVitalsRustBridge()
     let baseArgs = packetScoreBaseArgs(databasePath: databasePath, requireTrustedEvidence: false)
+    let strainWindow = dailyMetricWindow(containing: scoreDate)
+    var reports: [String: [String: Any]] = [:]
+    var firstError: Error?
+
     do {
-      var reports: [String: [String: Any]] = [:]
       reports["sleep"] = try sleepScoreBridgeReport(bridge: bridge, baseArgs: baseArgs)
+    } catch {
+      firstError = error
+    }
+
+    do {
       reports["strain"] = try bridge.request(
         method: "metrics.strain_score_from_features",
         args: baseArgs.merging([
+          "start": strainWindow.startISO,
+          "end": strainWindow.endISO,
           "resting_start": "0000",
           "resting_end": "9999",
           "resting_baseline_min_days": 3,
           "persist_algorithm_run": true,
         ]) { _, new in new }
       )
+    } catch {
+      if firstError == nil {
+        firstError = error
+      }
+    }
+
+    do {
       reports["recovery"] = try bridge.request(
         method: "metrics.recovery_score_from_features",
         args: baseArgs.merging(packetScoreRecoveryArgs()) { _, new in new }
       )
+    } catch {
+      if firstError == nil {
+        firstError = error
+      }
+    }
+
+    do {
       reports["stress"] = try bridge.request(
         method: "metrics.stress_score_from_features",
         args: baseArgs.merging([
@@ -151,21 +196,31 @@ extension HealthDataStore {
           "hrv_baseline_min_days": 3,
         ]) { _, new in new }
       )
-      return .success(reports)
     } catch {
-      return .failure(error)
+      if firstError == nil {
+        firstError = error
+      }
     }
+
+    if reports.isEmpty, let firstError {
+      return .failure(firstError)
+    }
+    return .success(reports)
   }
 
-  nonisolated static func persistedPacketScoreBridgeReports(databasePath: String) -> Result<[String: [String: Any]], Error> {
+  nonisolated static func persistedPacketScoreBridgeReports(
+    databasePath: String,
+    scoreDate: Date = Date()
+  ) -> Result<[String: [String: Any]], Error> {
     let bridge = OpenVitalsRustBridge()
+    let scoreWindow = dailyMetricWindow(containing: scoreDate)
     do {
       let value = try bridge.request(
         method: "metrics.persisted_score_reports",
         args: [
           "database_path": databasePath,
-          "start": "0000",
-          "end": "9999",
+          "start": scoreWindow.startISO,
+          "end": scoreWindow.endISO,
           "families": ["sleep", "recovery", "strain"],
         ]
       )
@@ -463,7 +518,8 @@ extension HealthDataStore {
   func strainSnapshot(for date: Date, calendar: Calendar = .current) -> HealthMetricSnapshot {
     let base = Self.baseLandingSnapshots.first { $0.route == .strain } ?? Self.baseLandingSnapshots[0]
     let snapshot = strainSnapshot(base: base)
-    guard calendar.isDate(calendar.startOfDay(for: date), inSameDayAs: calendar.startOfDay(for: Date())) else {
+    let selectedWindow = Self.dailyMetricWindow(containing: date, calendar: calendar)
+    guard selectedWindow.dateKey == packetScoreWindow.dateKey else {
       return zeroStrainSnapshot(
         base: snapshot,
         freshness: ScoreDateTimeline.dateLabel(for: date, calendar: calendar),
@@ -475,9 +531,11 @@ extension HealthDataStore {
   }
 
   func sleepSnapshot(base snapshot: HealthMetricSnapshot) -> HealthMetricSnapshot {
-    if let output = Self.map(packetScoreReports["sleep"], "score_result", "output") {
+    let sleepReport = packetScoreReports["sleep"]
+    if Self.sleepScoreReportIsDisplayable(sleepReport),
+       let output = Self.map(sleepReport, "score_result", "output") {
       let scoreText = Self.numberText(output["score_0_to_100"], fractionDigits: 0) ?? snapshot.value
-      let algorithmID = Self.map(packetScoreReports["sleep"], "score_result")?["algorithm_id"] as? String
+      let algorithmID = Self.map(sleepReport, "score_result")?["algorithm_id"] as? String
         ?? OpenVitalsPacketScoreAlgorithmID.sleep
       return HealthMetricSnapshot(
         id: snapshot.id,
@@ -533,9 +591,11 @@ extension HealthDataStore {
         trend: snapshot.trend
       )
     }
-    if let output = Self.map(packetScoreReports["sleep"], "score_result", "output"),
+    let sleepReport = packetScoreReports["sleep"]
+    if Self.sleepScoreReportIsDisplayable(sleepReport),
+       let output = Self.map(sleepReport, "score_result", "output"),
        let duration = Self.doubleValue(output["sleep_duration_minutes"]) {
-      let algorithmID = Self.map(packetScoreReports["sleep"], "score_result")?["algorithm_id"] as? String
+      let algorithmID = Self.map(sleepReport, "score_result")?["algorithm_id"] as? String
         ?? OpenVitalsPacketScoreAlgorithmID.sleep
       return HealthMetricSnapshot(
         id: snapshot.id,
@@ -758,7 +818,8 @@ extension HealthDataStore {
   }
 
   func strainScore0To100(for date: Date = Date(), calendar: Calendar = .current) -> Double {
-    guard calendar.isDate(calendar.startOfDay(for: date), inSameDayAs: calendar.startOfDay(for: Date())) else {
+    let selectedWindow = Self.dailyMetricWindow(containing: date, calendar: calendar)
+    guard selectedWindow.dateKey == packetScoreWindow.dateKey else {
       return 0
     }
     return currentStrainScore0To21().map(Self.strainPercent) ?? 0
@@ -773,7 +834,8 @@ extension HealthDataStore {
   }
 
   func strainStatusText(for date: Date = Date(), calendar: Calendar = .current) -> String {
-    guard calendar.isDate(calendar.startOfDay(for: date), inSameDayAs: calendar.startOfDay(for: Date())),
+    let selectedWindow = Self.dailyMetricWindow(containing: date, calendar: calendar)
+    guard selectedWindow.dateKey == packetScoreWindow.dateKey,
           let rawScore = currentStrainScore0To21() else {
       return "No strain data"
     }

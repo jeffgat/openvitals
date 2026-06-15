@@ -98,6 +98,8 @@ final class MoreDataStore: ObservableObject {
   @Published var k18ExportReadinessStatus = "K18 export readiness not checked"
   @Published var k18ExportReadinessInProgress = false
   @Published var k18ExportReadinessNextActions: [String] = []
+  @Published var k18ExportReadinessIssues: [String] = []
+  @Published var k18ExportReadinessLatestLagSeconds: Int?
   @Published var debugDataClearStatus = "Debug data not cleared"
   @Published var debugDataClearInProgress = false
   @Published var supabaseProjectURL: String
@@ -616,6 +618,8 @@ final class MoreDataStore: ObservableObject {
     k18ExportReadinessStatus = "K18 export readiness not checked"
     k18ExportReadinessInProgress = false
     k18ExportReadinessNextActions = []
+    k18ExportReadinessIssues = []
+    k18ExportReadinessLatestLagSeconds = nil
     supabaseUploadStatus = supabaseUploadIsConfigured ? "Ready to upload debug bundle" : "Not configured"
     supabaseUploadInProgress = false
     supabaseLastBundlePath = Self.supabaseNoBundleUploadText
@@ -663,6 +667,8 @@ final class MoreDataStore: ObservableObject {
     k18ExportReadinessStatus = "K18 export readiness not checked"
     k18ExportReadinessInProgress = false
     k18ExportReadinessNextActions = []
+    k18ExportReadinessIssues = []
+    k18ExportReadinessLatestLagSeconds = nil
     automaticStreamProbeStatus = "No automatic stream probe run"
     automaticStreamProbeInProgress = false
     automaticStreamProbeStartedAt = nil

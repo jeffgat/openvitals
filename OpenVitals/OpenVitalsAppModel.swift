@@ -293,6 +293,8 @@ final class OpenVitalsAppModel: ObservableObject {
   static let captureFrameWriteQueueMaxRows = 2048
   static let captureFrameWriteBatchMaxRows = 128
   static let dailyMetricSyncCaptureSource = "home.daily_scores.sync"
+  static let automaticHistoricalSyncCaptureSource = "auto.historical_sync.import"
+  static let automaticHistoricalSyncCaptureDuration: TimeInterval = 3 * 60
   static let passiveActivityCaptureDuration: TimeInterval = 12 * 60 * 60
   static let movementPacketStatusInterval: TimeInterval = 1
   static let movementPacketLogInterval: TimeInterval = 5
@@ -399,6 +401,11 @@ final class OpenVitalsAppModel: ObservableObject {
     ble.onConnectionStateChange = { [weak self] state in
       Task { @MainActor in
         self?.handleBLEConnectionStateChange(state)
+      }
+    }
+    ble.onAutomaticHistoricalSyncRequested = { [weak self] reason in
+      Task { @MainActor in
+        self?.startAutomaticHistoricalSyncImport(reason: reason)
       }
     }
     ble.onHistoricalSyncProgress = { [weak self] progress in

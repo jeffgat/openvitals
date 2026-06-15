@@ -393,6 +393,10 @@ extension HealthDataStore {
     guard let report = packetScoreReports["sleep"] else {
       return packetScoreStatus == "No run" ? "No run" : packetScoreStatus
     }
+    guard Self.sleepScoreReportIsDisplayable(report) else {
+      let action = Self.firstActionText(in: report) ?? "sleep score unavailable"
+      return "\(Self.passStatus(report)) | \(Self.shortActionText(action))"
+    }
     let output = Self.map(report, "score_result", "output")
     let score = Self.numberText(output?["score_0_to_100"], fractionDigits: 1) ?? "no score"
     let window = Self.map(report, "sleep_window")
@@ -781,6 +785,13 @@ extension HealthDataStore {
   func strainFeatureScoreSummary() -> String {
     guard let report = packetScoreReports["strain"] else {
       return packetScoreStatus == "No run" ? "No run" : packetScoreStatus
+    }
+    guard Self.strainScoreReportIsDisplayable(report, in: packetScoreWindow) else {
+      if Self.passStatus(report) == "pass" {
+        return "stale | outside current day"
+      }
+      let action = Self.firstActionText(in: report) ?? "strain score unavailable"
+      return "\(Self.passStatus(report)) | \(Self.shortActionText(action))"
     }
     let rawScore = Self.doubleValue(Self.map(report, "score_result", "output")?["score_0_to_21"])
     let score = rawScore.flatMap { Self.numberText(Self.strainPercent($0), fractionDigits: 0) } ?? "no score"

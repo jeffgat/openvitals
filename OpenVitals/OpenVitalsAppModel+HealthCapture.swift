@@ -319,6 +319,58 @@ extension OpenVitalsAppModel {
     completion?(true)
   }
 
+  func startAutomaticHistoricalSyncImport(reason: String) {
+    dailyMetricSyncStatus = "Preparing auto packet import..."
+
+    let beginSync: () -> Void = { [weak self] in
+      guard let self else {
+        return
+      }
+      guard self.ble.canSyncHistorical else {
+        self.dailyMetricSyncStatus = "Auto sync blocked: \(self.ble.historicalSyncStatus)"
+        self.ble.record(
+          level: .warn,
+          source: "auto.historical_sync.import",
+          title: "historical_sync.blocked",
+          body: self.ble.historicalSyncStatus
+        )
+        return
+      }
+
+      self.dailyMetricSyncStatus = "Requesting automatic historical packets..."
+      self.ble.record(source: "auto.historical_sync.import", title: "historical_sync.requested", body: reason)
+      self.ble.beginHistoricalSync(trigger: reason, automatic: true)
+    }
+
+    guard activeHealthPacketCapture == nil else {
+      dailyMetricSyncStatus = "Using active packet import session for auto sync"
+      beginSync()
+      return
+    }
+
+    startHealthPacketCapture(
+      mode: .physiology,
+      duration: Self.automaticHistoricalSyncCaptureDuration,
+      source: Self.automaticHistoricalSyncCaptureSource,
+      requestStreams: false
+    ) { [weak self] started in
+      guard let self else {
+        return
+      }
+      guard started else {
+        self.dailyMetricSyncStatus = "Auto sync blocked: \(self.healthPacketCaptureStatus)"
+        self.ble.record(
+          level: .warn,
+          source: "auto.historical_sync.import",
+          title: "capture.start_failed",
+          body: self.healthPacketCaptureStatus
+        )
+        return
+      }
+      beginSync()
+    }
+  }
+
   func finishDailyMetricSyncCaptureIfNeeded(completion: @escaping () -> Void) {
     guard let capture = activeHealthPacketCapture,
           capture.source == Self.dailyMetricSyncCaptureSource else {
@@ -336,6 +388,26 @@ extension OpenVitalsAppModel {
       self.dailyMetricSyncStatus = stopped
         ? "Packet import finished"
         : "Packet import finish failed: \(self.healthPacketCaptureStatus)"
+      completion()
+    }
+  }
+
+  func finishAutomaticHistoricalSyncCaptureIfNeeded(completion: @escaping () -> Void) {
+    guard let capture = activeHealthPacketCapture,
+          capture.source == Self.automaticHistoricalSyncCaptureSource else {
+      completion()
+      return
+    }
+
+    dailyMetricSyncStatus = "Finishing auto packet import..."
+    stopHealthPacketCapture(reason: "auto_historical_sync_complete") { [weak self] stopped in
+      guard let self else {
+        completion()
+        return
+      }
+      self.dailyMetricSyncStatus = stopped
+        ? "Auto packet import finished"
+        : "Auto packet import finish failed: \(self.healthPacketCaptureStatus)"
       completion()
     }
   }

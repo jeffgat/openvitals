@@ -87,7 +87,10 @@ struct HomeDashboardView: View {
     }
     .task {
       healthStore.loadBridgeCatalogsIfNeeded()
-      healthStore.loadPersistedPacketScoresIfNeeded()
+      healthStore.loadPersistedPacketScoresIfNeeded(for: selectedDate, recomputeIfMissing: true)
+    }
+    .onChange(of: selectedDate) { _, newValue in
+      healthStore.loadPersistedPacketScoresIfNeeded(for: newValue, recomputeIfMissing: true)
     }
     .onChange(of: model.ble.historicalSyncStatus) { _, newValue in
       handleHomeScoreSyncStatusChange(newValue)
@@ -186,7 +189,7 @@ struct HomeDashboardView: View {
 
   private func homeSnapshot(for route: HealthRoute, in snapshots: [HealthMetricSnapshot]) -> HealthMetricSnapshot {
     let snapshot = landingSnapshot(for: route, in: snapshots)
-    guard route == .strain, snapshot.unit != "%" else {
+    guard route == .strain, snapshot.unit == "/21" else {
       return snapshot
     }
     let rawValue = firstNumber(in: snapshot.displayValue) ?? firstNumber(in: snapshot.value) ?? 0
@@ -247,17 +250,10 @@ struct HomeDashboardView: View {
     }
     if status == "synced" {
       scoreSyncWaitingForBand = false
-      scoreSyncIsPreparing = true
-      model.finishDailyMetricSyncCaptureIfNeeded {
-        scoreSyncIsPreparing = false
-        healthStore.refreshHealthMetrics()
-      }
+      scoreSyncIsPreparing = false
     } else if status == "failed" {
       scoreSyncWaitingForBand = false
-      scoreSyncIsPreparing = true
-      model.finishDailyMetricSyncCaptureIfNeeded {
-        scoreSyncIsPreparing = false
-      }
+      scoreSyncIsPreparing = false
     }
   }
 

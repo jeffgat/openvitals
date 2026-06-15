@@ -113,9 +113,14 @@ MVP rule: More owns operational surfaces: device, connection lab, capture/import
 - [x] Add a guided RR + automatic probe action that scans/selects the reference strap, waits for live RR samples, starts the band probe, stops RR capture after the probe, and waits for RR storage before export.
 - [x] Use a 15-minute automatic stream probe window so K18 historical device-time rows have enough chance to overlap an external RR reference run.
 - [x] Add an advisory K18 export-readiness check that compares latest quality-gated K18 RR sample time against the probe/reference target end while still allowing export of captured evidence.
-- [x] Freeze the RR reference window at automatic probe timeout, keep band capture open for bounded K18 catch-up polling, then stop the band capture once K18 is ready or the catch-up timeout expires.
+- [x] Freeze the RR reference window at automatic probe timeout, keep band capture open for K18 catch-up polling, extend the wait when readiness reports K18-specific lag/missing RR evidence, then stop the band capture once K18 is ready or the extended catch-up timeout expires.
 - [x] Start the underlying band diagnostic capture with a longer fail-safe timeout than the 15-minute probe window so the app-level capture timer does not stop K18 catch-up at the same moment the reference window freezes.
+- [x] Emit K18 HRV sliding-window validation tables from Rust with reference labels, K18-only decisions, explicit failure reasons, and timebase/coverage audits so the stream-probe workflow can distinguish true rest-window passes, false accepts, and row-dropout failures.
+- [x] Add a K18 HRV corpus evaluator for saved validation reports so repeated stream-probe exports produce aggregate precision/recall, blocker, failure-reason, and shape-feature summaries.
+- [x] Add rule-candidate scoring to the K18 HRV corpus evaluator so simple runtime-safe selectors can be rejected before they reach app HRV surfaces.
+- [x] Add K18 row-context diagnostics for relaxed bounded intervals versus local current-gated medians so row-excursion rules can be evaluated before promotion.
 - [x] Add a Clear Debug Data action that removes stored debug sessions, probe/capture evidence, RR reference rows, and generated export bundles from the device.
+- [x] Add a storage-capped Bedtime Export lane to Stream Probe Plan that starts Overnight Guard in lean raw-spool mode, runs the morning final historical sync, and exposes the scoped bundle/manifest share links for sleep-like capture validation.
 - [x] Keep the route analysis-only; live device command sends remain blocked behind command validation, explicit user intent, dry-run bytes, and rollback expectations.
 - [ ] Add a validated command execution flow only after command evidence and UI confirmations are ready.
 

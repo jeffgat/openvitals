@@ -86,16 +86,15 @@ const K18_HRV_FLAG_INTERVAL_HEART_RATE_MISMATCH: &str =
 const K18_HRV_REST_SEGMENT_WINDOW_MS: i64 = 5 * 60 * 1_000;
 const K18_HRV_REST_SEGMENT_STEP_MS: i64 = 60 * 1_000;
 const K18_HRV_REST_SEGMENT_MAX_SUMMARIES: usize = 8;
+const K18_HRV_SLIDING_WINDOW_MAX_SUMMARIES: usize = 512;
 const K18_HRV_REST_SEGMENT_MIN_MOTION_SAMPLES: usize = 3;
 const K18_HRV_REST_SEGMENT_MIN_CURRENT_GATE_INTERVALS: usize = 120;
 const K18_HRV_REST_SEGMENT_MIN_CANDIDATE_INTERVALS: usize = 180;
 const K18_HRV_REST_SEGMENT_MAX_AVG_MOTION_INTENSITY: f64 = RESTING_HR_LOW_MOTION_INTENSITY_MAX;
 const K18_HRV_REST_SEGMENT_MAX_PEAK_MOTION_INTENSITY: f64 = 0.20;
-const K18_HRV_REST_SEGMENT_MIN_RELAXED_INTERVAL_FRACTION: f64 = 0.30;
-const K18_HRV_REST_SEGMENT_MIN_CANDIDATE_RMSSD_MS: f64 = 120.0;
-const K18_HRV_REST_SEGMENT_MIN_CANDIDATE_SDNN_MS: f64 = 115.0;
-const K18_HRV_REST_SEGMENT_MIN_CANDIDATE_PNN50: f64 = 0.50;
 const K18_HRV_REST_SEGMENT_MAX_CANDIDATE_GAP_SECONDS: f64 = 10.0;
+const K18_HRV_REST_SEGMENT_MAX_REFERENCE_EDGE_DELTA_SECONDS: f64 = 30.0;
+const K18_HRV_REST_SEGMENT_MOTION_CONTEXT_MS: i64 = 60 * 1_000;
 
 #[derive(Debug, Clone, Copy)]
 pub struct MotionFeatureOptions {
@@ -211,6 +210,7 @@ pub struct K18HrvValidationOptions {
     pub min_binned_correlation: f64,
     pub bin_seconds: usize,
     pub max_frame_summaries: usize,
+    pub max_segment_summaries: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -452,6 +452,7 @@ impl Default for K18HrvValidationOptions {
             min_binned_correlation: K18_HRV_DEFAULT_MIN_BINNED_CORRELATION,
             bin_seconds: 5,
             max_frame_summaries: 24,
+            max_segment_summaries: K18_HRV_SLIDING_WINDOW_MAX_SUMMARIES,
         }
     }
 }
@@ -1531,6 +1532,14 @@ pub struct K18HrvValidationReport {
     #[serde(default)]
     pub diagnostic_gate_summaries: Vec<K18HrvDiagnosticGateSummary>,
     #[serde(default)]
+    pub diagnostic_sliding_window_decision_summary: K18HrvSlidingWindowDecisionSummary,
+    #[serde(default)]
+    pub diagnostic_sliding_window_total_count: usize,
+    #[serde(default)]
+    pub diagnostic_sliding_window_returned_count: usize,
+    #[serde(default)]
+    pub diagnostic_sliding_window_summaries: Vec<K18HrvRestSegmentSummary>,
+    #[serde(default)]
     pub diagnostic_rest_segment_summaries: Vec<K18HrvRestSegmentSummary>,
     pub frame_summaries: Vec<K18HrvFrameSummary>,
     pub issues: Vec<String>,
@@ -1555,6 +1564,39 @@ pub struct K18HrvDiagnosticGateSummary {
     pub quality_flags: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct K18HrvSlidingWindowDecisionSummary {
+    pub total_window_count: usize,
+    pub reference_labeled_window_count: usize,
+    pub reference_pass_count: usize,
+    pub reference_fail_count: usize,
+    pub reference_unknown_count: usize,
+    pub k18_pass_count: usize,
+    pub k18_fail_count: usize,
+    pub k18_reject_count: usize,
+    pub k18_unknown_count: usize,
+    pub true_accept_count: usize,
+    pub true_reject_count: usize,
+    pub false_accept_count: usize,
+    pub false_reject_count: usize,
+    pub abstained_reference_pass_count: usize,
+    pub labeled_k18_pass_count: usize,
+    pub k18_pass_precision_fraction: Option<f64>,
+    pub k18_pass_false_accept_fraction: Option<f64>,
+    pub reference_pass_recall_fraction: Option<f64>,
+    pub reference_pass_false_reject_fraction: Option<f64>,
+    pub promotion_status: String,
+    pub promotion_blockers: Vec<String>,
+    pub decision_cells: Vec<K18HrvSlidingWindowDecisionCell>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct K18HrvSlidingWindowDecisionCell {
+    pub reference_label: String,
+    pub k18_only_decision: String,
+    pub count: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct K18HrvRestSegmentSummary {
     pub segment_id: String,
@@ -1565,9 +1607,14 @@ pub struct K18HrvRestSegmentSummary {
     pub selected_by_non_oracle_rest_gate: bool,
     pub passes_k18_only_segment_quality: bool,
     pub reference_validation_pass: bool,
+    pub reference_label: String,
+    pub k18_only_decision: String,
+    pub primary_failure_reason: Option<String>,
+    pub failure_reasons: Vec<String>,
     pub motion_sample_count: usize,
     pub average_motion_intensity_0_to_1: Option<f64>,
     pub max_motion_intensity_0_to_1: Option<f64>,
+    pub motion_context_summary: K18HrvSegmentMotionContextSummary,
     pub current_gate_interval_count: usize,
     pub candidate_interval_count: usize,
     pub reference_interval_count: usize,
@@ -1584,7 +1631,94 @@ pub struct K18HrvRestSegmentSummary {
     pub mean_nn_error_ms: Option<f64>,
     pub binned_comparison: Option<K18HrvBinnedComparison>,
     pub candidate_current_binned_comparison: Option<K18HrvBinnedComparison>,
+    pub timebase_audit: K18HrvSegmentTimebaseAudit,
+    pub row_context_summary: K18HrvSegmentRowContextSummary,
+    pub candidate_shape_summary: K18HrvSegmentShapeSummary,
+    pub current_gate_shape_summary: K18HrvSegmentShapeSummary,
     pub quality_flags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct K18HrvSegmentRowContextSummary {
+    pub candidate_interval_count: usize,
+    pub current_gate_interval_count: usize,
+    pub relaxed_interval_count: usize,
+    pub relaxed_interval_fraction: Option<f64>,
+    pub relaxed_with_local_context_count: usize,
+    pub relaxed_without_local_context_count: usize,
+    pub relaxed_locally_plausible_interval_count: usize,
+    pub relaxed_short_excursion_interval_count: usize,
+    pub relaxed_long_excursion_interval_count: usize,
+    pub relaxed_locally_plausible_fraction: Option<f64>,
+    pub relaxed_local_abs_delta_median_ms: Option<f64>,
+    pub relaxed_local_abs_delta_p95_ms: Option<f64>,
+    pub relaxed_local_abs_delta_max_ms: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct K18HrvSegmentMotionContextSummary {
+    pub context_window_seconds: i64,
+    pub pre_window: K18HrvMotionWindowSummary,
+    pub first_minute: K18HrvMotionWindowSummary,
+    pub last_minute: K18HrvMotionWindowSummary,
+    pub post_window: K18HrvMotionWindowSummary,
+    pub max_context_motion_intensity_0_to_1: Option<f64>,
+    pub start_transition_delta_0_to_1: Option<f64>,
+    pub end_transition_delta_0_to_1: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct K18HrvMotionWindowSummary {
+    pub sample_count: usize,
+    pub average_motion_intensity_0_to_1: Option<f64>,
+    pub max_motion_intensity_0_to_1: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct K18HrvSegmentTimebaseAudit {
+    pub candidate_first_time: Option<String>,
+    pub candidate_last_time: Option<String>,
+    pub reference_first_time: Option<String>,
+    pub reference_last_time: Option<String>,
+    pub candidate_time_span_seconds: Option<f64>,
+    pub reference_time_span_seconds: Option<f64>,
+    pub candidate_reference_start_delta_seconds: Option<f64>,
+    pub candidate_reference_end_delta_seconds: Option<f64>,
+    pub candidate_reference_interval_count_delta: i64,
+    pub candidate_reference_interval_count_ratio: Option<f64>,
+    pub max_candidate_sample_gap_seconds: Option<f64>,
+    pub max_reference_sample_gap_seconds: Option<f64>,
+    pub common_bin_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct K18HrvSegmentShapeSummary {
+    pub bin_seconds: usize,
+    pub bin_count: usize,
+    pub interval_count: usize,
+    pub sample_time_count: usize,
+    pub first_sample_offset_seconds: Option<f64>,
+    pub last_sample_offset_seconds: Option<f64>,
+    pub sample_time_span_seconds: Option<f64>,
+    pub covered_window_fraction: Option<f64>,
+    pub sample_gap_count: usize,
+    pub sample_gap_median_seconds: Option<f64>,
+    pub sample_gap_p95_seconds: Option<f64>,
+    pub sample_gap_max_seconds: Option<f64>,
+    pub sample_gap_over_3s_count: usize,
+    pub sample_gap_over_5s_count: usize,
+    pub sample_gap_over_10s_count: usize,
+    pub sample_gap_over_30s_count: usize,
+    pub sample_gap_over_3s_total_seconds: Option<f64>,
+    pub expected_interval_count_from_mean_nn: Option<f64>,
+    pub interval_count_expected_ratio: Option<f64>,
+    pub median_bin_rr_ms: Option<f64>,
+    pub bin_step_count: usize,
+    pub bin_step_mean_absolute_ms: Option<f64>,
+    pub bin_step_rmssd_ms: Option<f64>,
+    pub bin_step_max_absolute_ms: Option<f64>,
+    pub bin_step_over_50ms_fraction: Option<f64>,
+    pub bin_step_over_100ms_fraction: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -5777,6 +5911,7 @@ pub fn run_k18_hrv_validation(
     };
     let bin_seconds = options.bin_seconds.clamp(1, 300);
     let max_frame_summaries = options.max_frame_summaries;
+    let max_segment_summaries = options.max_segment_summaries;
     let requested_start_ms = parse_rfc3339_utc_unix_ms(start);
     let requested_end_ms = parse_rfc3339_utc_unix_ms(end);
 
@@ -5849,7 +5984,7 @@ pub fn run_k18_hrv_validation(
         binned_mae_tolerance_ms,
         min_binned_correlation,
     );
-    let diagnostic_rest_segment_summaries = k18_hrv_rest_segment_summaries(
+    let diagnostic_sliding_window_summaries_all = k18_hrv_sliding_window_summaries(
         &k18_rr_frames,
         &gated_timed_intervals,
         &reference_timed_intervals,
@@ -5861,6 +5996,16 @@ pub fn run_k18_hrv_validation(
         binned_mae_tolerance_ms,
         min_binned_correlation,
     );
+    let diagnostic_sliding_window_decision_summary =
+        k18_hrv_sliding_window_decision_summary(&diagnostic_sliding_window_summaries_all);
+    let diagnostic_sliding_window_total_count = diagnostic_sliding_window_summaries_all.len();
+    let diagnostic_sliding_window_summaries = diagnostic_sliding_window_summaries_all
+        .iter()
+        .take(max_segment_summaries)
+        .cloned()
+        .collect::<Vec<_>>();
+    let diagnostic_rest_segment_summaries =
+        k18_hrv_ranked_rest_segment_summaries(&diagnostic_sliding_window_summaries_all);
 
     let mut issues = Vec::new();
     if requested_start_ms.is_none() {
@@ -5976,6 +6121,10 @@ pub fn run_k18_hrv_validation(
         mean_nn_error_ms,
         binned_comparison,
         diagnostic_gate_summaries,
+        diagnostic_sliding_window_decision_summary,
+        diagnostic_sliding_window_total_count,
+        diagnostic_sliding_window_returned_count: diagnostic_sliding_window_summaries.len(),
+        diagnostic_sliding_window_summaries,
         diagnostic_rest_segment_summaries,
         frame_summaries,
         issues,
@@ -6803,7 +6952,7 @@ fn k18_motion_features_from_rows(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn k18_hrv_rest_segment_summaries(
+fn k18_hrv_sliding_window_summaries(
     frames: &[K18HrvFrameCandidate],
     current_gated_intervals: &[K18TimedInterval],
     reference_intervals: &[K18TimedInterval],
@@ -6827,7 +6976,7 @@ fn k18_hrv_rest_segment_summaries(
     };
 
     let window_ranges = k18_rest_segment_window_ranges(comparison_start_ms, comparison_end_ms);
-    let mut summaries = window_ranges
+    window_ranges
         .into_iter()
         .enumerate()
         .filter_map(|(index, (window_start_ms, window_end_ms))| {
@@ -6847,12 +6996,31 @@ fn k18_hrv_rest_segment_summaries(
                 min_binned_correlation,
             )
         })
-        .collect::<Vec<_>>();
+        .collect()
+}
 
+fn k18_hrv_ranked_rest_segment_summaries(
+    summaries: &[K18HrvRestSegmentSummary],
+) -> Vec<K18HrvRestSegmentSummary> {
+    let mut summaries = summaries
+        .iter()
+        .filter(|summary| summary.selected_by_non_oracle_rest_gate)
+        .cloned()
+        .collect::<Vec<_>>();
     summaries.sort_by(|left, right| {
         right
             .selected_by_non_oracle_rest_gate
             .cmp(&left.selected_by_non_oracle_rest_gate)
+            .then_with(|| {
+                right
+                    .passes_k18_only_segment_quality
+                    .cmp(&left.passes_k18_only_segment_quality)
+            })
+            .then_with(|| {
+                right
+                    .reference_validation_pass
+                    .cmp(&left.reference_validation_pass)
+            })
             .then_with(|| {
                 left.average_motion_intensity_0_to_1
                     .unwrap_or(f64::INFINITY)
@@ -6871,6 +7039,131 @@ fn k18_hrv_rest_segment_summaries(
     });
     summaries.truncate(K18_HRV_REST_SEGMENT_MAX_SUMMARIES);
     summaries
+}
+
+fn k18_hrv_sliding_window_decision_summary(
+    summaries: &[K18HrvRestSegmentSummary],
+) -> K18HrvSlidingWindowDecisionSummary {
+    let mut reference_pass_count = 0;
+    let mut reference_fail_count = 0;
+    let mut reference_unknown_count = 0;
+    let mut k18_pass_count = 0;
+    let mut k18_fail_count = 0;
+    let mut k18_reject_count = 0;
+    let mut k18_unknown_count = 0;
+    let mut true_accept_count = 0;
+    let mut true_reject_count = 0;
+    let mut false_accept_count = 0;
+    let mut false_reject_count = 0;
+    let mut abstained_reference_pass_count = 0;
+    let mut cell_counts = BTreeMap::<(String, String), usize>::new();
+
+    for summary in summaries {
+        match summary.reference_label.as_str() {
+            "pass" => reference_pass_count += 1,
+            "fail" => reference_fail_count += 1,
+            _ => reference_unknown_count += 1,
+        }
+        match summary.k18_only_decision.as_str() {
+            "pass" => k18_pass_count += 1,
+            "fail" => k18_fail_count += 1,
+            "reject" => k18_reject_count += 1,
+            _ => k18_unknown_count += 1,
+        }
+
+        match (
+            summary.reference_label.as_str(),
+            summary.k18_only_decision.as_str(),
+        ) {
+            ("pass", "pass") => true_accept_count += 1,
+            ("fail", "pass") => false_accept_count += 1,
+            ("fail", "fail" | "reject") => true_reject_count += 1,
+            ("pass", "fail" | "reject") => false_reject_count += 1,
+            ("pass", "unknown") => abstained_reference_pass_count += 1,
+            _ => {}
+        }
+
+        *cell_counts
+            .entry((
+                summary.reference_label.clone(),
+                summary.k18_only_decision.clone(),
+            ))
+            .or_default() += 1;
+    }
+
+    let reference_labeled_window_count = reference_pass_count + reference_fail_count;
+    let labeled_k18_pass_count = true_accept_count + false_accept_count;
+    let k18_pass_precision_fraction =
+        ratio_fraction(true_accept_count, labeled_k18_pass_count).map(round_3);
+    let k18_pass_false_accept_fraction =
+        ratio_fraction(false_accept_count, labeled_k18_pass_count).map(round_3);
+    let reference_pass_recall_fraction =
+        ratio_fraction(true_accept_count, reference_pass_count).map(round_3);
+    let reference_pass_false_reject_fraction =
+        ratio_fraction(false_reject_count, reference_pass_count).map(round_3);
+
+    let mut promotion_blockers = Vec::new();
+    if summaries.is_empty() {
+        promotion_blockers.push("no_sliding_windows".to_string());
+    }
+    if reference_labeled_window_count == 0 {
+        promotion_blockers.push("no_reference_labeled_windows".to_string());
+    }
+    if k18_pass_count == 0 {
+        promotion_blockers.push("no_k18_pass_windows".to_string());
+    }
+    if false_accept_count > 0 {
+        promotion_blockers.push("k18_pass_in_reference_fail_window".to_string());
+    }
+    if false_reject_count > 0 {
+        promotion_blockers.push("k18_rejects_reference_pass_window".to_string());
+    }
+    if abstained_reference_pass_count > 0 {
+        promotion_blockers.push("k18_abstains_reference_pass_window".to_string());
+    }
+    if reference_unknown_count > 0 {
+        promotion_blockers.push("reference_unknown_windows_present".to_string());
+    }
+
+    let promotion_status = if promotion_blockers.is_empty() {
+        "validation_only_repeat_required".to_string()
+    } else {
+        "validation_only_blocked".to_string()
+    };
+
+    K18HrvSlidingWindowDecisionSummary {
+        total_window_count: summaries.len(),
+        reference_labeled_window_count,
+        reference_pass_count,
+        reference_fail_count,
+        reference_unknown_count,
+        k18_pass_count,
+        k18_fail_count,
+        k18_reject_count,
+        k18_unknown_count,
+        true_accept_count,
+        true_reject_count,
+        false_accept_count,
+        false_reject_count,
+        abstained_reference_pass_count,
+        labeled_k18_pass_count,
+        k18_pass_precision_fraction,
+        k18_pass_false_accept_fraction,
+        reference_pass_recall_fraction,
+        reference_pass_false_reject_fraction,
+        promotion_status,
+        promotion_blockers,
+        decision_cells: cell_counts
+            .into_iter()
+            .map(
+                |((reference_label, k18_only_decision), count)| K18HrvSlidingWindowDecisionCell {
+                    reference_label,
+                    k18_only_decision,
+                    count,
+                },
+            )
+            .collect(),
+    }
 }
 
 fn k18_rest_segment_window_ranges(
@@ -6942,6 +7235,8 @@ fn k18_hrv_rest_segment_summary(
         .collect::<Vec<_>>();
     let average_motion_intensity_0_to_1 = mean_f64(&motion_values).map(round_3);
     let max_motion_intensity_0_to_1 = motion_values.iter().copied().reduce(f64::max).map(round_3);
+    let motion_context_summary =
+        k18_segment_motion_context_summary(motion_features, window_start_ms, window_end_ms);
 
     let candidate_intervals_ms = candidate_selection
         .intervals
@@ -6988,10 +7283,8 @@ fn k18_hrv_rest_segment_summary(
     );
     let passes_k18_only_segment_quality = k18_rest_segment_passes_k18_only_quality(
         selected_by_non_oracle_rest_gate,
-        &metric_summary,
         current_segment_intervals.len(),
         candidate_selection.intervals.len(),
-        accepted_rejected_by_current_gate_interval_fraction,
         max_candidate_sample_gap_seconds,
     );
     let reference_validation_pass = k18_rest_segment_reference_validation_pass(
@@ -7006,6 +7299,66 @@ fn k18_hrv_rest_segment_summary(
         binned_mae_tolerance_ms,
         min_binned_correlation,
     );
+    let reference_label = k18_rest_segment_reference_label(
+        candidate_selection.intervals.len(),
+        reference_segment_intervals.len(),
+        reference_validation_pass,
+        &metric_summary,
+        &reference_summary,
+        &binned_comparison,
+    );
+    let k18_only_decision = k18_rest_segment_k18_only_decision(
+        selected_by_non_oracle_rest_gate,
+        passes_k18_only_segment_quality,
+        motion_values.len(),
+        average_motion_intensity_0_to_1,
+        max_motion_intensity_0_to_1,
+        current_segment_intervals.len(),
+        candidate_selection.intervals.len(),
+        max_candidate_sample_gap_seconds,
+    );
+    let timebase_audit = k18_rest_segment_timebase_audit(
+        &candidate_selection.intervals,
+        &reference_segment_intervals,
+        &binned_comparison,
+    );
+    let candidate_shape_summary = k18_segment_shape_summary(
+        &candidate_selection.intervals,
+        bin_seconds,
+        window_start_ms,
+        window_end_ms,
+    );
+    let current_gate_shape_summary = k18_segment_shape_summary(
+        &current_segment_intervals,
+        bin_seconds,
+        window_start_ms,
+        window_end_ms,
+    );
+    let row_context_summary =
+        k18_segment_row_context_summary(&window_frames, current_gated_intervals);
+    let failure_reasons = k18_rest_segment_failure_reasons(
+        selected_by_non_oracle_rest_gate,
+        passes_k18_only_segment_quality,
+        reference_validation_pass,
+        motion_values.len(),
+        average_motion_intensity_0_to_1,
+        max_motion_intensity_0_to_1,
+        current_segment_intervals.len(),
+        candidate_selection.intervals.len(),
+        reference_segment_intervals.len(),
+        max_candidate_sample_gap_seconds,
+        &timebase_audit,
+        rmssd_error_ms,
+        sdnn_error_ms,
+        mean_nn_error_ms,
+        &binned_comparison,
+        rmssd_tolerance_ms,
+        sdnn_tolerance_ms,
+        mean_nn_tolerance_ms,
+        binned_mae_tolerance_ms,
+        min_binned_correlation,
+    );
+    let primary_failure_reason = failure_reasons.first().cloned();
     let quality_flags = k18_rest_segment_quality_flags(
         selected_by_non_oracle_rest_gate,
         passes_k18_only_segment_quality,
@@ -7018,7 +7371,6 @@ fn k18_hrv_rest_segment_summary(
         reference_segment_intervals.len(),
         accepted_rejected_by_current_gate_interval_fraction,
         max_candidate_sample_gap_seconds,
-        &metric_summary,
         rmssd_error_ms,
         sdnn_error_ms,
         mean_nn_error_ms,
@@ -7039,9 +7391,14 @@ fn k18_hrv_rest_segment_summary(
         selected_by_non_oracle_rest_gate,
         passes_k18_only_segment_quality,
         reference_validation_pass,
+        reference_label,
+        k18_only_decision,
+        primary_failure_reason,
+        failure_reasons,
         motion_sample_count: motion_values.len(),
         average_motion_intensity_0_to_1,
         max_motion_intensity_0_to_1,
+        motion_context_summary,
         current_gate_interval_count: current_segment_intervals.len(),
         candidate_interval_count: candidate_selection.intervals.len(),
         reference_interval_count: reference_segment_intervals.len(),
@@ -7060,6 +7417,10 @@ fn k18_hrv_rest_segment_summary(
         mean_nn_error_ms,
         binned_comparison,
         candidate_current_binned_comparison,
+        timebase_audit,
+        row_context_summary,
+        candidate_shape_summary,
+        current_gate_shape_summary,
         quality_flags,
     })
 }
@@ -7110,30 +7471,71 @@ fn k18_rest_segment_selected_by_non_oracle_gate(
 
 fn k18_rest_segment_passes_k18_only_quality(
     selected_by_non_oracle_rest_gate: bool,
-    metric_summary: &K18HrvMetricSummary,
     current_gate_interval_count: usize,
     candidate_interval_count: usize,
-    accepted_rejected_by_current_gate_interval_fraction: Option<f64>,
     max_candidate_sample_gap_seconds: Option<f64>,
 ) -> bool {
-    let current_gate_already_covers_candidate =
-        candidate_interval_count > 0 && current_gate_interval_count >= candidate_interval_count;
-    let relaxed_gate_material = accepted_rejected_by_current_gate_interval_fraction
-        .is_some_and(|value| value >= K18_HRV_REST_SEGMENT_MIN_RELAXED_INTERVAL_FRACTION);
-
     selected_by_non_oracle_rest_gate
-        && metric_summary
-            .rmssd_ms
-            .is_some_and(|value| value >= K18_HRV_REST_SEGMENT_MIN_CANDIDATE_RMSSD_MS)
-        && metric_summary
-            .sdnn_ms
-            .is_some_and(|value| value >= K18_HRV_REST_SEGMENT_MIN_CANDIDATE_SDNN_MS)
-        && metric_summary
-            .pnn50_fraction
-            .is_some_and(|value| value >= K18_HRV_REST_SEGMENT_MIN_CANDIDATE_PNN50)
-        && (current_gate_already_covers_candidate || relaxed_gate_material)
+        && current_gate_interval_count >= K18_HRV_REST_SEGMENT_MIN_CURRENT_GATE_INTERVALS
+        && candidate_interval_count >= K18_HRV_REST_SEGMENT_MIN_CANDIDATE_INTERVALS
         && max_candidate_sample_gap_seconds
             .is_some_and(|value| value <= K18_HRV_REST_SEGMENT_MAX_CANDIDATE_GAP_SECONDS)
+}
+
+fn k18_rest_segment_reference_label(
+    candidate_interval_count: usize,
+    reference_interval_count: usize,
+    reference_validation_pass: bool,
+    metric_summary: &K18HrvMetricSummary,
+    reference_summary: &K18HrvMetricSummary,
+    binned_comparison: &Option<K18HrvBinnedComparison>,
+) -> String {
+    if candidate_interval_count < K18_HRV_REST_SEGMENT_MIN_CANDIDATE_INTERVALS
+        || reference_interval_count < K18_HRV_REST_SEGMENT_MIN_CANDIDATE_INTERVALS
+        || metric_summary.rmssd_ms.is_none()
+        || metric_summary.sdnn_ms.is_none()
+        || metric_summary.mean_nn_ms.is_none()
+        || reference_summary.rmssd_ms.is_none()
+        || reference_summary.sdnn_ms.is_none()
+        || reference_summary.mean_nn_ms.is_none()
+        || binned_comparison.is_none()
+    {
+        "unknown".to_string()
+    } else if reference_validation_pass {
+        "pass".to_string()
+    } else {
+        "fail".to_string()
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn k18_rest_segment_k18_only_decision(
+    selected_by_non_oracle_rest_gate: bool,
+    passes_k18_only_segment_quality: bool,
+    motion_sample_count: usize,
+    average_motion_intensity_0_to_1: Option<f64>,
+    max_motion_intensity_0_to_1: Option<f64>,
+    current_gate_interval_count: usize,
+    candidate_interval_count: usize,
+    max_candidate_sample_gap_seconds: Option<f64>,
+) -> String {
+    if passes_k18_only_segment_quality {
+        return "pass".to_string();
+    }
+    if motion_sample_count < K18_HRV_REST_SEGMENT_MIN_MOTION_SAMPLES
+        || average_motion_intensity_0_to_1.is_none()
+        || max_motion_intensity_0_to_1.is_none()
+        || current_gate_interval_count < K18_HRV_REST_SEGMENT_MIN_CURRENT_GATE_INTERVALS
+        || candidate_interval_count < K18_HRV_REST_SEGMENT_MIN_CANDIDATE_INTERVALS
+        || max_candidate_sample_gap_seconds.is_none()
+    {
+        return "unknown".to_string();
+    }
+    if selected_by_non_oracle_rest_gate {
+        "fail".to_string()
+    } else {
+        "reject".to_string()
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -7165,6 +7567,493 @@ fn k18_rest_segment_reference_validation_pass(
         })
 }
 
+fn k18_rest_segment_timebase_audit(
+    candidate_intervals: &[K18TimedInterval],
+    reference_intervals: &[K18TimedInterval],
+    binned_comparison: &Option<K18HrvBinnedComparison>,
+) -> K18HrvSegmentTimebaseAudit {
+    let candidate_first_ms = candidate_intervals
+        .iter()
+        .map(|interval| interval.time_unix_ms)
+        .min();
+    let candidate_last_ms = candidate_intervals
+        .iter()
+        .map(|interval| interval.time_unix_ms)
+        .max();
+    let reference_first_ms = reference_intervals
+        .iter()
+        .map(|interval| interval.time_unix_ms)
+        .min();
+    let reference_last_ms = reference_intervals
+        .iter()
+        .map(|interval| interval.time_unix_ms)
+        .max();
+    let candidate_time_span_seconds = candidate_first_ms
+        .zip(candidate_last_ms)
+        .map(|(start, end)| round_3((end - start).max(0) as f64 / 1_000.0));
+    let reference_time_span_seconds = reference_first_ms
+        .zip(reference_last_ms)
+        .map(|(start, end)| round_3((end - start).max(0) as f64 / 1_000.0));
+    let candidate_reference_start_delta_seconds = candidate_first_ms
+        .zip(reference_first_ms)
+        .map(|(candidate, reference)| round_3((candidate - reference) as f64 / 1_000.0));
+    let candidate_reference_end_delta_seconds = candidate_last_ms
+        .zip(reference_last_ms)
+        .map(|(candidate, reference)| round_3((candidate - reference) as f64 / 1_000.0));
+    let candidate_reference_interval_count_delta =
+        candidate_intervals.len() as i64 - reference_intervals.len() as i64;
+    let candidate_reference_interval_count_ratio = if reference_intervals.is_empty() {
+        None
+    } else {
+        Some(round_3(
+            candidate_intervals.len() as f64 / reference_intervals.len() as f64,
+        ))
+    };
+
+    K18HrvSegmentTimebaseAudit {
+        candidate_first_time: candidate_first_ms.map(unix_ms_to_rfc3339_utc),
+        candidate_last_time: candidate_last_ms.map(unix_ms_to_rfc3339_utc),
+        reference_first_time: reference_first_ms.map(unix_ms_to_rfc3339_utc),
+        reference_last_time: reference_last_ms.map(unix_ms_to_rfc3339_utc),
+        candidate_time_span_seconds,
+        reference_time_span_seconds,
+        candidate_reference_start_delta_seconds,
+        candidate_reference_end_delta_seconds,
+        candidate_reference_interval_count_delta,
+        candidate_reference_interval_count_ratio,
+        max_candidate_sample_gap_seconds: k18_timed_interval_max_sample_gap_seconds(
+            candidate_intervals,
+        ),
+        max_reference_sample_gap_seconds: k18_timed_interval_max_sample_gap_seconds(
+            reference_intervals,
+        ),
+        common_bin_count: binned_comparison
+            .as_ref()
+            .map(|comparison| comparison.common_bin_count)
+            .unwrap_or_default(),
+    }
+}
+
+fn k18_segment_row_context_summary(
+    frames: &[K18HrvFrameCandidate],
+    current_gated_intervals: &[K18TimedInterval],
+) -> K18HrvSegmentRowContextSummary {
+    let mut candidate_interval_count = 0usize;
+    let mut current_gate_interval_count = 0usize;
+    let mut relaxed_interval_count = 0usize;
+    let mut relaxed_with_local_context_count = 0usize;
+    let mut relaxed_without_local_context_count = 0usize;
+    let mut relaxed_locally_plausible_interval_count = 0usize;
+    let mut relaxed_short_excursion_interval_count = 0usize;
+    let mut relaxed_long_excursion_interval_count = 0usize;
+    let mut relaxed_local_abs_deltas_ms = Vec::new();
+
+    for frame in frames {
+        let Some(time_unix_ms) = frame.sample_time_unix_ms else {
+            continue;
+        };
+        let passes_current_gate = k18_hrv_frame_passes_quality_gate(frame);
+        for rr_interval_ms in frame
+            .rr_intervals_ms
+            .iter()
+            .copied()
+            .filter(|rr_interval_ms| {
+                k18_hrv_diagnostic_gate_accepts_interval(
+                    frame,
+                    *rr_interval_ms,
+                    current_gated_intervals,
+                    K18HrvDiagnosticGate::BoundedPlausible,
+                )
+            })
+        {
+            candidate_interval_count += 1;
+            if passes_current_gate {
+                current_gate_interval_count += 1;
+                continue;
+            }
+
+            relaxed_interval_count += 1;
+            let Some(local_median) = k18_local_current_gate_median_rr_ms(
+                current_gated_intervals,
+                time_unix_ms,
+                K18_HRV_DIAGNOSTIC_LOCAL_WINDOW_MS,
+                K18_HRV_DIAGNOSTIC_LOCAL_MIN_NEIGHBORS,
+            ) else {
+                relaxed_without_local_context_count += 1;
+                continue;
+            };
+
+            relaxed_with_local_context_count += 1;
+            let delta = rr_interval_ms - local_median;
+            let abs_delta = delta.abs();
+            relaxed_local_abs_deltas_ms.push(abs_delta);
+            if abs_delta <= K18_HRV_DIAGNOSTIC_LOCAL_TOLERANCE_MS {
+                relaxed_locally_plausible_interval_count += 1;
+            } else if delta < 0.0 {
+                relaxed_short_excursion_interval_count += 1;
+            } else {
+                relaxed_long_excursion_interval_count += 1;
+            }
+        }
+    }
+
+    let relaxed_interval_fraction =
+        ratio_fraction(relaxed_interval_count, candidate_interval_count).map(round_3);
+    let relaxed_locally_plausible_fraction = ratio_fraction(
+        relaxed_locally_plausible_interval_count,
+        relaxed_with_local_context_count,
+    )
+    .map(round_3);
+    let relaxed_local_abs_delta_max_ms = relaxed_local_abs_deltas_ms
+        .iter()
+        .copied()
+        .reduce(f64::max)
+        .map(round_3);
+
+    K18HrvSegmentRowContextSummary {
+        candidate_interval_count,
+        current_gate_interval_count,
+        relaxed_interval_count,
+        relaxed_interval_fraction,
+        relaxed_with_local_context_count,
+        relaxed_without_local_context_count,
+        relaxed_locally_plausible_interval_count,
+        relaxed_short_excursion_interval_count,
+        relaxed_long_excursion_interval_count,
+        relaxed_locally_plausible_fraction,
+        relaxed_local_abs_delta_median_ms: median_f64(relaxed_local_abs_deltas_ms.clone())
+            .map(round_3),
+        relaxed_local_abs_delta_p95_ms: percentile_f64(relaxed_local_abs_deltas_ms, 0.95)
+            .map(round_3),
+        relaxed_local_abs_delta_max_ms,
+    }
+}
+
+fn k18_segment_motion_context_summary(
+    motion_features: &[MotionFeature],
+    window_start_ms: i64,
+    window_end_ms: i64,
+) -> K18HrvSegmentMotionContextSummary {
+    let context_window_ms = K18_HRV_REST_SEGMENT_MOTION_CONTEXT_MS;
+    let pre_window = k18_motion_window_summary(
+        motion_features,
+        window_start_ms.saturating_sub(context_window_ms),
+        window_start_ms,
+    );
+    let first_minute = k18_motion_window_summary(
+        motion_features,
+        window_start_ms,
+        window_start_ms
+            .saturating_add(context_window_ms)
+            .min(window_end_ms),
+    );
+    let last_minute = k18_motion_window_summary(
+        motion_features,
+        window_end_ms
+            .saturating_sub(context_window_ms)
+            .max(window_start_ms),
+        window_end_ms,
+    );
+    let post_window = k18_motion_window_summary(
+        motion_features,
+        window_end_ms,
+        window_end_ms.saturating_add(context_window_ms),
+    );
+
+    let max_context_motion_intensity_0_to_1 = [
+        pre_window.max_motion_intensity_0_to_1,
+        first_minute.max_motion_intensity_0_to_1,
+        last_minute.max_motion_intensity_0_to_1,
+        post_window.max_motion_intensity_0_to_1,
+    ]
+    .into_iter()
+    .flatten()
+    .reduce(f64::max)
+    .map(round_3);
+    let start_transition_delta_0_to_1 = pre_window
+        .average_motion_intensity_0_to_1
+        .zip(first_minute.average_motion_intensity_0_to_1)
+        .map(|(pre, first)| round_3((first - pre).abs()));
+    let end_transition_delta_0_to_1 = last_minute
+        .average_motion_intensity_0_to_1
+        .zip(post_window.average_motion_intensity_0_to_1)
+        .map(|(last, post)| round_3((post - last).abs()));
+
+    K18HrvSegmentMotionContextSummary {
+        context_window_seconds: context_window_ms / 1_000,
+        pre_window,
+        first_minute,
+        last_minute,
+        post_window,
+        max_context_motion_intensity_0_to_1,
+        start_transition_delta_0_to_1,
+        end_transition_delta_0_to_1,
+    }
+}
+
+fn k18_motion_window_summary(
+    motion_features: &[MotionFeature],
+    start_ms: i64,
+    end_ms: i64,
+) -> K18HrvMotionWindowSummary {
+    let values = motion_features
+        .iter()
+        .filter_map(|feature| {
+            let time_unix_ms = feature_time_unix_ms(feature)?;
+            (time_unix_ms >= start_ms && time_unix_ms < end_ms)
+                .then_some(feature.motion_intensity_0_to_1)
+        })
+        .collect::<Vec<_>>();
+
+    K18HrvMotionWindowSummary {
+        sample_count: values.len(),
+        average_motion_intensity_0_to_1: mean_f64(&values).map(round_3),
+        max_motion_intensity_0_to_1: values.iter().copied().reduce(f64::max).map(round_3),
+    }
+}
+
+fn k18_segment_shape_summary(
+    intervals: &[K18TimedInterval],
+    bin_seconds: usize,
+    window_start_ms: i64,
+    window_end_ms: i64,
+) -> K18HrvSegmentShapeSummary {
+    let bin_ms = i64::try_from(bin_seconds)
+        .ok()
+        .and_then(|seconds| seconds.checked_mul(1_000))
+        .unwrap_or(0);
+    let bins = if bin_ms > 0 {
+        k18_interval_median_bins(intervals, bin_ms)
+    } else {
+        BTreeMap::new()
+    };
+    let bin_values = bins.values().copied().collect::<Vec<_>>();
+    let bin_steps = bin_values
+        .windows(2)
+        .filter_map(|pair| {
+            let step = pair[1] - pair[0];
+            step.is_finite().then_some(step)
+        })
+        .collect::<Vec<_>>();
+    let absolute_steps = bin_steps.iter().map(|step| step.abs()).collect::<Vec<_>>();
+    let squared_steps = bin_steps
+        .iter()
+        .map(|step| step.powi(2))
+        .collect::<Vec<_>>();
+    let interval_values = intervals
+        .iter()
+        .map(|interval| interval.rr_interval_ms)
+        .collect::<Vec<_>>();
+    let mut sample_times = intervals
+        .iter()
+        .map(|interval| interval.time_unix_ms)
+        .collect::<Vec<_>>();
+    sample_times.sort();
+    sample_times.dedup();
+    let sample_gaps_seconds = sample_times
+        .windows(2)
+        .map(|pair| (pair[1] - pair[0]).max(0) as f64 / 1_000.0)
+        .collect::<Vec<_>>();
+    let first_sample_offset_seconds = sample_times
+        .first()
+        .map(|first| round_3((*first - window_start_ms) as f64 / 1_000.0));
+    let last_sample_offset_seconds = sample_times
+        .last()
+        .map(|last| round_3((window_end_ms - *last) as f64 / 1_000.0));
+    let sample_time_span_seconds = sample_times
+        .first()
+        .zip(sample_times.last())
+        .map(|(first, last)| round_3((*last - *first).max(0) as f64 / 1_000.0));
+    let covered_window_fraction = sample_time_span_seconds.and_then(|span_seconds| {
+        let window_seconds = (window_end_ms - window_start_ms).max(0) as f64 / 1_000.0;
+        (window_seconds > 0.0).then(|| round_3((span_seconds / window_seconds).clamp(0.0, 1.0)))
+    });
+    let sample_gap_over_3s_total_seconds = if sample_gaps_seconds.is_empty() {
+        None
+    } else {
+        Some(round_3(
+            sample_gaps_seconds
+                .iter()
+                .filter(|gap| **gap > 3.0)
+                .sum::<f64>(),
+        ))
+    };
+    let mean_nn_ms = mean_f64(&interval_values);
+    let expected_interval_count_from_mean_nn = mean_nn_ms.and_then(|mean_nn_ms| {
+        if mean_nn_ms <= 0.0 {
+            None
+        } else {
+            Some(round_3(
+                (window_end_ms - window_start_ms).max(0) as f64 / mean_nn_ms,
+            ))
+        }
+    });
+    let interval_count_expected_ratio = expected_interval_count_from_mean_nn.and_then(|expected| {
+        if expected <= 0.0 {
+            None
+        } else {
+            Some(round_3(intervals.len() as f64 / expected))
+        }
+    });
+    let step_count = absolute_steps.len();
+
+    K18HrvSegmentShapeSummary {
+        bin_seconds,
+        bin_count: bins.len(),
+        interval_count: intervals.len(),
+        sample_time_count: sample_times.len(),
+        first_sample_offset_seconds,
+        last_sample_offset_seconds,
+        sample_time_span_seconds,
+        covered_window_fraction,
+        sample_gap_count: sample_gaps_seconds.len(),
+        sample_gap_median_seconds: median_f64(sample_gaps_seconds.clone()).map(round_3),
+        sample_gap_p95_seconds: percentile_f64(sample_gaps_seconds.clone(), 0.95).map(round_3),
+        sample_gap_max_seconds: sample_gaps_seconds
+            .iter()
+            .copied()
+            .reduce(f64::max)
+            .map(round_3),
+        sample_gap_over_3s_count: sample_gaps_seconds.iter().filter(|gap| **gap > 3.0).count(),
+        sample_gap_over_5s_count: sample_gaps_seconds.iter().filter(|gap| **gap > 5.0).count(),
+        sample_gap_over_10s_count: sample_gaps_seconds
+            .iter()
+            .filter(|gap| **gap > 10.0)
+            .count(),
+        sample_gap_over_30s_count: sample_gaps_seconds
+            .iter()
+            .filter(|gap| **gap > 30.0)
+            .count(),
+        sample_gap_over_3s_total_seconds,
+        expected_interval_count_from_mean_nn,
+        interval_count_expected_ratio,
+        median_bin_rr_ms: median_f64(bin_values).map(round_3),
+        bin_step_count: step_count,
+        bin_step_mean_absolute_ms: mean_f64(&absolute_steps).map(round_3),
+        bin_step_rmssd_ms: mean_f64(&squared_steps).map(|mean| round_3(mean.sqrt())),
+        bin_step_max_absolute_ms: absolute_steps.iter().copied().reduce(f64::max).map(round_3),
+        bin_step_over_50ms_fraction: (step_count > 0).then(|| {
+            round_3(
+                absolute_steps.iter().filter(|step| **step > 50.0).count() as f64
+                    / step_count as f64,
+            )
+        }),
+        bin_step_over_100ms_fraction: (step_count > 0).then(|| {
+            round_3(
+                absolute_steps.iter().filter(|step| **step > 100.0).count() as f64
+                    / step_count as f64,
+            )
+        }),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn k18_rest_segment_failure_reasons(
+    selected_by_non_oracle_rest_gate: bool,
+    passes_k18_only_segment_quality: bool,
+    reference_validation_pass: bool,
+    motion_sample_count: usize,
+    average_motion_intensity_0_to_1: Option<f64>,
+    max_motion_intensity_0_to_1: Option<f64>,
+    current_gate_interval_count: usize,
+    candidate_interval_count: usize,
+    reference_interval_count: usize,
+    max_candidate_sample_gap_seconds: Option<f64>,
+    timebase_audit: &K18HrvSegmentTimebaseAudit,
+    rmssd_error_ms: Option<f64>,
+    sdnn_error_ms: Option<f64>,
+    mean_nn_error_ms: Option<f64>,
+    binned_comparison: &Option<K18HrvBinnedComparison>,
+    rmssd_tolerance_ms: f64,
+    sdnn_tolerance_ms: f64,
+    mean_nn_tolerance_ms: f64,
+    binned_mae_tolerance_ms: f64,
+    min_binned_correlation: f64,
+) -> Vec<String> {
+    let mut reasons = Vec::new();
+    if motion_sample_count < K18_HRV_REST_SEGMENT_MIN_MOTION_SAMPLES {
+        reasons.push("motion_coverage_low".to_string());
+    }
+    if average_motion_intensity_0_to_1.is_none() || max_motion_intensity_0_to_1.is_none() {
+        reasons.push("motion_missing".to_string());
+    }
+    if average_motion_intensity_0_to_1
+        .is_some_and(|value| value > K18_HRV_REST_SEGMENT_MAX_AVG_MOTION_INTENSITY)
+        || max_motion_intensity_0_to_1
+            .is_some_and(|value| value > K18_HRV_REST_SEGMENT_MAX_PEAK_MOTION_INTENSITY)
+    {
+        reasons.push("motion_artifact".to_string());
+    }
+    if current_gate_interval_count < K18_HRV_REST_SEGMENT_MIN_CURRENT_GATE_INTERVALS {
+        reasons.push("current_gate_coverage_low".to_string());
+    }
+    if candidate_interval_count < K18_HRV_REST_SEGMENT_MIN_CANDIDATE_INTERVALS {
+        reasons.push("candidate_interval_coverage_low".to_string());
+    }
+    if reference_interval_count < K18_HRV_REST_SEGMENT_MIN_CANDIDATE_INTERVALS {
+        reasons.push("reference_overlap_low".to_string());
+    }
+    if max_candidate_sample_gap_seconds.is_none() {
+        reasons.push("candidate_gap_missing".to_string());
+    } else if max_candidate_sample_gap_seconds
+        .is_some_and(|value| value > K18_HRV_REST_SEGMENT_MAX_CANDIDATE_GAP_SECONDS)
+    {
+        reasons.push("row_dropout_or_k18_gap".to_string());
+    }
+    if timebase_audit
+        .candidate_reference_start_delta_seconds
+        .is_some_and(|value| value.abs() > K18_HRV_REST_SEGMENT_MAX_REFERENCE_EDGE_DELTA_SECONDS)
+        || timebase_audit
+            .candidate_reference_end_delta_seconds
+            .is_some_and(|value| {
+                value.abs() > K18_HRV_REST_SEGMENT_MAX_REFERENCE_EDGE_DELTA_SECONDS
+            })
+    {
+        reasons.push("alignment_drift_or_edge_mismatch".to_string());
+    }
+    if rmssd_error_ms.is_some_and(|error| error > rmssd_tolerance_ms) {
+        reasons.push("aggregate_rmssd_error".to_string());
+    }
+    if sdnn_error_ms.is_some_and(|error| error > sdnn_tolerance_ms) {
+        reasons.push("aggregate_sdnn_error".to_string());
+    }
+    if mean_nn_error_ms.is_some_and(|error| error > mean_nn_tolerance_ms) {
+        reasons.push("mean_nn_error".to_string());
+    }
+    match binned_comparison {
+        Some(comparison) => {
+            if comparison.common_bin_count < 3 {
+                reasons.push("insufficient_common_bins".to_string());
+            }
+            if comparison
+                .mean_absolute_error_ms
+                .is_some_and(|error| error > binned_mae_tolerance_ms)
+            {
+                reasons.push("binned_shape_mismatch".to_string());
+            }
+            if comparison.pearson_correlation.is_some_and(|correlation| {
+                min_binned_correlation > 0.0 && correlation < min_binned_correlation
+            }) {
+                reasons.push("binned_correlation_low".to_string());
+            }
+            if min_binned_correlation > 0.0 && comparison.pearson_correlation.is_none() {
+                reasons.push("binned_correlation_missing".to_string());
+            }
+        }
+        None => reasons.push("no_common_bins".to_string()),
+    }
+    if selected_by_non_oracle_rest_gate
+        && passes_k18_only_segment_quality
+        && reference_validation_pass
+        && reasons.is_empty()
+    {
+        reasons.push("pass".to_string());
+    }
+    reasons.sort();
+    reasons.dedup();
+    reasons
+}
+
 #[allow(clippy::too_many_arguments)]
 fn k18_rest_segment_quality_flags(
     selected_by_non_oracle_rest_gate: bool,
@@ -7178,7 +8067,6 @@ fn k18_rest_segment_quality_flags(
     reference_interval_count: usize,
     accepted_rejected_by_current_gate_interval_fraction: Option<f64>,
     max_candidate_sample_gap_seconds: Option<f64>,
-    metric_summary: &K18HrvMetricSummary,
     rmssd_error_ms: Option<f64>,
     sdnn_error_ms: Option<f64>,
     mean_nn_error_ms: Option<f64>,
@@ -7227,11 +8115,6 @@ fn k18_rest_segment_quality_flags(
     if depends_on_relaxed_intervals && accepted_rejected_by_current_gate_interval_fraction.is_none()
     {
         flags.insert("rest_segment_relaxed_interval_fraction_missing".to_string());
-    } else if depends_on_relaxed_intervals
-        && accepted_rejected_by_current_gate_interval_fraction
-            .is_some_and(|value| value < K18_HRV_REST_SEGMENT_MIN_RELAXED_INTERVAL_FRACTION)
-    {
-        flags.insert("rest_segment_relaxed_interval_fraction_low".to_string());
     }
     if max_candidate_sample_gap_seconds.is_none() {
         flags.insert("rest_segment_candidate_gap_missing".to_string());
@@ -7239,24 +8122,6 @@ fn k18_rest_segment_quality_flags(
         .is_some_and(|value| value > K18_HRV_REST_SEGMENT_MAX_CANDIDATE_GAP_SECONDS)
     {
         flags.insert("rest_segment_candidate_gap_above_threshold".to_string());
-    }
-    if metric_summary
-        .rmssd_ms
-        .is_none_or(|value| value < K18_HRV_REST_SEGMENT_MIN_CANDIDATE_RMSSD_MS)
-    {
-        flags.insert("rest_segment_candidate_rmssd_below_quality_floor".to_string());
-    }
-    if metric_summary
-        .sdnn_ms
-        .is_none_or(|value| value < K18_HRV_REST_SEGMENT_MIN_CANDIDATE_SDNN_MS)
-    {
-        flags.insert("rest_segment_candidate_sdnn_below_quality_floor".to_string());
-    }
-    if metric_summary
-        .pnn50_fraction
-        .is_none_or(|value| value < K18_HRV_REST_SEGMENT_MIN_CANDIDATE_PNN50)
-    {
-        flags.insert("rest_segment_candidate_pnn50_below_quality_floor".to_string());
     }
     if reference_interval_count < K18_HRV_REST_SEGMENT_MIN_CANDIDATE_INTERVALS {
         flags.insert("rest_segment_reference_overlap_low".to_string());
@@ -12931,6 +13796,10 @@ fn median_f64(mut values: Vec<f64>) -> Option<f64> {
     } else {
         Some(values[middle])
     }
+}
+
+fn ratio_fraction(numerator: usize, denominator: usize) -> Option<f64> {
+    (denominator > 0).then(|| numerator as f64 / denominator as f64)
 }
 
 fn percentile_f64(mut values: Vec<f64>, percentile: f64) -> Option<f64> {

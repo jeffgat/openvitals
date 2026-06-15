@@ -556,6 +556,8 @@ extension MoreDataStore {
   func runK18ExportReadinessCheck(completion: ((Bool) -> Void)? = nil) {
     guard streamProbeWindowIssueSummary() == nil else {
       k18ExportReadinessStatus = streamProbeWindowIssueSummary() ?? "Window blocked"
+      k18ExportReadinessIssues = ["stream_probe_window_invalid"]
+      k18ExportReadinessLatestLagSeconds = nil
       completion?(false)
       return
     }
@@ -563,6 +565,8 @@ extension MoreDataStore {
     k18ExportReadinessInProgress = true
     k18ExportReadinessStatus = "Checking K18 catch-up..."
     k18ExportReadinessNextActions = []
+    k18ExportReadinessIssues = []
+    k18ExportReadinessLatestLagSeconds = nil
     let databasePath = databasePath
     let start = streamProbeStart
     let end = streamProbeEnd
@@ -591,6 +595,8 @@ extension MoreDataStore {
         completion?((value["pass"] as? Bool) == true)
       case .failure(let error):
         k18ExportReadinessStatus = "K18 readiness failed: \(Self.errorSummary(error))"
+        k18ExportReadinessIssues = ["bridge_request_failed"]
+        k18ExportReadinessLatestLagSeconds = nil
         completion?(false)
       }
     }
@@ -723,6 +729,16 @@ extension MoreDataStore {
   }
 
   private func applyK18ExportReadiness(_ value: [String: Any]) {
+    k18ExportReadinessIssues = Self.stringArray(value["issues"])
+    k18ExportReadinessLatestLagSeconds = Self.firstInt(
+      value,
+      keys: [
+        "latest_quality_gated_k18_rr_sample_lag_seconds",
+        "latest_k18_rr_sample_lag_seconds",
+        "latest_k18_sample_lag_seconds",
+      ]
+    )
+
     let nextActions = value["next_actions"] as? [[String: Any]] ?? []
     k18ExportReadinessNextActions = nextActions.map { row in
       let reason = Self.firstString(row, keys: ["reason"]) ?? "next_action"
@@ -756,15 +772,39 @@ extension MoreDataStore {
     return []
   }
 
+  private static func firstInt(_ dictionary: [String: Any], keys: [String]) -> Int? {
+    for key in keys {
+      if let value = dictionary[key],
+         let intValue = intValue(value) {
+        return intValue
+      }
+    }
+    return nil
+  }
+
+  private static func intValue(_ value: Any?) -> Int? {
+    if let value = value as? Int {
+      return value
+    }
+    if let value = value as? NSNumber {
+      return value.intValue
+    }
+    if let value = value as? String {
+      return Int(value)
+    }
+    return nil
+  }
+
   static let automaticStreamProbeDuration: TimeInterval = 15 * 60
   static let automaticStreamProbeWindowPadding: TimeInterval = 30
   static let automaticStreamProbeStartRetryDelay: TimeInterval = 1
-  static let automaticStreamProbeK18CatchUpTimeout: TimeInterval = 10 * 60
+  static let automaticStreamProbeK18CatchUpBaseTimeout: TimeInterval = 10 * 60
+  static let automaticStreamProbeK18CatchUpExtendedTimeout: TimeInterval = 25 * 60
   static let automaticStreamProbeK18CatchUpPollDelay: TimeInterval = 15
   static let automaticStreamProbeBandCaptureFailSafePadding: TimeInterval = 60
   static var automaticStreamProbeBandCaptureFailSafeDuration: TimeInterval {
     automaticStreamProbeDuration
-      + automaticStreamProbeK18CatchUpTimeout
+      + automaticStreamProbeK18CatchUpExtendedTimeout
       + automaticStreamProbeBandCaptureFailSafePadding
   }
   static let guidedReferenceProbePollDelay: TimeInterval = 1
@@ -896,6 +936,8 @@ extension MoreDataStore {
     beatEvidenceStatus = "No beat evidence report"
     localExportURL = nil
     localExportManifestURL = nil
+    k18ExportReadinessIssues = []
+    k18ExportReadinessLatestLagSeconds = nil
 
     refreshStreamProbePlan()
 
@@ -1047,11 +1089,14 @@ extension MoreDataStore {
       automaticStreamProbeStatus = "Band capture already stopped. Ready to create export bundle."
       return
     }
-    if Date().timeIntervalSince(startedAt) > Self.automaticStreamProbeK18CatchUpTimeout {
+    let elapsed = Date().timeIntervalSince(startedAt)
+    let timeout = automaticStreamProbeK18CatchUpTimeoutForCurrentReadiness()
+    if elapsed > timeout {
+      let timeoutMinutes = Int((timeout / 60).rounded())
       stopAutomaticStreamProbeBandCapture(
         model: model,
         reason: "k18_catch_up_timeout",
-        finalStatus: "K18 catch-up timed out. Export is available with readiness warning.",
+        finalStatus: "K18 catch-up timed out after \(timeoutMinutes) min. Export is available with readiness warning.",
         updateProbeWindowEnd: false
       )
       return
@@ -1075,7 +1120,10 @@ extension MoreDataStore {
         return
       }
 
-      self.automaticStreamProbeStatus = "K18 catch-up pending. \(self.k18ExportReadinessStatus)"
+      let nextTimeout = self.automaticStreamProbeK18CatchUpTimeoutForCurrentReadiness()
+      let remaining = max(0, nextTimeout - Date().timeIntervalSince(startedAt))
+      let waitText = self.automaticStreamProbeK18WaitText(remaining)
+      self.automaticStreamProbeStatus = "K18 catch-up pending. \(self.k18ExportReadinessStatus) \(waitText)"
       let workItem = DispatchWorkItem { [weak self, weak model] in
         guard let self, let model else {
           return
@@ -1085,6 +1133,37 @@ extension MoreDataStore {
       self.automaticStreamProbeCatchUpWorkItem = workItem
       DispatchQueue.main.asyncAfter(deadline: .now() + Self.automaticStreamProbeK18CatchUpPollDelay, execute: workItem)
     }
+  }
+
+  private func automaticStreamProbeK18CatchUpTimeoutForCurrentReadiness() -> TimeInterval {
+    k18ExportReadinessCanContinueWaiting
+      ? Self.automaticStreamProbeK18CatchUpExtendedTimeout
+      : Self.automaticStreamProbeK18CatchUpBaseTimeout
+  }
+
+  private var k18ExportReadinessCanContinueWaiting: Bool {
+    guard !k18ExportReadinessIssues.isEmpty else {
+      return false
+    }
+    let waitableIssues: Set<String> = [
+      "k18_sample_time_behind_target",
+      "quality_gated_k18_rr_sample_time_behind_target",
+      "not_enough_k18_rr_frames_observed",
+      "not_enough_quality_gated_k18_rr_intervals_observed",
+      "no_k18_frames_observed",
+      "no_k18_sample_time_observed",
+      "no_k18_rr_sample_time_observed",
+      "no_quality_gated_k18_rr_sample_time_observed",
+    ]
+    return k18ExportReadinessIssues.allSatisfy { waitableIssues.contains($0) }
+  }
+
+  private func automaticStreamProbeK18WaitText(_ remaining: TimeInterval) -> String {
+    let minutes = max(0, Int(ceil(remaining / 60)))
+    if k18ExportReadinessCanContinueWaiting {
+      return "Waiting up to \(minutes) more min because K18 evidence is still catching up."
+    }
+    return "Timing out in \(minutes) min if readiness stays blocked."
   }
 
   private func stopAutomaticStreamProbeBandCapture(
@@ -1358,6 +1437,90 @@ struct MoreStreamProbePlanView: View {
         if let localExportManifestURL = store.localExportManifestURL {
           ShareLink(item: localExportManifestURL) {
             Label("AirDrop Manifest", systemImage: "list.bullet.rectangle")
+          }
+        }
+      }
+
+      Section("Bedtime Export") {
+        MoreInfoRow(
+          title: "Guard",
+          value: model.overnightGuardStatus,
+          systemImage: "moon",
+          status: bedtimeGuardStatus
+        )
+        MoreInfoRow(
+          title: "Readiness",
+          value: model.overnightGuardReadinessSummary,
+          systemImage: "bed.double",
+          status: bedtimeReadinessStatus
+        )
+        MoreInfoRow(
+          title: "Targets",
+          value: model.overnightGuardTargetSummary,
+          systemImage: "scope",
+          status: bedtimeTargetStatus
+        )
+        MoreInfoRow(
+          title: "Spool",
+          value: "\(model.overnightGuardSpoolSizeSummary) | \(model.overnightGuardSpoolPath)",
+          systemImage: "folder",
+          status: model.overnightGuardSpoolPath == "No overnight spool" ? .pending : .ready
+        )
+        MoreInfoRow(
+          title: "Final Export",
+          value: model.overnightGuardExportStatus,
+          systemImage: "square.and.arrow.up",
+          status: bedtimeExportStatus
+        )
+        MoreActionRow(
+          title: "Start Bedtime Guard",
+          detail: bedtimeStartDetail,
+          systemImage: "moon.stars",
+          status: bedtimeStartStatus,
+          disabled: bedtimeStartDisabled
+        ) {
+          model.startLeanOvernightGuard()
+        }
+        MoreActionRow(
+          title: "Final Sync + Export",
+          detail: bedtimeFinalSyncDetail,
+          systemImage: "arrow.triangle.2.circlepath",
+          status: bedtimeFinalSyncStatus,
+          disabled: bedtimeFinalSyncDisabled
+        ) {
+          model.requestOvernightGuardFinalSync()
+        }
+        if model.overnightGuardCanExportLastSession {
+          MoreActionRow(
+            title: "Export Last Bedtime Guard",
+            detail: bedtimeExportLastDetail,
+            systemImage: "externaldrive.badge.plus",
+            status: bedtimeExportStatus,
+            disabled: bedtimeExportLastDisabled
+          ) {
+            model.exportLastOvernightGuardBundle()
+          }
+        }
+        MoreActionRow(
+          title: "Stop Bedtime Guard",
+          detail: "Stops collection without final sync. Use only when you do not want the morning historical drain.",
+          systemImage: "stop.circle",
+          status: model.overnightGuardActive ? .stale : .notRun,
+          disabled: !model.overnightGuardActive || model.overnightGuardExportInProgress
+        ) {
+          model.stopOvernightGuard()
+        }
+        if model.overnightGuardExportInProgress {
+          ProgressView("Saving bedtime bundle")
+        }
+        if let exportURL = model.overnightGuardExportURL {
+          ShareLink(item: exportURL) {
+            Label("AirDrop Bedtime Bundle", systemImage: "square.and.arrow.up")
+          }
+        }
+        if let exportManifestURL = model.overnightGuardExportManifestURL {
+          ShareLink(item: exportManifestURL) {
+            Label("AirDrop Bedtime Manifest", systemImage: "list.bullet.rectangle")
           }
         }
       }
@@ -1637,6 +1800,152 @@ struct MoreStreamProbePlanView: View {
       return .ready
     }
     return .notRun
+  }
+
+  private var bedtimeGuardStatus: MoreStatusKind {
+    if model.overnightGuardActive {
+      return .listening
+    }
+    if model.overnightGuardExportURL != nil {
+      return .ready
+    }
+    if model.overnightGuardCanExportLastSession {
+      return .pending
+    }
+    if model.overnightGuardStatus.localizedCaseInsensitiveContains("failed")
+      || model.overnightGuardStatus.localizedCaseInsensitiveContains("blocked") {
+      return .blocked
+    }
+    if model.ble.connectionState != "ready" {
+      return .blocked
+    }
+    return .notRun
+  }
+
+  private var bedtimeReadinessStatus: MoreStatusKind {
+    switch model.overnightGuardReadinessStatus {
+    case "ready":
+      return .ready
+    case "blocked":
+      return .blocked
+    case "unavailable":
+      return .unavailable
+    case "stale":
+      return .stale
+    default:
+      return .pending
+    }
+  }
+
+  private var bedtimeTargetStatus: MoreStatusKind {
+    model.overnightGuardTargetSummary.contains("K18 0 | K24 0 | K25 0 | K26 0 | packet47 0 | event17 0 | event29 0 | metadata49 0 | metadata56 0") ? .pending : .ready
+  }
+
+  private var bedtimeExportStatus: MoreStatusKind {
+    if model.overnightGuardExportInProgress {
+      return .inProgress
+    }
+    if model.overnightGuardExportStatus.localizedCaseInsensitiveContains("failed")
+      || model.overnightGuardExportStatus.localizedCaseInsensitiveContains("issue")
+      || model.overnightGuardExportStatus.localizedCaseInsensitiveContains("missing") {
+      return .stale
+    }
+    return model.overnightGuardExportURL == nil ? .pending : .ready
+  }
+
+  private var bedtimeStartStatus: MoreStatusKind {
+    if model.overnightGuardActive {
+      return .listening
+    }
+    if bedtimeStartDisabled {
+      return .blocked
+    }
+    return .ready
+  }
+
+  private var bedtimeStartDisabled: Bool {
+    model.overnightGuardActive
+      || model.ble.connectionState != "ready"
+      || store.automaticStreamProbeInProgress
+      || store.guidedReferenceProbeInProgress
+      || store.localExportInProgress
+      || model.overnightGuardExportInProgress
+  }
+
+  private var bedtimeStartDetail: String {
+    if model.overnightGuardActive {
+      return "Guard is recording. In the morning, run Final Sync + Export before opening other device apps."
+    }
+    if model.ble.connectionState != "ready" {
+      return "Connect the device before starting bedtime collection."
+    }
+    if store.automaticStreamProbeInProgress || store.guidedReferenceProbeInProgress {
+      return "Wait for the active probe to finish before starting bedtime collection."
+    }
+    if store.localExportInProgress || model.overnightGuardExportInProgress {
+      return "Wait for the current export to finish before starting bedtime collection."
+    }
+    return "Starts the lean guard for tonight: raw spool, range polls, watchdog, and final sync/export without the heavy decoded packet capture."
+  }
+
+  private var bedtimeFinalSyncStatus: MoreStatusKind {
+    if model.overnightGuardExportInProgress {
+      return .inProgress
+    }
+    if !model.overnightGuardActive {
+      return model.overnightGuardExportURL == nil ? .notRun : .ready
+    }
+    return model.ble.canSyncHistorical ? .ready : .blocked
+  }
+
+  private var bedtimeFinalSyncDisabled: Bool {
+    !model.overnightGuardActive
+      || model.ble.isHistoricalSyncing
+      || !model.ble.canSyncHistorical
+      || model.overnightGuardExportInProgress
+      || store.localExportInProgress
+  }
+
+  private var bedtimeFinalSyncDetail: String {
+    if model.overnightGuardExportInProgress {
+      return model.overnightGuardExportStatus
+    }
+    if model.overnightGuardActive {
+      if model.ble.isHistoricalSyncing {
+        return "Historical sync is already running. Keep the app open until the final bundle appears."
+      }
+      if !model.ble.canSyncHistorical {
+        return "Final sync blocked: \(model.ble.historicalSyncStatus)"
+      }
+      return "Morning action: pauses live capture, drains historical data, then creates the bedtime-scoped bundle."
+    }
+    if model.overnightGuardExportURL != nil {
+      return "Bundle ready. Share the bedtime bundle and manifest below."
+    }
+    if model.overnightGuardCanExportLastSession {
+      return "Guard is stopped. Use Export Last Bedtime Guard to package the stored evidence."
+    }
+    return "Available while Bedtime Guard is recording."
+  }
+
+  private var bedtimeExportLastDisabled: Bool {
+    model.overnightGuardActive
+      || model.overnightGuardExportInProgress
+      || store.localExportInProgress
+      || !model.overnightGuardCanExportLastSession
+  }
+
+  private var bedtimeExportLastDetail: String {
+    if model.overnightGuardExportInProgress {
+      return model.overnightGuardExportStatus
+    }
+    if model.overnightGuardActive {
+      return "Run Final Sync + Export while the guard is active."
+    }
+    if model.overnightGuardExportURL != nil {
+      return "Rebuilds the latest bedtime-scoped bundle if you need a fresh share file."
+    }
+    return "Packages the latest stopped or recovered bedtime guard session."
   }
 
   private var guidedProbeStatus: MoreStatusKind {
