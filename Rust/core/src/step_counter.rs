@@ -5,13 +5,15 @@ use serde_json::{Value, json};
 
 use crate::{
     OpenVitalsError, OpenVitalsResult,
+    protocol::{DeviceType, ParsedFrame, parse_frame_hex},
     step_discovery::{
         StepPacketDiscoveryCandidate, StepPacketDiscoveryOptions, StepPacketDiscoveryReport,
-        run_step_packet_discovery_for_store,
+        run_step_packet_discovery,
     },
     store::{
-        DailyActivityMetricInput, HourlyActivityMetricInput, MetricProvenanceInput,
-        OpenVitalsStore, StepCounterSampleInput, StepCounterSampleRow,
+        DailyActivityMetricInput, DecodedFrameRow, HourlyActivityMetricInput,
+        MetricProvenanceInput, OpenVitalsStore, RawEvidenceRow, StepCounterSampleInput,
+        StepCounterSampleRow,
     },
 };
 
@@ -27,6 +29,8 @@ pub const OPENVITALS_STEPS_DEVICE_COUNTER_V0_VERSION: &str = "0.1.0";
 pub const OPENVITALS_ACTIVITY_UNAVAILABLE_STATUS_V0_ID: &str =
     "open_vitals.activity.unavailable_status.v0";
 pub const OPENVITALS_ACTIVITY_UNAVAILABLE_STATUS_V0_VERSION: &str = "0.1.0";
+const STEP_COUNTER_U16_WRAP: i64 = 65_536;
+const MAX_STEP_COUNTER_SEGMENT_DELTA: i64 = 30_000;
 
 #[derive(Debug, Clone, Copy)]
 pub struct StepCounterIngestOptions {
@@ -230,8 +234,9 @@ pub fn run_step_counter_ingest_for_store(
     end: &str,
     options: StepCounterIngestOptions,
 ) -> OpenVitalsResult<StepCounterIngestReport> {
-    let discovery = run_step_packet_discovery_for_store(
-        store,
+    let decoded_rows = store.decoded_frames_between(start, end)?;
+    let discovery = run_step_packet_discovery(
+        &decoded_rows,
         database_path,
         start,
         end,
@@ -239,6 +244,30 @@ pub fn run_step_counter_ingest_for_store(
             max_candidate_fields: options.max_candidate_fields,
         },
     )?;
+    let discovery = if discovery.explicit_step_counter_found {
+        discovery
+    } else {
+        let reparsed_rows =
+            reparse_raw_evidence_for_step_discovery(store, start, end, &decoded_rows)?;
+        if reparsed_rows.is_empty() {
+            discovery
+        } else {
+            let reparsed_discovery = run_step_packet_discovery(
+                &reparsed_rows,
+                database_path,
+                start,
+                end,
+                StepPacketDiscoveryOptions {
+                    max_candidate_fields: options.max_candidate_fields,
+                },
+            )?;
+            if reparsed_discovery.explicit_step_counter_found {
+                reparsed_discovery
+            } else {
+                discovery
+            }
+        }
+    };
     persist_step_counter_discovery(store, database_path, start, end, discovery)
 }
 
@@ -389,6 +418,90 @@ pub fn persist_step_counter_discovery(
         issues,
         next_actions,
     })
+}
+
+fn reparse_raw_evidence_for_step_discovery(
+    store: &OpenVitalsStore,
+    start: &str,
+    end: &str,
+    decoded_rows: &[DecodedFrameRow],
+) -> OpenVitalsResult<Vec<DecodedFrameRow>> {
+    let decoded_by_evidence = decoded_rows
+        .iter()
+        .map(|row| (row.evidence_id.clone(), row))
+        .collect::<BTreeMap<_, _>>();
+    let raw_rows = store.raw_evidence_between(start, end)?;
+    let mut reparsed_rows = Vec::new();
+    for raw in raw_rows {
+        if raw.payload_hex.trim().is_empty() {
+            continue;
+        }
+        let device_type = decoded_by_evidence
+            .get(&raw.evidence_id)
+            .and_then(|row| device_type_from_store_value(&row.device_type))
+            .unwrap_or(DeviceType::OpenVitals);
+        let Ok(parsed) = parse_frame_hex(device_type, &raw.payload_hex) else {
+            continue;
+        };
+        let frame_id = decoded_by_evidence
+            .get(&raw.evidence_id)
+            .map(|row| row.frame_id.clone())
+            .unwrap_or_else(|| format!("{}.step-counter-reparse", raw.evidence_id));
+        reparsed_rows.push(decoded_row_from_reparsed_raw(&raw, &parsed, frame_id)?);
+    }
+    Ok(reparsed_rows)
+}
+
+fn decoded_row_from_reparsed_raw(
+    raw: &RawEvidenceRow,
+    parsed: &ParsedFrame,
+    frame_id: String,
+) -> OpenVitalsResult<DecodedFrameRow> {
+    let parsed_payload_json = serde_json::to_string(&parsed.parsed_payload).map_err(|error| {
+        OpenVitalsError::message(format!("cannot serialize reparsed payload: {error}"))
+    })?;
+    let warnings_json = serde_json::to_string(&parsed.warnings).map_err(|error| {
+        OpenVitalsError::message(format!("cannot serialize reparsed warnings: {error}"))
+    })?;
+    Ok(DecodedFrameRow {
+        frame_id,
+        evidence_id: raw.evidence_id.clone(),
+        captured_at: raw.captured_at.clone(),
+        device_type: device_type_name(parsed.device_type).to_string(),
+        raw_len: parsed.raw_len as i64,
+        header_len: parsed.header_len as i64,
+        declared_len: parsed.declared_len as i64,
+        payload_hex: parsed.payload_hex.clone(),
+        payload_crc_hex: parsed.payload_crc_hex.clone(),
+        header_crc_valid: parsed.header_crc_valid,
+        payload_crc_valid: parsed.payload_crc_valid,
+        packet_type: parsed.packet_type.map(i64::from),
+        packet_type_name: parsed.packet_type_name.clone(),
+        sequence: parsed.sequence.map(i64::from),
+        command_or_event: parsed.command_or_event.map(i64::from),
+        parsed_payload_json,
+        parser_version: "open-vitals-core/step-counter-raw-reparse-v1".to_string(),
+        warnings_json,
+    })
+}
+
+fn device_type_from_store_value(value: &str) -> Option<DeviceType> {
+    match value.trim().to_ascii_uppercase().as_str() {
+        "GEN4" => Some(DeviceType::Gen4),
+        "MAVERICK" => Some(DeviceType::Maverick),
+        "PUFFIN" => Some(DeviceType::Puffin),
+        "OPENVITALS" | "OPEN_VITALS" => Some(DeviceType::OpenVitals),
+        _ => None,
+    }
+}
+
+fn device_type_name(device_type: DeviceType) -> &'static str {
+    match device_type {
+        DeviceType::Gen4 => "GEN4",
+        DeviceType::Maverick => "MAVERICK",
+        DeviceType::Puffin => "PUFFIN",
+        DeviceType::OpenVitals => "OPENVITALS",
+    }
 }
 
 pub fn rollup_device_step_counter_day(
@@ -931,14 +1044,28 @@ fn summarize_step_counter_segments(samples: &[StepCounterSampleRow]) -> StepSegm
             }
             continue;
         }
-        if current.counter_value >= previous.counter_value {
-            summary.steps += current.counter_value - previous.counter_value;
-            summary.usable_segment_count += 1;
+        let raw_delta = current.counter_value - previous.counter_value;
+        let corrected_delta = if raw_delta >= 0 {
+            raw_delta
         } else {
+            summary
+                .quality_flags
+                .insert("counter_u16_wrap_detected".to_string());
+            raw_delta + STEP_COUNTER_U16_WRAP
+        };
+        if (1..=MAX_STEP_COUNTER_SEGMENT_DELTA).contains(&corrected_delta) {
+            summary.steps += corrected_delta;
+            summary.usable_segment_count += 1;
+        } else if corrected_delta > MAX_STEP_COUNTER_SEGMENT_DELTA {
             summary.reset_count += 1;
             summary
                 .quality_flags
-                .insert("counter_reset_detected".to_string());
+                .insert("implausible_counter_delta_dropped".to_string());
+            if raw_delta < 0 {
+                summary
+                    .quality_flags
+                    .insert("counter_reset_detected".to_string());
+            }
         }
     }
 

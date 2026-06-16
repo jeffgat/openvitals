@@ -12,11 +12,11 @@ use open_vitals_core::{
     metrics::{built_in_algorithm_definitions, built_in_default_algorithm_preferences},
     protocol::{DeviceType, parse_frame_hex},
     store::{
-        ActivityIntervalInput, ActivityLabelInput, ActivityMetricInput, ActivitySessionInput,
-        AlgorithmPreferenceRecord, CURRENT_SCHEMA_VERSION, CalibrationLabelInput,
-        CaptureSessionInput, CommandValidationRecord, DailyActivityMetricInput,
-        DailyRecoveryMetricInput, DebugCommandRow, DebugEventRow, DebugSessionRow,
-        DecodedFrameInput, ExternalSleepSessionInput, ExternalSleepStageInput,
+        ActivityIntervalInput, ActivityLabelInput, ActivityMetricInput, ActivityMotionFeatureInput,
+        ActivitySessionInput, AlgorithmPreferenceRecord, CURRENT_SCHEMA_VERSION,
+        CalibrationLabelInput, CaptureSessionInput, CommandValidationRecord,
+        DailyActivityMetricInput, DailyRecoveryMetricInput, DebugCommandRow, DebugEventRow,
+        DebugSessionRow, DecodedFrameInput, ExternalSleepSessionInput, ExternalSleepStageInput,
         HourlyActivityMetricInput, MetricDebugFeatureInput, MetricProvenanceInput, OpenVitalsStore,
         RawEvidenceInput, StepCounterSampleInput,
     },
@@ -861,6 +861,66 @@ fn activity_storage_round_trips_generic_sessions_metrics_intervals_and_labels() 
                 "activity-session-1",
                 1_770_001_100_000,
                 1_770_001_300_000,
+            )
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let motion_window = ActivityMotionFeatureInput {
+        feature_id: "motion-window-1",
+        activity_session_id: "activity-session-1",
+        capture_session_id: None,
+        start_time_unix_ms: 1_770_000_000_000,
+        end_time_unix_ms: 1_770_000_010_000,
+        sequence: 0,
+        movement_packet_count: 4,
+        source_frame_count: 2,
+        source_frame_ids_json: r#"["frame-1","frame-2"]"#,
+        source_evidence_ids_json: r#"["evidence-1","evidence-2"]"#,
+        mean_motion_intensity: 0.24,
+        peak_motion_intensity: 0.62,
+        mean_accelerometer_vector_intensity: Some(0.18),
+        peak_accelerometer_peak_range: Some(1200.0),
+        mean_gyroscope_peak_range: Some(88.0),
+        peak_gyroscope_peak_range: Some(140.0),
+        stillness_ratio: 0.25,
+        average_heart_rate_bpm: Some(145.0),
+        max_heart_rate_bpm: Some(152.0),
+        heart_rate_sample_count: 4,
+        dominant_hr_zone: Some(4),
+        gps_pace_seconds_per_km: Some(330.0),
+        gps_speed_mps: Some(3.03),
+        cadence_spm_candidate: None,
+        quality_flags_json: r#"["cadence_unavailable"]"#,
+        provenance_json: r#"{"source":"ios.live_activity","window_seconds":10}"#,
+    };
+    assert!(
+        store
+            .insert_activity_motion_features(&[motion_window.clone()])
+            .unwrap()
+            .0
+            == 1
+    );
+    assert_eq!(
+        store
+            .insert_activity_motion_features(&[motion_window])
+            .unwrap(),
+        (0, 1)
+    );
+    let saved_window = store
+        .activity_motion_features_for_session("activity-session-1")
+        .unwrap();
+    assert_eq!(saved_window.len(), 1);
+    assert_eq!(saved_window[0].movement_packet_count, 4);
+    assert_eq!(saved_window[0].source_frame_count, 2);
+    assert_eq!(saved_window[0].dominant_hr_zone, Some(4));
+    assert_eq!(
+        store
+            .activity_motion_features_for_session_in_window(
+                "activity-session-1",
+                1_770_000_005_000,
+                1_770_000_015_000,
             )
             .unwrap()
             .len(),

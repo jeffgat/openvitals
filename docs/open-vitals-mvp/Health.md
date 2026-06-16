@@ -75,6 +75,7 @@ Swift evidence 2026-06-01: `HealthView.swift`, `AppRouter.swift`, `xcodebuildmcp
 - [x] Apply the 2026-06-14 score audit to strain scoring: score components are normalized to 0-100 before the 0-21 output scale, and results expose cardiovascular-only strain type, confidence, HR-zone load, top-5-minute HR reserve, missing inputs, component scores, and weights.
 - [x] Run daily strain scoring against the selected local-day window and keep stale persisted strain runs out of Health/Home surfaces.
 - [x] Expose decoded health-packet evidence bounds through the Rust bridge so Home can align Daily Scores to the latest packet-evidence day before running selected-day Strain.
+- [x] Store live workout motion feature windows in Rust `activity_motion_features`: per 10-second window activity session id, capture session id, source frame/evidence ids, motion intensity, accelerometer/gyroscope summaries, stillness, HR, GPS pace, nullable cadence candidate, quality flags, and provenance.
 - [x] Add Stress score row from `stressFeatureScoreSummary()`.
 - [x] Add provenance for sleep, recovery, strain, and stress via `packetScoreProvenanceSummary(family)`.
 - [x] Add Next Action row from `packetDerivedScoreNextActionSummary()`.

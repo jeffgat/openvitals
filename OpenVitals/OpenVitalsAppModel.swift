@@ -24,6 +24,19 @@ final class OpenVitalsAppModel: ObservableObject {
   @Published var healthPacketCaptureTargetSummary = "No health packet capture"
   @Published var healthPacketCaptureLastPacketSummary = "No packets captured"
   @Published var healthPacketCaptureFamilyRows: [HealthPacketCaptureFamily] = []
+  @Published var mobileCaptureStreamEnabled = UserDefaults.standard.bool(forKey: OpenVitalsAppModel.mobileCaptureStreamEnabledDefaultsKey)
+  @Published var mobileCaptureStreamEndpoint = OpenVitalsAppModel.initialMobileCaptureStreamEndpoint()
+  @Published var mobileCaptureStreamToken = OpenVitalsAppModel.initialMobileCaptureStreamToken()
+  @Published var mobileCaptureStreamStatus = "Mac stream disabled"
+  @Published var mobileCaptureStreamAcceptedFrameCount = 0
+  @Published var mobileCaptureStreamDroppedFrameCount = 0
+  @Published var mobileCaptureStreamSentFrameCount = 0
+  @Published var mobileCaptureStreamImportedFrameCount = 0
+  @Published var mobileCaptureStreamExistingFrameCount = 0
+  @Published var mobileCaptureStreamRawInsertedCount = 0
+  @Published var mobileCaptureStreamRawExistingCount = 0
+  @Published var mobileCaptureStreamQueuedFrameCount = 0
+  var overnightGuardMobileStreamAcceptedFrameCount = 0
   @Published var dailyMetricSyncStatus = "No daily metric sync"
   @Published var respiratoryPacketWatchActive = false
   @Published var respiratoryPacketWatchStatus = "Not watching K18 respiratory history"
@@ -88,6 +101,10 @@ final class OpenVitalsAppModel: ObservableObject {
     maxQueuedRows: OpenVitalsAppModel.captureFrameWriteQueueMaxRows,
     maxBatchRows: OpenVitalsAppModel.captureFrameWriteBatchMaxRows
   )
+  let mobileCaptureStreamQueue = MobileCaptureStreamQueue(
+    maxQueuedRows: OpenVitalsAppModel.mobileCaptureStreamQueueMaxRows,
+    maxBatchRows: OpenVitalsAppModel.mobileCaptureStreamBatchMaxRows
+  )
   let captureFrameEnqueueAggregator = CaptureFrameEnqueueAggregator(
     publishInterval: OpenVitalsAppModel.captureFrameEnqueuePublishInterval
   )
@@ -127,11 +144,13 @@ final class OpenVitalsAppModel: ObservableObject {
   var packetImportRevisionWorkItem: DispatchWorkItem?
   var healthPacketCaptureTimeoutWorkItem: DispatchWorkItem?
   var healthPacketCaptureStreamRetryWorkItem: DispatchWorkItem?
+  var healthPacketCaptureReconnectWorkItem: DispatchWorkItem?
   var healthPacketCaptureUIUpdateWorkItem: DispatchWorkItem?
   var respiratoryPacketWatchTimeoutWorkItem: DispatchWorkItem?
   var autoStartRespiratoryPacketWatchWorkItem: DispatchWorkItem?
   var temperatureHistorySyncWorkItem: DispatchWorkItem?
   var healthPacketCaptureStreamRetryAttempt = 0
+  var healthPacketCaptureStaleReconnectAttempt = 0
   var autoStartHealthPacketCaptureWorkItem: DispatchWorkItem?
   var autoStartHealthPacketCaptureAttempt = 0
   var autoStartRespiratoryPacketWatchAttempt = 0
@@ -296,9 +315,24 @@ final class OpenVitalsAppModel: ObservableObject {
   static let captureFrameEnqueuePublishInterval: TimeInterval = 1
   static let captureFrameWriteQueueMaxRows = 2048
   static let captureFrameWriteBatchMaxRows = 128
+  static let mobileCaptureStreamEnabledDefaultsKey = "openvitals.mobile_capture_stream.enabled"
+  static let mobileCaptureStreamEndpointDefaultsKey = "openvitals.mobile_capture_stream.endpoint"
+  static let mobileCaptureStreamTokenDefaultsKey = "openvitals.mobile_capture_stream.token"
+  static let defaultMobileCaptureStreamEndpoint = "http://100.125.118.61:8765/v1/mobile/frame-batch"
+  static let legacyMobileCaptureStreamEndpoint = "http://m4.tail5f467f.ts.net:8765/v1/mobile/frame-batch"
+  static let defaultMobileCaptureStreamToken = "openvitals-local-ingest"
+  static let mobileCaptureStreamQueueMaxRows = 16_384
+  static let mobileCaptureStreamBatchMaxRows = 1_000
+  static let mobileCaptureStreamLongCaptureDuration: TimeInterval = 12 * 60 * 60
+  static let healthPacketCaptureStaleReconnectRetryAttempt = 3
+  static let healthPacketCaptureMaxStaleReconnects = 1
   static let dailyMetricSyncCaptureSource = "home.daily_scores.sync"
   static let automaticHistoricalSyncCaptureSource = "auto.historical_sync.import"
-  static let automaticHistoricalSyncCaptureDuration: TimeInterval = 3 * 60
+  static let historicalCatchUpCaptureDuration: TimeInterval = 20 * 60
+  static let dailyMetricHistoricalCatchUpRounds = 6
+  static let automaticHistoricalCatchUpRounds = 6
+  static let overnightFinalHistoricalCatchUpRounds = 18
+  static let automaticHistoricalSyncCaptureDuration: TimeInterval = historicalCatchUpCaptureDuration
   static let passiveActivityCaptureDuration: TimeInterval = 12 * 60 * 60
   static let movementPacketStatusInterval: TimeInterval = 1
   static let movementPacketLogInterval: TimeInterval = 5
@@ -327,6 +361,26 @@ final class OpenVitalsAppModel: ObservableObject {
   static let overnightGuardFreeSpaceCriticalBytes: Int64 = 1 * 1024 * 1024 * 1024
   static let overnightGuardSpoolWarningBytes: Int64 = 256 * 1024 * 1024
   static let overnightGuardSpoolHardLimitBytes: Int64 = 750 * 1024 * 1024
+
+  static func initialMobileCaptureStreamEndpoint() -> String {
+    let stored = UserDefaults.standard
+      .string(forKey: mobileCaptureStreamEndpointDefaultsKey)?
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let stored, !stored.isEmpty else {
+      return defaultMobileCaptureStreamEndpoint
+    }
+    if stored == legacyMobileCaptureStreamEndpoint || stored.hasPrefix("http://m4.tail5f467f.ts.net:8765/") {
+      return defaultMobileCaptureStreamEndpoint
+    }
+    return stored
+  }
+
+  static func initialMobileCaptureStreamToken() -> String {
+    let stored = UserDefaults.standard
+      .string(forKey: mobileCaptureStreamTokenDefaultsKey)?
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    return stored?.isEmpty == false ? stored! : defaultMobileCaptureStreamToken
+  }
 
   init(startBLE: Bool = true) {
     ble = OpenVitalsBLEClient(startCentral: startBLE)
@@ -367,6 +421,11 @@ final class OpenVitalsAppModel: ObservableObject {
     captureFrameEnqueueAggregator.onSnapshot = { [weak self] snapshot in
       Task { @MainActor in
         self?.applyCaptureFrameEnqueueSnapshot(snapshot)
+      }
+    }
+    mobileCaptureStreamQueue.onResult = { [weak self] result in
+      DispatchQueue.main.async { [weak self] in
+        self?.handleMobileCaptureStreamResult(result)
       }
     }
     passiveActivityDetectionPipeline.onEvents = { [weak self] events in
@@ -429,6 +488,7 @@ final class OpenVitalsAppModel: ObservableObject {
       self?.persistOvernightEventLog(message)
     }
     refreshHeartRateHourlyRanges()
+    configureMobileCaptureStreamQueue()
     ble.record(source: "app", title: "model.init")
     prepareClientHello()
     cleanupOrphanedActivityCaptureSessions()
@@ -450,6 +510,7 @@ final class OpenVitalsAppModel: ObservableObject {
     temperatureHistorySyncWorkItem?.cancel()
     autoStartHealthPacketCaptureWorkItem?.cancel()
     passiveActivityCaptureWorkItem?.cancel()
+    mobileCaptureStreamQueue.cancelPending()
     overnightGuardHeartbeatWorkItem?.cancel()
     overnightGuardRangePollWorkItem?.cancel()
     overnightGuardFinalSyncDrainWorkItem?.cancel()

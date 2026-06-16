@@ -16,6 +16,8 @@ struct MovementPacketSample {
   let motionIntensity: Double
   let deviceTimestampSeconds: Int?
   let deviceTimestampSubseconds: Int?
+  let sourceEvidenceID: String?
+  let sourceFrameID: String?
 
   var isMoving: Bool {
     parsedSampleCount > 0 && motionIntensity >= 0.10
@@ -24,7 +26,9 @@ struct MovementPacketSample {
   static func fromParsedFrame(
     _ parsed: [String: Any],
     capturedAt: Date,
-    fallbackHeartRate: Int?
+    fallbackHeartRate: Int?,
+    sourceEvidenceID: String? = nil,
+    sourceFrameID: String? = nil
   ) -> MovementPacketSample? {
     guard
       let payload = parsed["parsed_payload"] as? [String: Any],
@@ -96,14 +100,18 @@ struct MovementPacketSample {
       accelerometerVectorRange: accelerometerVectorRange,
       motionIntensity: min(1, max(rawIntensity, accelerometerIntensity)),
       deviceTimestampSeconds: intValue(payload["timestamp_seconds"]),
-      deviceTimestampSubseconds: intValue(payload["timestamp_subseconds"])
+      deviceTimestampSubseconds: intValue(payload["timestamp_subseconds"]),
+      sourceEvidenceID: sourceEvidenceID,
+      sourceFrameID: sourceFrameID
     )
   }
 
   static func fromCompactSummary(
     _ compact: NotificationFrameCompactSummary,
     capturedAt: Date,
-    fallbackHeartRate: Int?
+    fallbackHeartRate: Int?,
+    sourceEvidenceID: String? = nil,
+    sourceFrameID: String? = nil
   ) -> MovementPacketSample? {
     guard compact.payloadKind == "data_packet",
           compact.bodyKind == "raw_motion_k10",
@@ -125,7 +133,9 @@ struct MovementPacketSample {
       accelerometerVectorRange: movement.accelerometerVectorRange,
       motionIntensity: movement.motionIntensity,
       deviceTimestampSeconds: nil,
-      deviceTimestampSubseconds: nil
+      deviceTimestampSubseconds: nil,
+      sourceEvidenceID: sourceEvidenceID,
+      sourceFrameID: sourceFrameID
     )
   }
 

@@ -228,7 +228,7 @@ struct HomeAlarmSection: View {
 
         HStack(spacing: 10) {
           Button {
-            draftAlarmTime = ble.lastAlarmScheduledAt ?? alarmTime
+            draftAlarmTime = displayedAlarmScheduledAt ?? alarmTime
             showingAlarmEditor = true
           } label: {
             Label(alarmEditorButtonTitle, systemImage: alarmIsSet ? "pencil" : "alarm.badge.plus")
@@ -268,6 +268,9 @@ struct HomeAlarmSection: View {
     .onChange(of: ble.lastAlarmScheduledAt) { _, _ in
       syncAlarmTimeFromDevice()
     }
+    .onChange(of: ble.savedWakeAlarmScheduledAt) { _, _ in
+      syncAlarmTimeFromDevice()
+    }
     .sheet(isPresented: $showingAlarmEditor) {
       HomeAlarmEditorSheet(
         alarmTime: $draftAlarmTime,
@@ -289,14 +292,14 @@ struct HomeAlarmSection: View {
   }
 
   private var wakeTimeText: String {
-    if let scheduledAt = ble.lastAlarmScheduledAt {
+    if let scheduledAt = displayedAlarmScheduledAt {
       return Self.clockFormatter.string(from: scheduledAt)
     }
     return Self.clockFormatter.string(from: alarmTime)
   }
 
   private var alarmIsSet: Bool {
-    ble.lastAlarmScheduledAt != nil
+    displayedAlarmScheduledAt != nil
   }
 
   private var alarmEditorButtonTitle: String {
@@ -309,6 +312,9 @@ struct HomeAlarmSection: View {
 
   private var statusTitle: String {
     if ble.lastAlarmScheduledAt != nil {
+      return "Alarm on"
+    }
+    if ble.savedWakeAlarmScheduledAt != nil {
       return "Alarm on"
     }
     if alarmCommandLooksDisabled {
@@ -324,6 +330,9 @@ struct HomeAlarmSection: View {
     if let scheduledAt = ble.lastAlarmScheduledAt {
       return "Set for \(Self.clockFormatter.string(from: scheduledAt))"
     }
+    if let savedWakeTime = ble.savedWakeAlarmScheduledAt {
+      return "Saved locally for \(Self.clockFormatter.string(from: savedWakeTime))"
+    }
     if alarmCommandLooksDisabled {
       return "Alarm disabled"
     }
@@ -334,7 +343,7 @@ struct HomeAlarmSection: View {
   }
 
   private var statusTint: Color {
-    if ble.lastAlarmScheduledAt != nil || ble.canWriteAlarm {
+    if displayedAlarmScheduledAt != nil || ble.canWriteAlarm {
       return OpenVitalsTheme.accent
     }
     return OpenVitalsTheme.textTertiary
@@ -345,8 +354,12 @@ struct HomeAlarmSection: View {
       || ble.lastAlarmEventSummary.localizedCaseInsensitiveContains("disabled")
   }
 
+  private var displayedAlarmScheduledAt: Date? {
+    ble.lastAlarmScheduledAt ?? ble.savedWakeAlarmScheduledAt
+  }
+
   private func syncAlarmTimeFromDevice() {
-    guard let scheduledAt = ble.lastAlarmScheduledAt else {
+    guard let scheduledAt = displayedAlarmScheduledAt else {
       return
     }
     alarmTime = scheduledAt

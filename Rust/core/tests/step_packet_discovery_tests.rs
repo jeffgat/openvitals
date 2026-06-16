@@ -207,6 +207,81 @@ fn step_capture_validation_accepts_monotonic_counter_matching_labels() {
 }
 
 #[test]
+fn step_capture_validation_accepts_u16_wrapped_counter_matching_labels() {
+    let rows = vec![
+        decoded_frame_row(
+            "wrapped-step-frame-1",
+            "2026-06-02T12:00:00Z",
+            "HISTORICAL_DATA",
+            json!({
+                "kind": "data_packet",
+                "packet_k": 18,
+                "domain": "normal_history_with_hr_marker",
+                "body_summary": {
+                    "kind": "normal_history",
+                    "step_motion_counter": 65500
+                },
+                "warnings": []
+            }),
+        ),
+        decoded_frame_row(
+            "wrapped-step-frame-2",
+            "2026-06-02T12:05:00Z",
+            "HISTORICAL_DATA",
+            json!({
+                "kind": "data_packet",
+                "packet_k": 18,
+                "domain": "normal_history_with_hr_marker",
+                "body_summary": {
+                    "kind": "normal_history",
+                    "step_motion_counter": 30
+                },
+                "warnings": []
+            }),
+        ),
+        decoded_frame_row(
+            "wrapped-step-frame-3",
+            "2026-06-02T12:10:00Z",
+            "HISTORICAL_DATA",
+            json!({
+                "kind": "data_packet",
+                "packet_k": 18,
+                "domain": "normal_history_with_hr_marker",
+                "body_summary": {
+                    "kind": "normal_history",
+                    "step_motion_counter": 90
+                },
+                "warnings": []
+            }),
+        ),
+    ];
+
+    let report = run_step_capture_validation(
+        &rows,
+        "synthetic.sqlite",
+        "2026-06-02T12:00:00Z",
+        "2026-06-02T12:15:00Z",
+        StepCaptureValidationOptions {
+            capture_kind: Some("wrapped_counter_counted_steps".to_string()),
+            manual_step_delta: Some(126),
+            official_whoop_step_delta: None,
+            tolerance_steps: 0,
+            label_provenance: Some(json!({
+                "source": "manual_counted_steps"
+            })),
+            ..StepCaptureValidationOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert!(report.pass, "{:?}", report.issues);
+    assert_eq!(report.matching_counter_delta_count, 1);
+    assert_eq!(report.counter_deltas[0].delta, 126);
+    assert!(report.counter_deltas[0].monotonic_non_decreasing);
+    assert_eq!(report.counter_deltas[0].matches_manual_label, Some(true));
+}
+
+#[test]
 fn step_capture_validation_blocks_official_label_without_policy_marker() {
     let rows = vec![
         decoded_frame_row(

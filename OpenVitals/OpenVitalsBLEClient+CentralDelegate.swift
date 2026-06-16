@@ -198,7 +198,8 @@ extension OpenVitalsBLEClient: CBCentralManagerDelegate {
     autoReconnectTargetID = nil
     let reason = pendingConnectionReason ?? "unknown"
     pendingConnectionReason = nil
-    if !prioritizeLiveCaptureOnReady,
+    if pendingHistoricalSyncResumeRequest == nil,
+       !prioritizeLiveCaptureOnReady,
        reason == "manual" || reason.hasPrefix("auto.") || reason == "restore" {
       if autoHistoricalSyncOnReady {
         pendingAutomaticHistoricalSyncReason = reason
@@ -265,7 +266,12 @@ extension OpenVitalsBLEClient: CBCentralManagerDelegate {
     connectTimeoutWorkItem?.cancel()
     readySyncWorkItem?.cancel()
     if isHistoricalSyncing {
-      failHistoricalSync("Device disconnected during historical sync. \(error?.localizedDescription ?? "No CoreBluetooth error was provided.")")
+      let message = "Device disconnected during historical sync. \(error?.localizedDescription ?? "No CoreBluetooth error was provided.")"
+      if shouldReconnect {
+        pauseHistoricalSyncForReconnect(message)
+      } else {
+        failHistoricalSync(message)
+      }
     }
     if pendingAlarmCommand != nil {
       failAlarmCommand("Device disconnected during alarm command. \(error?.localizedDescription ?? "No CoreBluetooth error was provided.")")
@@ -291,7 +297,9 @@ extension OpenVitalsBLEClient: CBCentralManagerDelegate {
     connectedAt = nil
     if shouldReconnect {
       let reconnectReason = prioritizeLiveCaptureOnReady ? "auto_live_capture_disconnect" : "auto.disconnect"
-      if autoHistoricalSyncOnReady && !prioritizeLiveCaptureOnReady {
+      if pendingHistoricalSyncResumeRequest != nil {
+        pendingAutomaticHistoricalSyncReason = nil
+      } else if autoHistoricalSyncOnReady && !prioritizeLiveCaptureOnReady {
         pendingAutomaticHistoricalSyncReason = reconnectReason
       } else {
         pendingAutomaticHistoricalSyncReason = nil

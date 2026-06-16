@@ -1,17 +1,21 @@
 use open_vitals_core::{
+    protocol::{PACKET_TYPE_HISTORICAL_DATA, build_v5_payload_frame},
     step_counter::{
         ActivityUnavailableDailyStatusOptions, OPENVITALS_ACTIVITY_UNAVAILABLE_STATUS_V0_ID,
         OPENVITALS_ACTIVITY_UNAVAILABLE_STATUS_V0_VERSION, OPENVITALS_STEPS_DEVICE_COUNTER_V0_ID,
         OPENVITALS_STEPS_DEVICE_COUNTER_V0_VERSION, StepCounterDailyRollupOptions,
-        StepCounterHourlyRollupOptions, persist_step_counter_discovery,
+        StepCounterHourlyRollupOptions, StepCounterIngestOptions, persist_step_counter_discovery,
         rollup_activity_unavailable_daily_status_for_store, rollup_device_step_counter_day,
-        rollup_device_step_counter_hour,
+        rollup_device_step_counter_hour, run_step_counter_ingest_for_store,
     },
     step_discovery::{
         StepCaptureValidationOptions, StepPacketDiscoveryOptions, run_step_capture_validation,
         run_step_packet_discovery,
     },
-    store::{DailyActivityMetricInput, DecodedFrameRow, OpenVitalsStore, StepCounterSampleInput},
+    store::{
+        DailyActivityMetricInput, DecodedFrameRow, OpenVitalsStore, RawEvidenceInput,
+        StepCounterSampleInput,
+    },
 };
 use serde_json::json;
 
@@ -91,6 +95,139 @@ fn step_counter_ingest_persists_decoded_device_counter_candidates() {
     assert_eq!(samples[1].cadence_spm, Some(101.5));
     assert_eq!(samples[1].activity_state.as_deref(), Some("walking"));
     assert_eq!(samples[0].source_kind, "device_counter");
+}
+
+#[test]
+fn step_counter_ingest_persists_decoded_step_motion_counter_candidates() {
+    let store = OpenVitalsStore::open_in_memory().unwrap();
+    let rows = vec![
+        decoded_frame_row(
+            "step-motion-frame-1",
+            "2026-06-02T12:00:00.000Z",
+            "HISTORICAL_DATA",
+            json!({
+                "kind": "data_packet",
+                "packet_k": 18,
+                "domain": "normal_history_with_hr_marker",
+                "body_summary": {
+                    "kind": "normal_history",
+                    "heart_rate_bpm": 82,
+                    "rr_count": 1,
+                    "rr_intervals_ms": [732],
+                    "step_motion_counter": 65500
+                },
+                "warnings": []
+            }),
+        ),
+        decoded_frame_row(
+            "step-motion-frame-2",
+            "2026-06-02T12:02:00.000Z",
+            "HISTORICAL_DATA",
+            json!({
+                "kind": "data_packet",
+                "packet_k": 18,
+                "domain": "normal_history_with_hr_marker",
+                "body_summary": {
+                    "kind": "normal_history",
+                    "heart_rate_bpm": 88,
+                    "rr_count": 1,
+                    "rr_intervals_ms": [681],
+                    "step_motion_counter": 30
+                },
+                "warnings": []
+            }),
+        ),
+    ];
+    let discovery = run_step_packet_discovery(
+        &rows,
+        "synthetic.sqlite",
+        "2026-06-02T00:00:00Z",
+        "2026-06-03T00:00:00Z",
+        StepPacketDiscoveryOptions::default(),
+    )
+    .unwrap();
+
+    assert!(discovery.pass, "{:?}", discovery.issues);
+    assert!(discovery.explicit_step_counter_found);
+    assert_eq!(
+        discovery
+            .candidate_fields
+            .iter()
+            .filter(|candidate| candidate.match_kind == "step_count")
+            .count(),
+        2
+    );
+
+    let report = persist_step_counter_discovery(
+        &store,
+        "synthetic.sqlite",
+        "2026-06-02T00:00:00Z",
+        "2026-06-03T00:00:00Z",
+        discovery,
+    )
+    .unwrap();
+
+    assert!(report.pass, "{:?}", report.issues);
+    assert_eq!(report.persisted_sample_count, 2);
+    let samples = store
+        .step_counter_samples_between(1_780_355_000_000, 1_780_442_000_000)
+        .unwrap();
+    assert_eq!(samples.len(), 2);
+    assert_eq!(samples[0].counter_value, 65_500);
+    assert_eq!(samples[0].json_path, "$.body_summary.step_motion_counter");
+    assert_eq!(
+        samples[0].packet_family,
+        "K18/normal_history_with_hr_marker"
+    );
+    assert_eq!(samples[1].counter_value, 30);
+}
+
+#[test]
+fn step_counter_ingest_reparses_raw_evidence_when_decoded_rows_are_stale() {
+    let store = OpenVitalsStore::open_in_memory().unwrap();
+    let mut payload = vec![0; 52];
+    payload[0] = PACKET_TYPE_HISTORICAL_DATA;
+    payload[1] = 18;
+    payload[14] = 82;
+    payload[15] = 0;
+    put_u16(&mut payload, 49, 4_242);
+    let frame = build_v5_payload_frame(&payload);
+    store
+        .insert_raw_evidence(RawEvidenceInput {
+            evidence_id: "raw-k18-step-motion-counter",
+            source: "synthetic.fixture",
+            captured_at: "2026-06-02T12:00:00.000Z",
+            device_model: "OpenVitals test wearable",
+            payload: &frame,
+            sensitivity: "public-test-fixture",
+            capture_session_id: None,
+        })
+        .unwrap();
+
+    let report = run_step_counter_ingest_for_store(
+        &store,
+        "synthetic.sqlite",
+        "2026-06-02T00:00:00Z",
+        "2026-06-03T00:00:00Z",
+        StepCounterIngestOptions::default(),
+    )
+    .unwrap();
+
+    assert!(report.pass, "{:?}", report.issues);
+    assert_eq!(report.discovery.decoded_frame_count, 1);
+    assert!(report.explicit_step_counter_found);
+    assert_eq!(report.persisted_sample_count, 1);
+    assert_eq!(report.inserted_sample_count, 1);
+    let samples = store
+        .step_counter_samples_between(1_780_355_000_000, 1_780_442_000_000)
+        .unwrap();
+    assert_eq!(samples.len(), 1);
+    assert_eq!(samples[0].counter_value, 4_242);
+    assert_eq!(
+        samples[0].evidence_id.as_deref(),
+        Some("raw-k18-step-motion-counter")
+    );
+    assert_eq!(samples[0].json_path, "$.body_summary.step_motion_counter");
 }
 
 #[test]
@@ -839,6 +976,42 @@ fn step_counter_daily_rollup_handles_counter_reset_without_negative_steps() {
 }
 
 #[test]
+fn step_counter_daily_rollup_handles_u16_wraparound() {
+    let store = OpenVitalsStore::open_in_memory().unwrap();
+    insert_step_sample(&store, "s1", 1_780_387_200_000, 65_500, None, None);
+    insert_step_sample(&store, "s2", 1_780_387_260_000, 30, None, None);
+    insert_step_sample(&store, "s3", 1_780_387_320_000, 90, None, None);
+
+    let report = rollup_device_step_counter_day(
+        &store,
+        StepCounterDailyRollupOptions {
+            date_key: "2026-06-02",
+            timezone: "Europe/London",
+            start_time_unix_ms: 1_780_355_200_000,
+            end_time_unix_ms: 1_780_441_600_000,
+            min_sample_count: 2,
+            write_metric: false,
+        },
+    )
+    .unwrap();
+
+    assert!(report.pass, "{:?}", report.issues);
+    assert_eq!(report.steps, Some(126));
+    assert_eq!(report.usable_segment_count, 2);
+    assert_eq!(report.reset_count, 0);
+    assert!(
+        report
+            .quality_flags
+            .contains(&"counter_u16_wrap_detected".to_string())
+    );
+    assert!(
+        !report
+            .quality_flags
+            .contains(&"counter_reset_detected".to_string())
+    );
+}
+
+#[test]
 fn step_counter_daily_rollup_blocks_without_two_samples() {
     let store = OpenVitalsStore::open_in_memory().unwrap();
     insert_step_sample(&store, "s1", 1_780_387_200_000, 990, None, None);
@@ -1034,4 +1207,8 @@ fn decoded_frame_row(
         parser_version: "open-vitals-core/step-counter-test".to_string(),
         warnings_json: "[]".to_string(),
     }
+}
+
+fn put_u16(bytes: &mut [u8], offset: usize, value: u16) {
+    bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
 }

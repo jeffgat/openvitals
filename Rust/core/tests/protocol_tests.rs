@@ -197,6 +197,7 @@ fn parses_history_packet_stable_header_and_hr_marker() {
                 heart_rate_bpm: Some(0x4d),
                 rr_count: Some(0),
                 rr_intervals_ms: Vec::new(),
+                step_motion_counter: None,
                 warnings: Vec::new(),
             }),
             warnings: Vec::new(),
@@ -234,6 +235,7 @@ fn parses_noop_v18_history_rr_candidates_from_k18_payload_offsets() {
                     heart_rate_bpm: Some(102),
                     rr_count: Some(2),
                     rr_intervals_ms: vec![602, 613],
+                    step_motion_counter: Some(50),
                     warnings: Vec::new(),
                 })
             );
@@ -268,6 +270,7 @@ fn normal_history_zero_hr_marker_is_not_treated_as_hr_present() {
                     heart_rate_bpm: None,
                     rr_count: None,
                     rr_intervals_ms: Vec::new(),
+                    step_motion_counter: None,
                     warnings: Vec::new(),
                 })
             );
@@ -553,6 +556,7 @@ fn short_data_packets_preserve_raw_body_and_warn() {
                 heart_rate_bpm: None,
                 rr_count: None,
                 rr_intervals_ms: Vec::new(),
+                step_motion_counter: None,
                 warnings: vec!["normal_history_k18_rr_count_missing".to_string()],
             }),
             warnings: vec![

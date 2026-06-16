@@ -26,13 +26,45 @@ extension OpenVitalsBLEClient {
     attemptAutomaticReconnect(reason: "manual")
   }
 
+  func recoverStaleConnection(reason: String) {
+    record(level: .warn, source: "ble", title: "connection.recover_stale.requested", body: reason)
+    ensureCentral()
+    connectTimeoutWorkItem?.cancel()
+    readySyncWorkItem?.cancel()
+    historicalResumeWorkItem?.cancel()
+    pendingConnectionReason = nil
+    pendingAutomaticHistoricalSyncReason = nil
+    autoReconnectInFlight = false
+    autoReconnectTargetID = nil
+    autoConnectForPhysiologyCapture = false
+    autoStartedPhysiologyCapture = false
+    clientHelloSentForCurrentConnection = false
+    commandWriteAuthenticationRequired = false
+    commandWriteAuthenticationStatus = "No command authentication failures"
+    commandCharacteristic = nil
+    debugMenuCharacteristic = nil
+    batteryLevelCharacteristic = nil
+    batteryLevelStatusCharacteristic = nil
+    updateConnectionState("reconnecting")
+    updateReconnectState("recovering stale link")
+    if let activePeripheral {
+      fullServiceDiscoveryRequestedIDs.remove(activePeripheral.identifier)
+      central?.cancelPeripheralConnection(activePeripheral)
+    } else {
+      attemptAutomaticReconnect(reason: "stale_recovery")
+    }
+  }
+
   func resetConnection() {
     record(source: "ui", title: "connection.reset.requested")
     connectTimeoutWorkItem?.cancel()
     readySyncWorkItem?.cancel()
     syncClearWorkItem?.cancel()
+    historicalResumeWorkItem?.cancel()
     pendingConnectionReason = nil
     pendingAutomaticHistoricalSyncReason = nil
+    activeHistoricalSyncRequest = nil
+    pendingHistoricalSyncResumeRequest = nil
     autoReconnectInFlight = false
     autoReconnectTargetID = nil
     autoConnectForPhysiologyCapture = false
@@ -281,22 +313,44 @@ extension OpenVitalsBLEClient {
     )
   }
 
-  func syncHistoricalPackets(rangeFirst: Bool = false) {
-    record(source: "ui", title: "historical_sync.requested", body: "range_first=\(rangeFirst)")
+  func syncHistoricalPackets(rangeFirst: Bool = false, maxDrainRounds: Int = 1) {
+    record(source: "ui", title: "historical_sync.requested", body: "range_first=\(rangeFirst) max_rounds=\(maxDrainRounds)")
     beginHistoricalSync(
       trigger: rangeFirst ? "manual_range_first" : "manual",
       automatic: false,
-      firstCommandOverride: rangeFirst ? .getDataRange : nil
+      firstCommandOverride: rangeFirst ? .getDataRange : nil,
+      maxDrainRounds: maxDrainRounds
     )
   }
 
-  func syncHistoricalPacketsPreservingUnreadQueue(rangeFirst: Bool = false) {
-    record(source: "ui", title: "historical_sync_preserve.requested", body: "range_first=\(rangeFirst) ack=disabled")
+  func syncHistoricalPacketsPreservingUnreadQueue(rangeFirst: Bool = false, maxDrainRounds: Int = 1) {
+    record(source: "ui", title: "historical_sync_preserve.requested", body: "range_first=\(rangeFirst) ack=disabled max_rounds=\(maxDrainRounds)")
     beginHistoricalSync(
       trigger: rangeFirst ? "manual_range_first_preserve" : "manual_preserve",
       automatic: false,
       firstCommandOverride: rangeFirst ? .getDataRange : nil,
-      acknowledgeHistoricalDataResult: false
+      acknowledgeHistoricalDataResult: false,
+      maxDrainRounds: maxDrainRounds
+    )
+  }
+
+  func catchUpHistoricalPackets(maxDrainRounds: Int = 6) {
+    record(source: "ui", title: "historical_catch_up.requested", body: "max_rounds=\(maxDrainRounds)")
+    beginHistoricalSync(
+      trigger: "manual_catch_up",
+      automatic: false,
+      firstCommandOverride: .getDataRange,
+      maxDrainRounds: maxDrainRounds
+    )
+  }
+
+  func streamHistoricalPacketsDirectly(maxDrainRounds: Int = 6) {
+    record(source: "ui", title: "historical_stream_direct.requested", body: "max_rounds=\(maxDrainRounds)")
+    beginHistoricalSync(
+      trigger: "manual_stream_direct",
+      automatic: false,
+      firstCommandOverride: .sendHistoricalData,
+      maxDrainRounds: maxDrainRounds
     )
   }
 

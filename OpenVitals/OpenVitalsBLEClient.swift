@@ -50,6 +50,9 @@ final class OpenVitalsBLEClient: NSObject, ObservableObject, @unchecked Sendable
   @Published var lastAlarmEventPayloadHex = ""
   @Published var lastAlarmScheduledAt: Date?
   @Published var lastAlarmID: Int?
+  @Published var savedWakeAlarmScheduledAt: Date?
+  @Published var savedWakeAlarmID: Int?
+  @Published var savedWakeAlarmUpdatedAt: Date?
   @Published var physiologyCaptureStatus = "Not started"
   @Published var lastPhysiologyCommandSummary = "No physiology stream command sent"
   @Published var commandWriteAuthenticationRequired = false
@@ -248,6 +251,7 @@ final class OpenVitalsBLEClient: NSObject, ObservableObject, @unchecked Sendable
   var rememberedDeviceID: UUID?
   var rememberedDeviceName: String?
   var rememberedDeviceValidated = false
+  var savedWakeAlarmDeviceID: UUID?
   var autoReconnectTargetID: UUID?
   var autoReconnectInFlight = false
   var userDisconnectRequestedIDs = Set<UUID>()
@@ -261,9 +265,16 @@ final class OpenVitalsBLEClient: NSObject, ObservableObject, @unchecked Sendable
   var historicalCommandTimeoutWorkItem: DispatchWorkItem?
   var historicalIdleWorkItem: DispatchWorkItem?
   var historicalRangeRetryWorkItem: DispatchWorkItem?
+  var historicalCatchUpWorkItem: DispatchWorkItem?
+  var historicalResumeWorkItem: DispatchWorkItem?
+  var activeHistoricalSyncRequest: HistoricalSyncRequestContext?
+  var pendingHistoricalSyncResumeRequest: HistoricalSyncRequestContext?
   var pendingHistoricalCommand: PendingHistoricalCommand?
   var nextHistoricalCommandSequence: UInt8 = 57
   var historicalPacketsReceivedThisSync = 0
+  var historicalPacketsReceivedAtDrainRoundStart = 0
+  var historicalDrainRound = 1
+  var historicalMaxDrainRounds = 1
   var historicalRangePendingResponses = 0
   var historicalRangeRetryCount = 0
   var historicalTransferRequestAttemptCount = 0
@@ -308,6 +319,8 @@ final class OpenVitalsBLEClient: NSObject, ObservableObject, @unchecked Sendable
   let historicalCommandResponseTimeout: TimeInterval = 7
   let historicalPendingResponseGrace: TimeInterval = 25
   let historicalRangeRetryDelay: TimeInterval = 1
+  let historicalCatchUpRoundDelay: TimeInterval = 1.5
+  let historicalReconnectResumeDelay: TimeInterval = 1.2
   let historicalRangeMaxRetries = 2
   let historicalTransferMaxRequestAttempts = 3
   var historicalSyncRunID = UUID()
@@ -344,6 +357,10 @@ final class OpenVitalsBLEClient: NSObject, ObservableObject, @unchecked Sendable
     static let liveHRVRMSSDSampleCount = "open_vitals.swift.liveHRVRMSSDSampleCount"
     static let liveHRVUpdatedAt = "open_vitals.swift.liveHRVUpdatedAt"
     static let liveHRVSource = "open_vitals.swift.liveHRVSource"
+    static let savedWakeAlarmScheduledAt = "open_vitals.swift.alarm.savedScheduledAt"
+    static let savedWakeAlarmID = "open_vitals.swift.alarm.savedID"
+    static let savedWakeAlarmUpdatedAt = "open_vitals.swift.alarm.savedUpdatedAt"
+    static let savedWakeAlarmDeviceID = "open_vitals.swift.alarm.savedDeviceID"
     static let debugHistoricalRangeStatus = "open_vitals.swift.debug.historicalRangeStatus"
   }
 
@@ -478,6 +495,20 @@ final class OpenVitalsBLEClient: NSObject, ObservableObject, @unchecked Sendable
   struct PendingHistoricalCommand {
     let kind: HistoricalCommandKind
     let sequence: UInt8
+  }
+
+  struct HistoricalSyncRequestContext {
+    let id = UUID()
+    let trigger: String
+    let automatic: Bool
+    let firstCommandOverride: HistoricalCommandKind?
+    let rangeOnly: Bool
+    let acknowledgeHistoricalDataResult: Bool
+    let maxDrainRounds: Int
+
+    var resumeTrigger: String {
+      "\(trigger).resume"
+    }
   }
 
   enum ClockCommandKind {
@@ -914,6 +945,11 @@ final class OpenVitalsBLEClient: NSObject, ObservableObject, @unchecked Sendable
       let slot = lastAlarmID.map { "slot \($0)" } ?? "band"
       return "\(time) | \(slot)"
     }
+    if let savedWakeAlarmScheduledAt {
+      let time = Self.alarmTimeFormatter.string(from: savedWakeAlarmScheduledAt)
+      let slot = savedWakeAlarmID.map { "slot \($0)" } ?? "saved target"
+      return "\(time) | \(slot) saved locally"
+    }
     return alarmCommandStatus
   }
 
@@ -988,6 +1024,7 @@ final class OpenVitalsBLEClient: NSObject, ObservableObject, @unchecked Sendable
       }
     }
     loadRememberedDevice()
+    loadPersistedWakeAlarmTarget()
     loadPersistedBatterySample()
     loadPersistedRestingHeartRateEstimate()
     loadPersistedHRVSample()

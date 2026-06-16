@@ -112,6 +112,9 @@ struct ActiveHealthPacketCapture {
   let mode: HealthPacketCaptureMode
   let source: String
   let requestedStreams: Bool
+  let deviceModel: String
+  let activeDeviceID: String?
+  let streamProvenance: [String: String]
   var importedFrameCount: Int
 }
 

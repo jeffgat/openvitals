@@ -150,7 +150,7 @@ struct MoreRouteDestinationView: View {
     case .about:
       MoreAboutView(store: store)
     case .developer:
-      MoreDeveloperView(routes: MoreRoute.developerToolRoutes, routeStatus: routeStatus)
+      MoreDeveloperView(store: store, routes: MoreRoute.developerToolRoutes, routeStatus: routeStatus)
     }
   }
 }

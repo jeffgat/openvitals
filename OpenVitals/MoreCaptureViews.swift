@@ -75,6 +75,81 @@ struct MoreCaptureView: View {
         }
       }
 
+      Section("Mac Stream") {
+        MoreInfoRow(
+          title: "Status",
+          value: model.mobileCaptureStreamStatus,
+          systemImage: "network",
+          status: mobileCaptureStreamStatus
+        )
+        TextField(
+          "Endpoint",
+          text: Binding(
+            get: { model.mobileCaptureStreamEndpoint },
+            set: { model.setMobileCaptureStreamEndpoint($0) }
+          )
+        )
+        .textInputAutocapitalization(.never)
+        .keyboardType(.URL)
+        .autocorrectionDisabled()
+
+        SecureField(
+          "Token",
+          text: Binding(
+            get: { model.mobileCaptureStreamToken },
+            set: { model.setMobileCaptureStreamToken($0) }
+          )
+        )
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled()
+
+        Toggle(
+          "Enable Stream",
+          isOn: Binding(
+            get: { model.mobileCaptureStreamEnabled },
+            set: { model.setMobileCaptureStreamEnabled($0) }
+          )
+        )
+
+        MoreInfoRow(
+          title: "Queued",
+          value: "\(model.mobileCaptureStreamQueuedFrameCount) queued | \(model.mobileCaptureStreamDroppedFrameCount) dropped",
+          systemImage: "tray.and.arrow.up",
+          status: model.mobileCaptureStreamDroppedFrameCount > 0 ? .stale : (model.mobileCaptureStreamQueuedFrameCount > 0 ? .pending : .ready)
+        )
+        MoreInfoRow(
+          title: "Imported",
+          value: "\(model.mobileCaptureStreamImportedFrameCount) imported | \(model.mobileCaptureStreamExistingFrameCount) existing | \(model.mobileCaptureStreamSentFrameCount) sent",
+          systemImage: "externaldrive.badge.plus",
+          status: model.mobileCaptureStreamImportedFrameCount > 0 || model.mobileCaptureStreamExistingFrameCount > 0 ? .ready : .pending
+        )
+        MoreInfoRow(
+          title: "Raw Rows",
+          value: "\(model.mobileCaptureStreamRawInsertedCount) inserted | \(model.mobileCaptureStreamRawExistingCount) existing",
+          systemImage: "cylinder.split.1x2",
+          status: model.mobileCaptureStreamRawInsertedCount > 0 || model.mobileCaptureStreamRawExistingCount > 0 ? .ready : .pending
+        )
+        Button {
+          if model.healthPacketCaptureSessionID == nil {
+            model.startDiagnosticPacketCapture(
+              duration: OpenVitalsAppModel.mobileCaptureStreamLongCaptureDuration,
+              source: "ui.mac_stream"
+            )
+          } else {
+            model.stopHealthPacketCapture(reason: "mac_stream_stop")
+          }
+        } label: {
+          Label(
+            model.healthPacketCaptureSessionID == nil ? "Start Long Capture" : "Stop Active Capture",
+            systemImage: model.healthPacketCaptureSessionID == nil ? "record.circle" : "stop.circle"
+          )
+        }
+        .disabled(
+          model.healthPacketCaptureSessionID == nil
+          && (!model.mobileCaptureStreamReady || model.ble.connectionState != "ready")
+        )
+      }
+
       Section("Overnight Guard") {
         MoreInfoRow(
           title: "Status",
@@ -269,6 +344,20 @@ struct MoreCaptureView: View {
       return .stale
     }
     return .pending
+  }
+
+  private var mobileCaptureStreamStatus: MoreStatusKind {
+    if !model.mobileCaptureStreamEnabled {
+      return .pending
+    }
+    if !model.mobileCaptureStreamReady {
+      return .blocked
+    }
+    if model.mobileCaptureStreamStatus.localizedCaseInsensitiveContains("failed")
+      || model.mobileCaptureStreamStatus.localizedCaseInsensitiveContains("dropped") {
+      return .stale
+    }
+    return .ready
   }
 
   private var overnightGuardReadinessStatus: MoreStatusKind {

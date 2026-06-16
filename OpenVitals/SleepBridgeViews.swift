@@ -204,6 +204,9 @@ struct SleepAlarmBridgeSection: View {
     if ble.lastAlarmScheduledAt != nil {
       return .live("band alarm event")
     }
+    if ble.savedWakeAlarmScheduledAt != nil {
+      return .local("saved alarm target")
+    }
     if ble.canWriteAlarm {
       return .live("OpenVitals alarm write")
     }

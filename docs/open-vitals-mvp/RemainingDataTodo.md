@@ -23,7 +23,9 @@ Runtime rule: do not show fabricated metric values. A surface may show live, loc
 
 - [ ] Persist activity sessions with start/end, type, HR summary, zone durations, calories, and sync status.
 - [ ] Compute daily strain from activity sessions and HR load.
-- [ ] Add real step count extraction from motion/history packets.
+- [x] Decode and persist the K18 historical `step_motion_counter` candidate as device-counter step evidence, with u16 wrap/reset-safe rollups.
+- [ ] Validate the K18 `step_motion_counter` scale against controlled counted-step captures before treating it as final step-count parity.
+- [ ] Add fallback step count extraction from raw motion packets only after local validation labels pass.
 - [ ] Add calorie/energy estimator from profile, HR, movement, and activity sessions.
 - [ ] Build strain trends for score, exercise duration, daytime HR, total energy, and step count.
 

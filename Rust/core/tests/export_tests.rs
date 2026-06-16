@@ -977,7 +977,7 @@ fn raw_export_sensor_samples_store_sample_time_separate_from_capture_time() {
 }
 
 #[test]
-fn raw_export_sensor_samples_reject_invalid_device_timestamp_subseconds() {
+fn raw_export_sensor_samples_ignore_invalid_device_timestamp_subseconds() {
     let tempdir = tempfile::tempdir().unwrap();
     let db_path = tempdir.path().join("open_vitals.sqlite");
     let export_dir = tempdir
@@ -1024,11 +1024,12 @@ fn raw_export_sensor_samples_reject_invalid_device_timestamp_subseconds() {
 
     assert!(report.pass, "{:?}", report.issues);
     let sensor_samples = fs::read_to_string(export_dir.join("data/sensor_samples.jsonl")).unwrap();
-    assert!(sensor_samples.contains("\"sample_time\":\"2026-01-01T20:00:00Z\""));
-    assert!(sensor_samples.contains("\"sample_time_source\":\"captured_at\""));
-    assert!(sensor_samples.contains("\"sample_time_unix_ms\":1767297600000"));
+    assert!(sensor_samples.contains("\"sample_time\":\"2026-01-01T22:00:00Z\""));
+    assert!(sensor_samples.contains("\"sample_time_source\":\"device_timestamp\""));
+    assert!(sensor_samples.contains("\"sample_time_unix_ms\":1767304800000"));
     assert!(sensor_samples.contains("\"device_timestamp_subseconds\":1500"));
     assert!(sensor_samples.contains("device_timestamp_subseconds_out_of_range"));
+    assert!(sensor_samples.contains("device_timestamp_subseconds_ignored"));
     assert!(!sensor_samples.contains("\"sample_time\":\"2026-01-01T22:00:01Z\""));
 }
 

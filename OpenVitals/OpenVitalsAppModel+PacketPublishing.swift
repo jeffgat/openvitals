@@ -356,20 +356,26 @@ extension OpenVitalsAppModel {
     from parsed: [String: Any],
     compact: NotificationFrameCompactSummary?,
     capturedAt: Date,
-    fallbackHeartRate: Int?
+    fallbackHeartRate: Int?,
+    sourceEvidenceID: String? = nil,
+    sourceFrameID: String? = nil
   ) -> MovementPacketSample? {
     if let compact,
        let sample = MovementPacketSample.fromCompactSummary(
         compact,
         capturedAt: capturedAt,
-        fallbackHeartRate: fallbackHeartRate
+        fallbackHeartRate: fallbackHeartRate,
+        sourceEvidenceID: sourceEvidenceID,
+        sourceFrameID: sourceFrameID
        ) {
       return sample
     }
     return MovementPacketSample.fromParsedFrame(
       parsed,
       capturedAt: capturedAt,
-      fallbackHeartRate: fallbackHeartRate
+      fallbackHeartRate: fallbackHeartRate,
+      sourceEvidenceID: sourceEvidenceID,
+      sourceFrameID: sourceFrameID
     )
   }
 
@@ -416,7 +422,10 @@ extension OpenVitalsAppModel {
       publishMovementPacketStatus("\(packetCount) packets | \(sample.bodySummaryKind) \(movingText) \(intensityPercent)%")
     }
     if var persistence = activeActivityPersistence {
-      persistence.ingest(sample)
+      persistence.ingest(
+        sample,
+        gpsPaceSecondsPerKilometer: activityLocationTracker.currentPaceSecondsPerKilometer
+      )
       activeActivityPersistence = persistence
     }
     if shouldLogMovementPacket(sample) {

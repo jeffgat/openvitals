@@ -144,6 +144,8 @@ pub enum DataPacketBodySummary {
         rr_count: Option<u8>,
         #[serde(default)]
         rr_intervals_ms: Vec<u16>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        step_motion_counter: Option<u16>,
         #[serde(default)]
         warnings: Vec<String>,
     },
@@ -614,6 +616,11 @@ fn parse_normal_history_body_summary(
             heart_rate_bpm: hr_present_marker.filter(|marker| *marker > 0),
             rr_count,
             rr_intervals_ms,
+            step_motion_counter: if packet_k == 18 {
+                read_u16_le(payload, 49)
+            } else {
+                None
+            },
             warnings: warnings.clone(),
         }),
         warnings,

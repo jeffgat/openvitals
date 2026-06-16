@@ -5,7 +5,9 @@ import UIKit
 extension OpenVitalsAppModel {
   func handleNotification(_ event: OpenVitalsNotificationEvent) {
     let (queueDepth, highWatermark) = incrementNotificationIngestQueueDepth()
-    let captureImportActive = activeHealthPacketCapture != nil || activeActivityPersistence != nil
+    let captureImportActive = activeHealthPacketCapture != nil
+      || activeActivityPersistence != nil
+      || shouldRouteOvernightFramesToMobileCaptureStream
     let reassembler = notificationFrameReassembler
     publishPipelinePerformanceStatus(
       "ingest queued notification bytes=\(event.value.count) | ingestQ \(queueDepth) hwm \(highWatermark)"
@@ -163,7 +165,9 @@ extension OpenVitalsAppModel {
   }
 
   func importCapturedFrames(_ frames: [NotificationFrame], event: OpenVitalsNotificationEvent) {
-    guard activeHealthPacketCapture != nil || activeActivityPersistence != nil else {
+    let shouldWriteLocalCaptureRows = activeHealthPacketCapture != nil || activeActivityPersistence != nil
+    let mobileStreamSession = activeMobileCaptureFrameStreamSession()
+    guard shouldWriteLocalCaptureRows || mobileStreamSession != nil else {
       return
     }
 
@@ -173,7 +177,9 @@ extension OpenVitalsAppModel {
     }
 
     let capturedAt = Self.captureTimestampFormatter.string(from: event.capturedAt)
-    let captureSessionID = activeHealthPacketCapture?.sessionID ?? activeActivityPersistence?.captureSessionID
+    let captureSessionID = activeHealthPacketCapture?.sessionID
+      ?? activeActivityPersistence?.captureSessionID
+      ?? mobileStreamSession?.sessionID
     let request = CaptureFrameRowBuildRequest(
       frames: framesToWrite,
       event: event,
@@ -196,10 +202,20 @@ extension OpenVitalsAppModel {
         guard let self else {
           return
         }
+        if let mobileStreamSession {
+          self.streamCapturedFrameRows(frameRows, session: mobileStreamSession)
+        }
+        let rowBuildQueue = self.decrementCaptureFrameRowBuildQueueDepth()
+        guard shouldWriteLocalCaptureRows else {
+          self.publishPipelinePerformanceStatus(
+            "mac stream queued \(frameRows.count) historical frame\(frameRows.count == 1 ? "" : "s")"
+              + " | rowQ \(rowBuildQueue.depth) hwm \(rowBuildQueue.highWatermark)"
+          )
+          return
+        }
         let enqueueResult = self.captureFrameWriteQueue.enqueue(rows: frameRows) { [weak self] result in
           self?.handleCaptureFrameWriteResult(result)
         }
-        let rowBuildQueue = self.decrementCaptureFrameRowBuildQueueDepth()
         self.captureFrameEnqueueAggregator.record(
           enqueueResult,
           capturedAt: event.capturedAt,
@@ -399,12 +415,24 @@ extension OpenVitalsAppModel {
       var offMainDataSignalCount = 0
       var skippedDiagnosticFrameCount = 0
       var skippedParseErrorCount = 0
-      for result in parseResults {
+      for (index, result) in parseResults.enumerated() {
+        let sourceEvidenceID: String?
+        let sourceFrameID: String?
+        if index < frames.count {
+          let evidenceID = Self.captureEvidenceID(for: frames[index], event: event, index: index)
+          sourceEvidenceID = evidenceID
+          sourceFrameID = "\(evidenceID).frame.0"
+        } else {
+          sourceEvidenceID = nil
+          sourceFrameID = nil
+        }
         let interpretation = Self.interpretNotificationFrame(
           result,
           event: event,
           healthCaptureActive: healthCaptureActive,
-          fallbackHeartRate: fallbackHeartRate
+          fallbackHeartRate: fallbackHeartRate,
+          sourceEvidenceID: sourceEvidenceID,
+          sourceFrameID: sourceFrameID
         )
         let parsedResult = ParsedNotificationFrameResult(
           interpretation: interpretation,
@@ -536,7 +564,9 @@ extension OpenVitalsAppModel {
     _ result: NotificationFrameParseResult,
     event: OpenVitalsNotificationEvent,
     healthCaptureActive: Bool,
-    fallbackHeartRate: Int?
+    fallbackHeartRate: Int?,
+    sourceEvidenceID: String? = nil,
+    sourceFrameID: String? = nil
   ) -> NotificationFrameInterpretation {
     guard result.parsed != nil || result.compact != nil else {
       return NotificationFrameInterpretation(
@@ -566,7 +596,9 @@ extension OpenVitalsAppModel {
         from: parsed ?? [:],
         compact: compact,
         capturedAt: event.capturedAt,
-        fallbackHeartRate: fallbackHeartRate
+        fallbackHeartRate: fallbackHeartRate,
+        sourceEvidenceID: sourceEvidenceID,
+        sourceFrameID: sourceFrameID
       ),
       whoopEvent: extractWhoopEvent(from: compact, capturedAt: event.capturedAt)
         ?? parsed.flatMap { extractWhoopEvent(from: $0, capturedAt: event.capturedAt) },

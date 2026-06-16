@@ -10,7 +10,7 @@ use crate::{
     protocol::{DeviceType, ParsedFrame},
 };
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 16;
+pub const CURRENT_SCHEMA_VERSION: i64 = 17;
 pub const DEFAULT_RAW_EVIDENCE_PAYLOAD_RETENTION_LIMIT_BYTES: i64 = 512 * 1024 * 1024;
 const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -488,6 +488,68 @@ pub struct ActivityMetricRow {
     pub unit: String,
     pub start_time_unix_ms: i64,
     pub end_time_unix_ms: i64,
+    pub quality_flags_json: String,
+    pub provenance_json: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ActivityMotionFeatureInput<'a> {
+    pub feature_id: &'a str,
+    pub activity_session_id: &'a str,
+    pub capture_session_id: Option<&'a str>,
+    pub start_time_unix_ms: i64,
+    pub end_time_unix_ms: i64,
+    pub sequence: i64,
+    pub movement_packet_count: i64,
+    pub source_frame_count: i64,
+    pub source_frame_ids_json: &'a str,
+    pub source_evidence_ids_json: &'a str,
+    pub mean_motion_intensity: f64,
+    pub peak_motion_intensity: f64,
+    pub mean_accelerometer_vector_intensity: Option<f64>,
+    pub peak_accelerometer_peak_range: Option<f64>,
+    pub mean_gyroscope_peak_range: Option<f64>,
+    pub peak_gyroscope_peak_range: Option<f64>,
+    pub stillness_ratio: f64,
+    pub average_heart_rate_bpm: Option<f64>,
+    pub max_heart_rate_bpm: Option<f64>,
+    pub heart_rate_sample_count: i64,
+    pub dominant_hr_zone: Option<i64>,
+    pub gps_pace_seconds_per_km: Option<f64>,
+    pub gps_speed_mps: Option<f64>,
+    pub cadence_spm_candidate: Option<f64>,
+    pub quality_flags_json: &'a str,
+    pub provenance_json: &'a str,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ActivityMotionFeatureRow {
+    pub feature_id: String,
+    pub activity_session_id: String,
+    pub capture_session_id: Option<String>,
+    pub start_time_unix_ms: i64,
+    pub end_time_unix_ms: i64,
+    pub duration_ms: i64,
+    pub sequence: i64,
+    pub movement_packet_count: i64,
+    pub source_frame_count: i64,
+    pub source_frame_ids_json: String,
+    pub source_evidence_ids_json: String,
+    pub mean_motion_intensity: f64,
+    pub peak_motion_intensity: f64,
+    pub mean_accelerometer_vector_intensity: Option<f64>,
+    pub peak_accelerometer_peak_range: Option<f64>,
+    pub mean_gyroscope_peak_range: Option<f64>,
+    pub peak_gyroscope_peak_range: Option<f64>,
+    pub stillness_ratio: f64,
+    pub average_heart_rate_bpm: Option<f64>,
+    pub max_heart_rate_bpm: Option<f64>,
+    pub heart_rate_sample_count: i64,
+    pub dominant_hr_zone: Option<i64>,
+    pub gps_pace_seconds_per_km: Option<f64>,
+    pub gps_speed_mps: Option<f64>,
+    pub cadence_spm_candidate: Option<f64>,
     pub quality_flags_json: String,
     pub provenance_json: String,
     pub created_at: String,
@@ -1241,6 +1303,46 @@ impl OpenVitalsStore {
             CREATE INDEX IF NOT EXISTS idx_activity_metrics_by_session_window
                 ON activity_metrics(activity_session_id, start_time_unix_ms, end_time_unix_ms);
 
+            CREATE TABLE IF NOT EXISTS activity_motion_features (
+                feature_id TEXT PRIMARY KEY,
+                activity_session_id TEXT NOT NULL REFERENCES activity_sessions(session_id) ON DELETE CASCADE,
+                capture_session_id TEXT REFERENCES capture_sessions(session_id) ON DELETE SET NULL,
+                start_time_unix_ms INTEGER NOT NULL,
+                end_time_unix_ms INTEGER NOT NULL,
+                duration_ms INTEGER NOT NULL,
+                sequence INTEGER NOT NULL,
+                movement_packet_count INTEGER NOT NULL,
+                source_frame_count INTEGER NOT NULL,
+                source_frame_ids_json TEXT NOT NULL DEFAULT '[]',
+                source_evidence_ids_json TEXT NOT NULL DEFAULT '[]',
+                mean_motion_intensity REAL NOT NULL,
+                peak_motion_intensity REAL NOT NULL,
+                mean_accelerometer_vector_intensity REAL,
+                peak_accelerometer_peak_range REAL,
+                mean_gyroscope_peak_range REAL,
+                peak_gyroscope_peak_range REAL,
+                stillness_ratio REAL NOT NULL,
+                average_heart_rate_bpm REAL,
+                max_heart_rate_bpm REAL,
+                heart_rate_sample_count INTEGER NOT NULL DEFAULT 0,
+                dominant_hr_zone INTEGER,
+                gps_pace_seconds_per_km REAL,
+                gps_speed_mps REAL,
+                cadence_spm_candidate REAL,
+                quality_flags_json TEXT NOT NULL DEFAULT '[]',
+                provenance_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_activity_motion_features_by_session
+                ON activity_motion_features(activity_session_id);
+            CREATE INDEX IF NOT EXISTS idx_activity_motion_features_by_window
+                ON activity_motion_features(start_time_unix_ms, end_time_unix_ms);
+            CREATE INDEX IF NOT EXISTS idx_activity_motion_features_by_session_window
+                ON activity_motion_features(activity_session_id, start_time_unix_ms, end_time_unix_ms);
+            CREATE INDEX IF NOT EXISTS idx_activity_motion_features_by_capture
+                ON activity_motion_features(capture_session_id);
+
             CREATE TABLE IF NOT EXISTS daily_activity_metrics (
                 daily_metric_id TEXT PRIMARY KEY,
                 date_key TEXT NOT NULL,
@@ -1596,7 +1698,8 @@ impl OpenVitalsStore {
             INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (14);
             INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (15);
             INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (16);
-            PRAGMA user_version = 16;
+            INSERT OR IGNORE INTO open_vitals_schema_migrations(version) VALUES (17);
+            PRAGMA user_version = 17;
             "#,
         )?;
         self.ensure_raw_evidence_columns()?;
@@ -3417,6 +3520,313 @@ impl OpenVitalsStore {
         let rows = statement.query_map(
             params![start_time_unix_ms, end_time_unix_ms],
             activity_metric_from_row,
+        )?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(OpenVitalsError::from)
+    }
+
+    pub fn insert_activity_motion_features(
+        &self,
+        inputs: &[ActivityMotionFeatureInput<'_>],
+    ) -> OpenVitalsResult<(usize, usize)> {
+        let mut session_ids = BTreeSet::new();
+        for input in inputs {
+            validate_activity_motion_feature_input(self, input)?;
+            session_ids.insert(input.activity_session_id);
+        }
+
+        for session_id in session_ids {
+            if self.activity_session(session_id)?.is_none() {
+                return Err(OpenVitalsError::message(format!(
+                    "activity session {} not found",
+                    session_id
+                )));
+            }
+        }
+
+        let mut inserted = 0;
+        let mut existing = 0;
+        for input in inputs {
+            if self.insert_activity_motion_feature_without_session_check(input)? {
+                inserted += 1;
+            } else {
+                existing += 1;
+            }
+        }
+        Ok((inserted, existing))
+    }
+
+    fn insert_activity_motion_feature_without_session_check(
+        &self,
+        input: &ActivityMotionFeatureInput<'_>,
+    ) -> OpenVitalsResult<bool> {
+        let changed = self.conn.execute(
+            r#"
+            INSERT OR IGNORE INTO activity_motion_features (
+                feature_id,
+                activity_session_id,
+                capture_session_id,
+                start_time_unix_ms,
+                end_time_unix_ms,
+                duration_ms,
+                sequence,
+                movement_packet_count,
+                source_frame_count,
+                source_frame_ids_json,
+                source_evidence_ids_json,
+                mean_motion_intensity,
+                peak_motion_intensity,
+                mean_accelerometer_vector_intensity,
+                peak_accelerometer_peak_range,
+                mean_gyroscope_peak_range,
+                peak_gyroscope_peak_range,
+                stillness_ratio,
+                average_heart_rate_bpm,
+                max_heart_rate_bpm,
+                heart_rate_sample_count,
+                dominant_hr_zone,
+                gps_pace_seconds_per_km,
+                gps_speed_mps,
+                cadence_spm_candidate,
+                quality_flags_json,
+                provenance_json
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)
+            "#,
+            params![
+                input.feature_id,
+                input.activity_session_id,
+                input.capture_session_id,
+                input.start_time_unix_ms,
+                input.end_time_unix_ms,
+                input.end_time_unix_ms - input.start_time_unix_ms,
+                input.sequence,
+                input.movement_packet_count,
+                input.source_frame_count,
+                input.source_frame_ids_json,
+                input.source_evidence_ids_json,
+                input.mean_motion_intensity,
+                input.peak_motion_intensity,
+                input.mean_accelerometer_vector_intensity,
+                input.peak_accelerometer_peak_range,
+                input.mean_gyroscope_peak_range,
+                input.peak_gyroscope_peak_range,
+                input.stillness_ratio,
+                input.average_heart_rate_bpm,
+                input.max_heart_rate_bpm,
+                input.heart_rate_sample_count,
+                input.dominant_hr_zone,
+                input.gps_pace_seconds_per_km,
+                input.gps_speed_mps,
+                input.cadence_spm_candidate,
+                input.quality_flags_json,
+                input.provenance_json,
+            ],
+        )?;
+        if changed > 0 {
+            return Ok(true);
+        }
+
+        if let Some(existing) = self.activity_motion_feature(input.feature_id)? {
+            if existing.activity_session_id == input.activity_session_id
+                && existing.capture_session_id == input.capture_session_id.map(str::to_string)
+                && existing.start_time_unix_ms == input.start_time_unix_ms
+                && existing.end_time_unix_ms == input.end_time_unix_ms
+                && existing.sequence == input.sequence
+                && existing.movement_packet_count == input.movement_packet_count
+                && existing.source_frame_count == input.source_frame_count
+                && existing.source_frame_ids_json == input.source_frame_ids_json
+                && existing.source_evidence_ids_json == input.source_evidence_ids_json
+                && existing.mean_motion_intensity == input.mean_motion_intensity
+                && existing.peak_motion_intensity == input.peak_motion_intensity
+                && existing.mean_accelerometer_vector_intensity
+                    == input.mean_accelerometer_vector_intensity
+                && existing.peak_accelerometer_peak_range == input.peak_accelerometer_peak_range
+                && existing.mean_gyroscope_peak_range == input.mean_gyroscope_peak_range
+                && existing.peak_gyroscope_peak_range == input.peak_gyroscope_peak_range
+                && existing.stillness_ratio == input.stillness_ratio
+                && existing.average_heart_rate_bpm == input.average_heart_rate_bpm
+                && existing.max_heart_rate_bpm == input.max_heart_rate_bpm
+                && existing.heart_rate_sample_count == input.heart_rate_sample_count
+                && existing.dominant_hr_zone == input.dominant_hr_zone
+                && existing.gps_pace_seconds_per_km == input.gps_pace_seconds_per_km
+                && existing.gps_speed_mps == input.gps_speed_mps
+                && existing.cadence_spm_candidate == input.cadence_spm_candidate
+                && existing.quality_flags_json == input.quality_flags_json
+                && existing.provenance_json == input.provenance_json
+            {
+                return Ok(false);
+            }
+            return Err(OpenVitalsError::message(format!(
+                "activity motion feature {} already exists with different metadata",
+                input.feature_id
+            )));
+        }
+
+        Err(OpenVitalsError::message(format!(
+            "activity motion feature {} insert was ignored but no existing row was found",
+            input.feature_id
+        )))
+    }
+
+    pub fn activity_motion_feature(
+        &self,
+        feature_id: &str,
+    ) -> OpenVitalsResult<Option<ActivityMotionFeatureRow>> {
+        validate_required("feature_id", feature_id)?;
+        self.conn
+            .query_row(
+                r#"
+                SELECT
+                    feature_id,
+                    activity_session_id,
+                    capture_session_id,
+                    start_time_unix_ms,
+                    end_time_unix_ms,
+                    duration_ms,
+                    sequence,
+                    movement_packet_count,
+                    source_frame_count,
+                    source_frame_ids_json,
+                    source_evidence_ids_json,
+                    mean_motion_intensity,
+                    peak_motion_intensity,
+                    mean_accelerometer_vector_intensity,
+                    peak_accelerometer_peak_range,
+                    mean_gyroscope_peak_range,
+                    peak_gyroscope_peak_range,
+                    stillness_ratio,
+                    average_heart_rate_bpm,
+                    max_heart_rate_bpm,
+                    heart_rate_sample_count,
+                    dominant_hr_zone,
+                    gps_pace_seconds_per_km,
+                    gps_speed_mps,
+                    cadence_spm_candidate,
+                    quality_flags_json,
+                    provenance_json,
+                    created_at
+                FROM activity_motion_features
+                WHERE feature_id = ?1
+                "#,
+                params![feature_id],
+                activity_motion_feature_from_row,
+            )
+            .optional()
+            .map_err(OpenVitalsError::from)
+    }
+
+    pub fn activity_motion_features_for_session(
+        &self,
+        activity_session_id: &str,
+    ) -> OpenVitalsResult<Vec<ActivityMotionFeatureRow>> {
+        validate_required("activity_session_id", activity_session_id)?;
+        if self.activity_session(activity_session_id)?.is_none() {
+            return Err(OpenVitalsError::message(format!(
+                "activity session {} not found",
+                activity_session_id
+            )));
+        }
+        let mut statement = self.conn.prepare(
+            r#"
+            SELECT
+                feature_id,
+                activity_session_id,
+                capture_session_id,
+                start_time_unix_ms,
+                end_time_unix_ms,
+                duration_ms,
+                sequence,
+                movement_packet_count,
+                source_frame_count,
+                source_frame_ids_json,
+                source_evidence_ids_json,
+                mean_motion_intensity,
+                peak_motion_intensity,
+                mean_accelerometer_vector_intensity,
+                peak_accelerometer_peak_range,
+                mean_gyroscope_peak_range,
+                peak_gyroscope_peak_range,
+                stillness_ratio,
+                average_heart_rate_bpm,
+                max_heart_rate_bpm,
+                heart_rate_sample_count,
+                dominant_hr_zone,
+                gps_pace_seconds_per_km,
+                gps_speed_mps,
+                cadence_spm_candidate,
+                quality_flags_json,
+                provenance_json,
+                created_at
+            FROM activity_motion_features
+            WHERE activity_session_id = ?1
+            ORDER BY start_time_unix_ms, sequence, feature_id
+            "#,
+        )?;
+        let rows = statement.query_map(
+            params![activity_session_id],
+            activity_motion_feature_from_row,
+        )?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(OpenVitalsError::from)
+    }
+
+    pub fn activity_motion_features_for_session_in_window(
+        &self,
+        activity_session_id: &str,
+        start_time_unix_ms: i64,
+        end_time_unix_ms: i64,
+    ) -> OpenVitalsResult<Vec<ActivityMotionFeatureRow>> {
+        validate_required("activity_session_id", activity_session_id)?;
+        validate_non_negative("start_time_unix_ms", start_time_unix_ms)?;
+        validate_non_negative("end_time_unix_ms", end_time_unix_ms)?;
+        validate_window_order(start_time_unix_ms, end_time_unix_ms)?;
+        if self.activity_session(activity_session_id)?.is_none() {
+            return Err(OpenVitalsError::message(format!(
+                "activity session {} not found",
+                activity_session_id
+            )));
+        }
+        let mut statement = self.conn.prepare(
+            r#"
+            SELECT
+                feature_id,
+                activity_session_id,
+                capture_session_id,
+                start_time_unix_ms,
+                end_time_unix_ms,
+                duration_ms,
+                sequence,
+                movement_packet_count,
+                source_frame_count,
+                source_frame_ids_json,
+                source_evidence_ids_json,
+                mean_motion_intensity,
+                peak_motion_intensity,
+                mean_accelerometer_vector_intensity,
+                peak_accelerometer_peak_range,
+                mean_gyroscope_peak_range,
+                peak_gyroscope_peak_range,
+                stillness_ratio,
+                average_heart_rate_bpm,
+                max_heart_rate_bpm,
+                heart_rate_sample_count,
+                dominant_hr_zone,
+                gps_pace_seconds_per_km,
+                gps_speed_mps,
+                cadence_spm_candidate,
+                quality_flags_json,
+                provenance_json,
+                created_at
+            FROM activity_motion_features
+            WHERE activity_session_id = ?1
+              AND start_time_unix_ms < ?3
+              AND end_time_unix_ms > ?2
+            ORDER BY start_time_unix_ms, sequence, feature_id
+            "#,
+        )?;
+        let rows = statement.query_map(
+            params![activity_session_id, start_time_unix_ms, end_time_unix_ms],
+            activity_motion_feature_from_row,
         )?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(OpenVitalsError::from)
@@ -7018,6 +7428,17 @@ fn validate_json(name: &str, value: &str) -> OpenVitalsResult<()> {
     Ok(())
 }
 
+fn validate_json_array(name: &str, value: &str) -> OpenVitalsResult<usize> {
+    let parsed = serde_json::from_str::<serde_json::Value>(value)
+        .map_err(|error| OpenVitalsError::message(format!("{name} must be valid JSON: {error}")))?;
+    let Some(values) = parsed.as_array() else {
+        return Err(OpenVitalsError::message(format!(
+            "{name} must be a JSON array"
+        )));
+    };
+    Ok(values.len())
+}
+
 fn validate_command_report_json(record: &CommandValidationRecord) -> OpenVitalsResult<()> {
     let parsed =
         serde_json::from_str::<serde_json::Value>(&record.report_json).map_err(|error| {
@@ -7366,6 +7787,22 @@ fn validate_optional_non_negative_f64(name: &str, value: Option<f64>) -> OpenVit
     Ok(())
 }
 
+fn validate_unit_interval(name: &str, value: f64) -> OpenVitalsResult<()> {
+    if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+        return Err(OpenVitalsError::message(format!(
+            "{name} must be finite and between 0 and 1",
+        )));
+    }
+    Ok(())
+}
+
+fn validate_optional_unit_interval(name: &str, value: Option<f64>) -> OpenVitalsResult<()> {
+    if let Some(value) = value {
+        validate_unit_interval(name, value)?;
+    }
+    Ok(())
+}
+
 fn validate_positive(name: &str, value: i64) -> OpenVitalsResult<()> {
     if value <= 0 {
         Err(OpenVitalsError::message(format!("{name} must be positive")))
@@ -7567,6 +8004,89 @@ fn validate_activity_metric_input(
     validate_non_negative("end_time_unix_ms", input.end_time_unix_ms)?;
     validate_window_order(input.start_time_unix_ms, input.end_time_unix_ms)?;
     validate_json("quality_flags_json", input.quality_flags_json)?;
+    validate_json_object("provenance_json", input.provenance_json)?;
+    Ok(())
+}
+
+fn validate_activity_motion_feature_input(
+    _store: &OpenVitalsStore,
+    input: &ActivityMotionFeatureInput<'_>,
+) -> OpenVitalsResult<()> {
+    validate_required("feature_id", input.feature_id)?;
+    validate_required("activity_session_id", input.activity_session_id)?;
+    validate_optional_required("capture_session_id", input.capture_session_id)?;
+    validate_non_negative("start_time_unix_ms", input.start_time_unix_ms)?;
+    validate_non_negative("end_time_unix_ms", input.end_time_unix_ms)?;
+    validate_window_order(input.start_time_unix_ms, input.end_time_unix_ms)?;
+    validate_non_negative("sequence", input.sequence)?;
+    validate_non_negative("movement_packet_count", input.movement_packet_count)?;
+    validate_non_negative("source_frame_count", input.source_frame_count)?;
+    let source_frame_count = i64::try_from(validate_json_array(
+        "source_frame_ids_json",
+        input.source_frame_ids_json,
+    )?)
+    .map_err(|_| OpenVitalsError::message("source_frame_ids_json is too large"))?;
+    validate_json_array("source_evidence_ids_json", input.source_evidence_ids_json)?;
+    if source_frame_count != input.source_frame_count {
+        return Err(OpenVitalsError::message(
+            "source_frame_count must match source_frame_ids_json length",
+        ));
+    }
+    validate_unit_interval("mean_motion_intensity", input.mean_motion_intensity)?;
+    validate_unit_interval("peak_motion_intensity", input.peak_motion_intensity)?;
+    if input.peak_motion_intensity < input.mean_motion_intensity {
+        return Err(OpenVitalsError::message(
+            "peak_motion_intensity must be greater than or equal to mean_motion_intensity",
+        ));
+    }
+    validate_optional_unit_interval(
+        "mean_accelerometer_vector_intensity",
+        input.mean_accelerometer_vector_intensity,
+    )?;
+    validate_optional_non_negative_f64(
+        "peak_accelerometer_peak_range",
+        input.peak_accelerometer_peak_range,
+    )?;
+    validate_optional_non_negative_f64(
+        "mean_gyroscope_peak_range",
+        input.mean_gyroscope_peak_range,
+    )?;
+    validate_optional_non_negative_f64(
+        "peak_gyroscope_peak_range",
+        input.peak_gyroscope_peak_range,
+    )?;
+    validate_unit_interval("stillness_ratio", input.stillness_ratio)?;
+    validate_optional_non_negative_f64("average_heart_rate_bpm", input.average_heart_rate_bpm)?;
+    validate_optional_non_negative_f64("max_heart_rate_bpm", input.max_heart_rate_bpm)?;
+    validate_non_negative("heart_rate_sample_count", input.heart_rate_sample_count)?;
+    if let Some(max_heart_rate_bpm) = input.max_heart_rate_bpm
+        && let Some(average_heart_rate_bpm) = input.average_heart_rate_bpm
+        && max_heart_rate_bpm < average_heart_rate_bpm
+    {
+        return Err(OpenVitalsError::message(
+            "max_heart_rate_bpm must be greater than or equal to average_heart_rate_bpm",
+        ));
+    }
+    if input.heart_rate_sample_count == 0
+        && (input.average_heart_rate_bpm.is_some()
+            || input.max_heart_rate_bpm.is_some()
+            || input.dominant_hr_zone.is_some())
+    {
+        return Err(OpenVitalsError::message(
+            "heart-rate fields require heart_rate_sample_count > 0",
+        ));
+    }
+    if let Some(dominant_hr_zone) = input.dominant_hr_zone
+        && !(1..=5).contains(&dominant_hr_zone)
+    {
+        return Err(OpenVitalsError::message(
+            "dominant_hr_zone must be between 1 and 5",
+        ));
+    }
+    validate_optional_non_negative_f64("gps_pace_seconds_per_km", input.gps_pace_seconds_per_km)?;
+    validate_optional_non_negative_f64("gps_speed_mps", input.gps_speed_mps)?;
+    validate_optional_non_negative_f64("cadence_spm_candidate", input.cadence_spm_candidate)?;
+    validate_json_array("quality_flags_json", input.quality_flags_json)?;
     validate_json_object("provenance_json", input.provenance_json)?;
     Ok(())
 }
@@ -8107,6 +8627,41 @@ fn activity_metric_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Activit
     })
 }
 
+fn activity_motion_feature_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<ActivityMotionFeatureRow> {
+    Ok(ActivityMotionFeatureRow {
+        feature_id: row.get(0)?,
+        activity_session_id: row.get(1)?,
+        capture_session_id: row.get(2)?,
+        start_time_unix_ms: row.get(3)?,
+        end_time_unix_ms: row.get(4)?,
+        duration_ms: row.get(5)?,
+        sequence: row.get(6)?,
+        movement_packet_count: row.get(7)?,
+        source_frame_count: row.get(8)?,
+        source_frame_ids_json: row.get(9)?,
+        source_evidence_ids_json: row.get(10)?,
+        mean_motion_intensity: row.get(11)?,
+        peak_motion_intensity: row.get(12)?,
+        mean_accelerometer_vector_intensity: row.get(13)?,
+        peak_accelerometer_peak_range: row.get(14)?,
+        mean_gyroscope_peak_range: row.get(15)?,
+        peak_gyroscope_peak_range: row.get(16)?,
+        stillness_ratio: row.get(17)?,
+        average_heart_rate_bpm: row.get(18)?,
+        max_heart_rate_bpm: row.get(19)?,
+        heart_rate_sample_count: row.get(20)?,
+        dominant_hr_zone: row.get(21)?,
+        gps_pace_seconds_per_km: row.get(22)?,
+        gps_speed_mps: row.get(23)?,
+        cadence_spm_candidate: row.get(24)?,
+        quality_flags_json: row.get(25)?,
+        provenance_json: row.get(26)?,
+        created_at: row.get(27)?,
+    })
+}
+
 fn daily_activity_metric_from_row(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<DailyActivityMetricRow> {
@@ -8454,6 +9009,7 @@ pub fn known_tables() -> &'static [&'static str] {
         "rr_reference_samples",
         "activity_sessions",
         "activity_metrics",
+        "activity_motion_features",
         "daily_activity_metrics",
         "hourly_activity_metrics",
         "daily_recovery_metrics",

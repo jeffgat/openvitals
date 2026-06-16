@@ -590,6 +590,39 @@ extension OpenVitalsAppModel {
     }
   }
 
+  func attachActivityMotionFeatures(_ features: [[String: Any]]) {
+    guard !features.isEmpty else {
+      return
+    }
+    OpenVitalsRustBridge.performInBackground(qos: .utility, {
+      try OpenVitalsRustBridge().request(
+        method: "activity.attach_motion_features",
+        args: [
+          "database_path": HealthDataStore.defaultDatabasePath(),
+          "include_features": false,
+          "features": features,
+        ]
+      )
+    }) { [weak self] result in
+      guard let self else {
+        return
+      }
+      switch result {
+      case .success(let report):
+        let inserted = intValue(report["inserted"]) ?? 0
+        let existing = intValue(report["existing"]) ?? 0
+        ble.record(
+          level: .debug,
+          source: "rust",
+          title: "activity.motion_features.store.ok",
+          body: "inserted=\(inserted) existing=\(existing) requested=\(features.count)"
+        )
+      case .failure(let error):
+        ble.record(level: .warn, source: "rust", title: "activity.motion_features.store.failed", body: "count=\(features.count): \(String(describing: error))")
+      }
+    }
+  }
+
   func rustActivityType(for activity: ActivityKind) -> String {
     switch activity {
     case .run:

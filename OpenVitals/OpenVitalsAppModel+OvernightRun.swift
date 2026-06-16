@@ -101,6 +101,7 @@ extension OpenVitalsAppModel {
       overnightGuardLastTargetMissingWarningAt = .distantPast
       overnightGuardLastStorageWarningAt = .distantPast
       overnightGuardRawNotificationCount = 0
+      overnightGuardMobileStreamAcceptedFrameCount = 0
       overnightGuardRangePollCount = 0
       overnightGuardRangeTelemetryCount = 0
       overnightGuardSuccessfulRangePollCount = 0
@@ -189,10 +190,19 @@ extension OpenVitalsAppModel {
         self.writeOvernightGuardStatus(reason: "final_sync_blocked_after_live_stream_pause")
         return
       }
-      self.overnightGuardStatus = "Running final historical sync before export"
+      self.overnightGuardStatus = self.mobileCaptureStreamReady
+        ? "Streaming historical catch-up to Mac"
+        : "Running historical catch-up before export"
       self.refreshOvernightReadiness(reason: "final_sync_history_started")
       self.writeOvernightGuardStatus(reason: "final_sync_history_started")
-      self.ble.syncHistoricalPacketsPreservingUnreadQueue(rangeFirst: true)
+      if self.mobileCaptureStreamReady {
+        self.ble.streamHistoricalPacketsDirectly(maxDrainRounds: Self.overnightFinalHistoricalCatchUpRounds)
+      } else {
+        self.ble.syncHistoricalPackets(
+          rangeFirst: true,
+          maxDrainRounds: Self.overnightFinalHistoricalCatchUpRounds
+        )
+      }
     }
   }
 
@@ -445,6 +455,13 @@ extension OpenVitalsAppModel {
     guard overnightGuardActive, !overnightGuardFinalSyncPending else {
       return
     }
+    guard !mobileCaptureStreamEnabled else {
+      overnightGuardStatus = "Mac Stream active; range polls paused"
+      refreshOvernightReadiness(reason: "range_poll_paused_for_mac_stream")
+      writeOvernightGuardStatus(reason: "range_poll_paused_for_mac_stream")
+      ble.record(source: "overnight.guard", title: "range_poll.paused_for_mac_stream", body: reason)
+      return
+    }
     let delay = delay ?? Self.overnightGuardRangePollInterval
     let workItem = DispatchWorkItem { [weak self] in
       Task { @MainActor in
@@ -458,6 +475,13 @@ extension OpenVitalsAppModel {
   func runOvernightGuardRangePoll(reason: String) {
     overnightGuardRangePollWorkItem = nil
     guard overnightGuardActive, !overnightGuardFinalSyncPending else {
+      return
+    }
+    guard !mobileCaptureStreamEnabled else {
+      overnightGuardStatus = "Mac Stream active; range polls paused"
+      refreshOvernightReadiness(reason: "range_poll_paused_for_mac_stream")
+      writeOvernightGuardStatus(reason: "range_poll_paused_for_mac_stream")
+      ble.record(source: "overnight.guard", title: "range_poll.paused_for_mac_stream", body: reason)
       return
     }
 
@@ -570,7 +594,11 @@ extension OpenVitalsAppModel {
     }
 
     let endedAt = Date()
+    let shouldSkipFinalBundleForMacStream = reason.hasPrefix("final_sync") && mobileCaptureStreamReady
     let snapshot = overnightRawSpool.finish(status: reason, summary: overnightGuardManifestSummary(reason: reason))
+    if let sessionID = snapshot.sessionID {
+      finishOvernightMobileCaptureStream(sessionID: sessionID, endedAt: endedAt)
+    }
     overnightGuardActive = false
     overnightGuardRawNotificationCount = snapshot.notificationCount
     overnightGuardRangeTelemetryCount = snapshot.historicalRangePollCount
@@ -614,6 +642,14 @@ extension OpenVitalsAppModel {
     }
     ble.record(source: "overnight.guard", title: "stopped", body: overnightGuardStatus)
     if reason.hasPrefix("final_sync") {
+      if shouldSkipFinalBundleForMacStream {
+        let streamedFrames = overnightGuardMobileStreamAcceptedFrameCount
+        overnightGuardExportStatus = "Skipped phone bundle; streamed \(streamedFrames) frames to Mac Stream"
+        endOvernightGuardCriticalBackgroundTask(reason: "final_sync_streamed_to_mac")
+        writeOvernightGuardStatus(reason: "final_sync_streamed_to_mac")
+        ble.record(source: "overnight.guard", title: "final_sync.streamed_to_mac", body: overnightGuardExportStatus)
+        return
+      }
       exportOvernightGuardBundle(sessionID: snapshot.sessionID, reason: reason)
     }
   }

@@ -26,6 +26,7 @@ import {
   type CapturedFrameInput,
   type RrReferenceSampleInput,
 } from "../bridge/RustBridgeClient";
+import { MobileIngestServer } from "../mobile/MobileIngestServer";
 import {
   BATTERY_LEVEL_STATUS_UUID,
   BATTERY_LEVEL_UUID,
@@ -202,6 +203,7 @@ export class DebuggerController extends EventEmitter {
   private lastHelloFrameHex: string | undefined;
 
   private capture: CaptureState;
+  private readonly mobileIngest: MobileIngestServer;
   private rustReady = false;
   private rustVersion: string | undefined;
   private rustLastError: string | undefined;
@@ -239,6 +241,12 @@ export class DebuggerController extends EventEmitter {
       flushing: false,
       lastImportStatus: "idle",
     };
+    this.mobileIngest = new MobileIngestServer({
+      rust,
+      databasePath,
+      log: (level, source, message) => this.log(level, source, message),
+      onState: () => this.emitState(),
+    });
 
     noble.on("stateChange", (state) => {
       this.bluetoothState = state;
@@ -251,6 +259,7 @@ export class DebuggerController extends EventEmitter {
 
     this.rust.on("stderr", (line) => this.log("info", "rust", line));
     void this.initializeRust();
+    this.mobileIngest.start();
   }
 
   async initializeRust(): Promise<void> {
@@ -276,6 +285,7 @@ export class DebuggerController extends EventEmitter {
       scanning: this.scanning,
       devices: [...this.devices.values()].sort((left, right) => right.rssi - left.rssi),
       capture: { ...this.capture, pendingFrames: this.captureQueue.length },
+      mobileIngest: this.mobileIngest.getState(),
       packets: [...this.packets],
       logs: [...this.logs],
       rust: {
@@ -414,6 +424,7 @@ export class DebuggerController extends EventEmitter {
       databasePath,
       lastImportStatus: "database path updated",
     };
+    this.mobileIngest.setDatabasePath(databasePath);
     this.emitState();
     return this.getState();
   }
@@ -869,6 +880,7 @@ export class DebuggerController extends EventEmitter {
     if (this.scanning) {
       await stopScanning();
     }
+    await this.mobileIngest.stop();
     this.rust.stop();
   }
 

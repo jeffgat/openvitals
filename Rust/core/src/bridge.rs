@@ -159,10 +159,10 @@ use crate::{
     step_motion_estimator::{RawMotionStepEstimateOptions, run_raw_motion_step_estimate_for_store},
     storage_check::{StorageCheckOptions, check_storage_database},
     store::{
-        ActivityIntervalInput, ActivityMetricInput, ActivityMetricRow, ActivitySessionInput,
-        ActivitySessionRow, AlgorithmPreferenceRecord, AlgorithmRunRecord, CURRENT_SCHEMA_VERSION,
-        CalibrationLabelInput, CalibrationLabelRow, CaptureSessionInput, CaptureSessionRow,
-        CommandValidationRecord, DecodedFrameRow, ExternalSleepSessionInput,
+        ActivityIntervalInput, ActivityMetricInput, ActivityMetricRow, ActivityMotionFeatureInput,
+        ActivitySessionInput, ActivitySessionRow, AlgorithmPreferenceRecord, AlgorithmRunRecord,
+        CURRENT_SCHEMA_VERSION, CalibrationLabelInput, CalibrationLabelRow, CaptureSessionInput,
+        CaptureSessionRow, CommandValidationRecord, DecodedFrameRow, ExternalSleepSessionInput,
         ExternalSleepSessionRow, ExternalSleepStageInput, ExternalSleepStageRow, OpenVitalsStore,
         OvernightHistoricalRangePollInput, OvernightRawNotificationInput,
         OvernightSyncSessionInput, RrReferenceSampleInput, SleepCorrectionLabelInput,
@@ -1876,6 +1876,76 @@ struct ActivityMetricWindowArgs {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct ActivityMotionFeatureAttachBatchArgs {
+    database_path: String,
+    features: Vec<ActivityMotionFeatureAttachInputArgs>,
+    #[serde(default = "default_true")]
+    include_features: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ActivityMotionFeatureAttachInputArgs {
+    feature_id: String,
+    activity_session_id: String,
+    #[serde(default)]
+    capture_session_id: Option<String>,
+    start_time_unix_ms: i64,
+    end_time_unix_ms: i64,
+    sequence: i64,
+    movement_packet_count: i64,
+    #[serde(default)]
+    source_frame_ids: Vec<String>,
+    #[serde(default)]
+    source_evidence_ids: Vec<String>,
+    mean_motion_intensity: f64,
+    peak_motion_intensity: f64,
+    #[serde(default)]
+    mean_accelerometer_vector_intensity: Option<f64>,
+    #[serde(default)]
+    peak_accelerometer_peak_range: Option<f64>,
+    #[serde(default)]
+    mean_gyroscope_peak_range: Option<f64>,
+    #[serde(default)]
+    peak_gyroscope_peak_range: Option<f64>,
+    stillness_ratio: f64,
+    #[serde(default)]
+    average_heart_rate_bpm: Option<f64>,
+    #[serde(default)]
+    max_heart_rate_bpm: Option<f64>,
+    heart_rate_sample_count: i64,
+    #[serde(default)]
+    dominant_hr_zone: Option<i64>,
+    #[serde(default)]
+    gps_pace_seconds_per_km: Option<f64>,
+    #[serde(default)]
+    gps_speed_mps: Option<f64>,
+    #[serde(default)]
+    cadence_spm_candidate: Option<f64>,
+    #[serde(default = "empty_json_array")]
+    quality_flags: serde_json::Value,
+    #[serde(default = "empty_json_object")]
+    provenance: serde_json::Value,
+}
+
+struct SerializedActivityMotionFeatureAttachArg<'a> {
+    feature: &'a ActivityMotionFeatureAttachInputArgs,
+    source_frame_ids_json: String,
+    source_evidence_ids_json: String,
+    quality_flags_json: String,
+    provenance_json: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ActivityMotionFeatureListArgs {
+    database_path: String,
+    activity_session_id: String,
+    #[serde(default)]
+    start_time_unix_ms: Option<i64>,
+    #[serde(default)]
+    end_time_unix_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct ActivityIntervalAttachArgs {
     database_path: String,
     interval_id: String,
@@ -2859,6 +2929,16 @@ fn handle_bridge_request_inner(request: BridgeRequest) -> BridgeResponse {
                 .map(|value| bridge_ok(&request.request_id, value))
                 .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error))
         }
+        "activity.attach_motion_features" => {
+            request_args::<ActivityMotionFeatureAttachBatchArgs>(&request)
+                .and_then(activity_attach_motion_features_bridge)
+                .map(|value| bridge_ok(&request.request_id, value))
+                .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error))
+        }
+        "activity.list_motion_features" => request_args::<ActivityMotionFeatureListArgs>(&request)
+            .and_then(activity_list_motion_features_bridge)
+            .map(|value| bridge_ok(&request.request_id, value))
+            .unwrap_or_else(|error| bridge_error(&request.request_id, "method_error", error)),
         "sleep.import_external_history" => request_args::<ExternalSleepHistoryImportArgs>(&request)
             .and_then(external_sleep_history_import_bridge)
             .map(|value| bridge_ok(&request.request_id, value))
@@ -7926,6 +8006,131 @@ fn activity_metrics_for_session_in_window_bridge(
         "end_time_unix_ms": args.end_time_unix_ms,
         "metric_count": metrics.len(),
         "metrics": metrics,
+    }))
+}
+
+fn activity_attach_motion_features_bridge(
+    args: ActivityMotionFeatureAttachBatchArgs,
+) -> OpenVitalsResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let serialized = args
+        .features
+        .iter()
+        .map(|feature| {
+            Ok(SerializedActivityMotionFeatureAttachArg {
+                feature,
+                source_frame_ids_json: serde_json::to_string(&feature.source_frame_ids).map_err(
+                    |error| {
+                        OpenVitalsError::message(format!(
+                            "cannot serialize source_frame_ids: {error}"
+                        ))
+                    },
+                )?,
+                source_evidence_ids_json: serde_json::to_string(&feature.source_evidence_ids)
+                    .map_err(|error| {
+                        OpenVitalsError::message(format!(
+                            "cannot serialize source_evidence_ids: {error}"
+                        ))
+                    })?,
+                quality_flags_json: serde_json::to_string(&feature.quality_flags).map_err(
+                    |error| {
+                        OpenVitalsError::message(format!("cannot serialize quality_flags: {error}"))
+                    },
+                )?,
+                provenance_json: json_object_string("provenance", &feature.provenance)?,
+            })
+        })
+        .collect::<OpenVitalsResult<Vec<_>>>()?;
+    let inputs = serialized
+        .iter()
+        .map(|serialized| ActivityMotionFeatureInput {
+            feature_id: &serialized.feature.feature_id,
+            activity_session_id: &serialized.feature.activity_session_id,
+            capture_session_id: serialized.feature.capture_session_id.as_deref(),
+            start_time_unix_ms: serialized.feature.start_time_unix_ms,
+            end_time_unix_ms: serialized.feature.end_time_unix_ms,
+            sequence: serialized.feature.sequence,
+            movement_packet_count: serialized.feature.movement_packet_count,
+            source_frame_count: i64::try_from(serialized.feature.source_frame_ids.len())
+                .unwrap_or(i64::MAX),
+            source_frame_ids_json: &serialized.source_frame_ids_json,
+            source_evidence_ids_json: &serialized.source_evidence_ids_json,
+            mean_motion_intensity: serialized.feature.mean_motion_intensity,
+            peak_motion_intensity: serialized.feature.peak_motion_intensity,
+            mean_accelerometer_vector_intensity: serialized
+                .feature
+                .mean_accelerometer_vector_intensity,
+            peak_accelerometer_peak_range: serialized.feature.peak_accelerometer_peak_range,
+            mean_gyroscope_peak_range: serialized.feature.mean_gyroscope_peak_range,
+            peak_gyroscope_peak_range: serialized.feature.peak_gyroscope_peak_range,
+            stillness_ratio: serialized.feature.stillness_ratio,
+            average_heart_rate_bpm: serialized.feature.average_heart_rate_bpm,
+            max_heart_rate_bpm: serialized.feature.max_heart_rate_bpm,
+            heart_rate_sample_count: serialized.feature.heart_rate_sample_count,
+            dominant_hr_zone: serialized.feature.dominant_hr_zone,
+            gps_pace_seconds_per_km: serialized.feature.gps_pace_seconds_per_km,
+            gps_speed_mps: serialized.feature.gps_speed_mps,
+            cadence_spm_candidate: serialized.feature.cadence_spm_candidate,
+            quality_flags_json: &serialized.quality_flags_json,
+            provenance_json: &serialized.provenance_json,
+        })
+        .collect::<Vec<_>>();
+    let (inserted, existing) =
+        store.immediate_transaction(|store| store.insert_activity_motion_features(&inputs))?;
+    let features = if args.include_features {
+        args.features
+            .iter()
+            .map(|feature| {
+                store
+                    .activity_motion_feature(&feature.feature_id)?
+                    .ok_or_else(|| {
+                        OpenVitalsError::message(format!(
+                            "activity motion feature {} not found",
+                            feature.feature_id
+                        ))
+                    })
+            })
+            .collect::<OpenVitalsResult<Vec<_>>>()?
+    } else {
+        Vec::new()
+    };
+
+    Ok(json!({
+        "schema": "open_vitals.activity-motion-feature-batch-result.v1",
+        "generated_by": "open-vitals-bridge",
+        "feature_count": args.features.len(),
+        "inserted": inserted,
+        "existing": existing,
+        "features": features,
+    }))
+}
+
+fn activity_list_motion_features_bridge(
+    args: ActivityMotionFeatureListArgs,
+) -> OpenVitalsResult<serde_json::Value> {
+    let store = open_bridge_store(&args.database_path)?;
+    let features = match (args.start_time_unix_ms, args.end_time_unix_ms) {
+        (Some(start_time_unix_ms), Some(end_time_unix_ms)) => store
+            .activity_motion_features_for_session_in_window(
+                &args.activity_session_id,
+                start_time_unix_ms,
+                end_time_unix_ms,
+            )?,
+        (None, None) => store.activity_motion_features_for_session(&args.activity_session_id)?,
+        _ => {
+            return Err(OpenVitalsError::message(
+                "start_time_unix_ms and end_time_unix_ms must be provided together",
+            ));
+        }
+    };
+    Ok(json!({
+        "schema": "open_vitals.activity-motion-feature-list.v1",
+        "generated_by": "open-vitals-bridge",
+        "activity_session_id": args.activity_session_id,
+        "start_time_unix_ms": args.start_time_unix_ms,
+        "end_time_unix_ms": args.end_time_unix_ms,
+        "feature_count": features.len(),
+        "features": features,
     }))
 }
 

@@ -1488,7 +1488,7 @@ struct MoreStreamProbePlanView: View {
           model.startLeanOvernightGuard()
         }
         MoreActionRow(
-          title: "Final Sync + Export",
+          title: bedtimeFinalSyncTitle,
           detail: bedtimeFinalSyncDetail,
           systemImage: "arrow.triangle.2.circlepath",
           status: bedtimeFinalSyncStatus,
@@ -1921,6 +1921,10 @@ struct MoreStreamProbePlanView: View {
     return model.ble.canSyncHistorical ? .ready : .blocked
   }
 
+  private var bedtimeFinalSyncTitle: String {
+    model.mobileCaptureStreamReady ? "Final Sync to Mac" : "Final Sync + Export"
+  }
+
   private var bedtimeFinalSyncDisabled: Bool {
     !model.overnightGuardActive
       || model.ble.isHistoricalSyncing
@@ -1935,10 +1939,15 @@ struct MoreStreamProbePlanView: View {
     }
     if model.overnightGuardActive {
       if model.ble.isHistoricalSyncing {
-        return "Historical sync is already running. Keep the app open until the final bundle appears."
+        return model.mobileCaptureStreamReady
+          ? "Historical sync is already running. Keep the app open while Mac Stream imports frames."
+          : "Historical sync is already running. Keep the app open until the final bundle appears."
       }
       if !model.ble.canSyncHistorical {
         return "Final sync blocked: \(model.ble.historicalSyncStatus)"
+      }
+      if model.mobileCaptureStreamReady {
+        return "Morning action: pauses live capture, drains historical data to Mac Stream, then stops the guard."
       }
       return "Morning action: pauses live capture, drains historical data, then creates the bedtime-scoped bundle."
     }

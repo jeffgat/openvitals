@@ -18,24 +18,27 @@ if (!databasePath) {
   throw new Error("OPENVITALS_BLE_DEBUGGER_DB is required");
 }
 
+const daemonMode = process.env.OPENVITALS_BLE_HOST_DAEMON === "1";
 const controller = new DebuggerController(new RustBridgeClient(repoRoot), databasePath, repoRoot);
 controller.on("state", (state) => {
   write({ event: "state", payload: state });
 });
 
-const lines = readline.createInterface({ input: process.stdin });
-lines.on("line", (line) => {
-  if (line.trim().length === 0) {
-    return;
-  }
-  void handleLine(line);
-});
-lines.on("close", () => {
-  void controller.shutdown().finally(() => process.exit(0));
-});
-process.stdin.on("end", () => {
-  void controller.shutdown().finally(() => process.exit(0));
-});
+if (!daemonMode) {
+  const lines = readline.createInterface({ input: process.stdin });
+  lines.on("line", (line) => {
+    if (line.trim().length === 0) {
+      return;
+    }
+    void handleLine(line);
+  });
+  lines.on("close", () => {
+    void controller.shutdown().finally(() => process.exit(0));
+  });
+  process.stdin.on("end", () => {
+    void controller.shutdown().finally(() => process.exit(0));
+  });
+}
 
 process.on("SIGTERM", () => {
   void controller.shutdown().finally(() => process.exit(0));

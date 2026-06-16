@@ -57,35 +57,361 @@ struct MoreGreetingHeader: View {
 }
 
 struct MoreDeveloperView: View {
+  @EnvironmentObject private var model: OpenVitalsAppModel
+  @ObservedObject var store: MoreDataStore
   let routes: [MoreRoute]
   let routeStatus: MoreRouteStatus
+  @State private var advancedToolsExpanded = false
 
   var body: some View {
     List {
-      Section("Tools") {
-        ForEach(routes) { route in
-          NavigationLink(value: route) {
-            MoreRouteRow(route: route, status: routeStatus[keyPath: route.statusKeyPath], showsStatus: true)
-          }
-          .accessibilityLabel(route.title)
+      Section("Mac Stream") {
+        MoreInfoRow(
+          title: "Status",
+          value: macStreamSummary,
+          systemImage: "network",
+          status: macStreamStatus
+        )
+        Toggle(
+          isOn: Binding(
+            get: { model.mobileCaptureStreamEnabled },
+            set: { model.setMobileCaptureStreamEnabled($0) }
+          )
+        ) {
+          Label("Enable Mac Stream", systemImage: "dot.radiowaves.left.and.right")
         }
       }
 
-      Section("Scope") {
+      Section("Live Data") {
+        MoreActionRow(
+          title: liveDataActionTitle,
+          detail: liveDataDetail,
+          systemImage: liveDataActionIcon,
+          status: liveDataStatus,
+          disabled: liveDataDisabled
+        ) {
+          if liveDataShouldStartOrReplace {
+            model.startDataCollectionLiveCapture()
+          } else {
+            model.stopHealthPacketCapture(reason: "data_collection_live_stop")
+          }
+        }
         MoreInfoRow(
-          title: "Developer Surface",
-          value: "Internal capture, export, storage, bridge, and algorithm tools live here instead of the main More page.",
-          systemImage: "hammer",
-          status: .ready,
-          statusTitle: "Available"
+          title: "Live Frames",
+          value: model.healthPacketCaptureTargetSummary,
+          systemImage: "waveform.path.ecg",
+          status: model.healthPacketCaptureSessionID == nil ? .notRun : .listening
         )
+      }
+
+      Section("Historical Data") {
+        MoreActionRow(
+          title: historicalActionTitle,
+          detail: historicalActionDetail,
+          systemImage: historicalActionIcon,
+          status: historicalActionStatus,
+          disabled: historicalActionDisabled
+        ) {
+          if model.overnightGuardActive {
+            model.requestOvernightGuardFinalSync()
+          } else {
+            model.startLeanOvernightGuard()
+          }
+        }
+        if model.overnightGuardActive {
+          MoreActionRow(
+            title: "Stop Historical Collection",
+            detail: "Stops the guard without running another historical drain.",
+            systemImage: "stop.circle",
+            status: .stale,
+            disabled: model.ble.isHistoricalSyncing || model.overnightGuardExportInProgress
+          ) {
+            model.stopOvernightGuard()
+          }
+        }
+        MoreInfoRow(
+          title: "Backlog",
+          value: model.overnightGuardTargetSummary,
+          systemImage: "clock.arrow.circlepath",
+          status: historicalTargetStatus
+        )
+        MoreInfoRow(
+          title: "Guard",
+          value: model.overnightGuardStatus,
+          systemImage: "moon",
+          status: historicalGuardStatus
+        )
+      }
+
+      Section("Reference Data") {
+        MoreActionRow(
+          title: store.guidedReferenceProbeInProgress ? "Cancel Reference Run" : "Start Reference Run",
+          detail: store.guidedReferenceProbeStatus,
+          systemImage: store.guidedReferenceProbeInProgress ? "xmark.circle" : "waveform.path.ecg.rectangle",
+          status: referenceRunStatus,
+          disabled: referenceRunDisabled
+        ) {
+          if store.guidedReferenceProbeInProgress {
+            store.cancelGuidedReferenceProbe()
+          } else {
+            store.startGuidedReferenceProbe(model: model)
+          }
+        }
+        MoreInfoRow(
+          title: "Reference Strap",
+          value: referenceSummary,
+          systemImage: "heart.circle",
+          status: referenceStatus
+        )
+      }
+
+      Section("Export Fallback") {
+        MoreActionRow(
+          title: "Create Local Export",
+          detail: exportDetail,
+          systemImage: "externaldrive.badge.plus",
+          status: exportStatus,
+          disabled: store.localExportInProgress || model.overnightGuardExportInProgress
+        ) {
+          store.saveLocalDataBundle()
+        }
+        if store.localExportInProgress {
+          MoreLocalExportProgressView(
+            progress: store.localExportProgress,
+            fallback: store.localExportStatus
+          )
+        }
+        if let localExportURL = store.localExportURL {
+          ShareLink(item: localExportURL) {
+            Label("AirDrop Local Data File", systemImage: "square.and.arrow.up")
+          }
+        }
+        if let localExportManifestURL = store.localExportManifestURL {
+          ShareLink(item: localExportManifestURL) {
+            Label("AirDrop Manifest", systemImage: "list.bullet.rectangle")
+          }
+        }
+      }
+
+      Section("Advanced") {
+        DisclosureGroup(isExpanded: $advancedToolsExpanded) {
+          ForEach(routes) { route in
+            NavigationLink(value: route) {
+              MoreRouteRow(route: route, status: routeStatus[keyPath: route.statusKeyPath], showsStatus: true)
+            }
+            .accessibilityLabel(route.title)
+          }
+        } label: {
+          Label("Advanced Tools", systemImage: "slider.horizontal.3")
+        }
       }
     }
     .listStyle(.insetGrouped)
     .openVitalsListBackground()
-    .navigationTitle("Developer")
+    .navigationTitle("Data Collection")
     .navigationBarTitleDisplayMode(.inline)
     .toolbarBackground(.hidden, for: .navigationBar)
+  }
+
+  private var macStreamStatus: MoreStatusKind {
+    if !model.mobileCaptureStreamEnabled {
+      return .pending
+    }
+    if !model.mobileCaptureStreamReady {
+      return .blocked
+    }
+    if model.mobileCaptureStreamStatus.localizedCaseInsensitiveContains("failed")
+      || model.mobileCaptureStreamStatus.localizedCaseInsensitiveContains("dropped") {
+      return .stale
+    }
+    return .ready
+  }
+
+  private var macStreamSummary: String {
+    "\(model.mobileCaptureStreamStatus) | queued \(model.mobileCaptureStreamQueuedFrameCount) | sent \(model.mobileCaptureStreamSentFrameCount) | imported \(model.mobileCaptureStreamImportedFrameCount) | raw \(model.mobileCaptureStreamRawInsertedCount)"
+  }
+
+  private var liveDataStatus: MoreStatusKind {
+    if model.healthPacketCaptureSessionID != nil, !passiveCaptureOccupiesLiveSlot {
+      return .listening
+    }
+    if !model.mobileCaptureStreamReady {
+      return .blocked
+    }
+    return model.ble.connectionState == "ready" ? .notRun : .blocked
+  }
+
+  private var liveDataDisabled: Bool {
+    liveDataShouldStartOrReplace
+      && (!model.mobileCaptureStreamReady || model.ble.connectionState != "ready")
+  }
+
+  private var liveDataDetail: String {
+    if passiveCaptureOccupiesLiveSlot {
+      return "Replaces the passive activity capture with a diagnostic live stream to the Mac."
+    }
+    if model.healthPacketCaptureSessionID != nil {
+      return model.healthPacketCaptureTargetSummary
+    }
+    if !model.mobileCaptureStreamReady {
+      return "Enable Mac Stream before starting long live collection."
+    }
+    if model.ble.connectionState != "ready" {
+      return "Connect the device before starting live collection."
+    }
+    return "Streams live movement, heart, optical, pulse, temperature/history, and metadata frames to the Mac."
+  }
+
+  private var passiveCaptureOccupiesLiveSlot: Bool {
+    model.activeHealthPacketCapture?.source == "auto.passive_activity_detection"
+  }
+
+  private var liveDataShouldStartOrReplace: Bool {
+    model.healthPacketCaptureSessionID == nil || passiveCaptureOccupiesLiveSlot
+  }
+
+  private var liveDataActionTitle: String {
+    liveDataShouldStartOrReplace ? "Start Live Data" : "Stop Live Data"
+  }
+
+  private var liveDataActionIcon: String {
+    liveDataShouldStartOrReplace ? "record.circle" : "stop.circle"
+  }
+
+  private var historicalActionTitle: String {
+    if model.ble.isHistoricalSyncing {
+      return "Historical Sync Running"
+    }
+    if model.overnightGuardActive {
+      return model.mobileCaptureStreamReady ? "Drain History to Mac" : "Drain History + Export"
+    }
+    return "Start Historical Collection"
+  }
+
+  private var historicalActionIcon: String {
+    model.overnightGuardActive ? "arrow.triangle.2.circlepath" : "clock.arrow.circlepath"
+  }
+
+  private var historicalActionStatus: MoreStatusKind {
+    if model.ble.isHistoricalSyncing {
+      return .inProgress
+    }
+    if model.overnightGuardActive {
+      return .listening
+    }
+    if model.ble.connectionState != "ready" {
+      return .blocked
+    }
+    return .notRun
+  }
+
+  private var historicalActionDisabled: Bool {
+    model.ble.isHistoricalSyncing
+      || model.overnightGuardExportInProgress
+      || (!model.overnightGuardActive && model.ble.connectionState != "ready")
+      || (model.overnightGuardActive && !model.ble.canSyncHistorical)
+  }
+
+  private var historicalActionDetail: String {
+    if model.ble.isHistoricalSyncing {
+      return "Historical packets are draining now. Keep the app foregrounded."
+    }
+    if model.overnightGuardActive {
+      if !model.ble.canSyncHistorical {
+        return "Historical drain blocked: \(model.ble.historicalSyncStatus)"
+      }
+      if model.mobileCaptureStreamReady {
+        return "Pulls delayed historical frames from the device and streams them to the Mac database."
+      }
+      return "Pulls delayed historical frames and falls back to a phone-side export."
+    }
+    if model.ble.connectionState != "ready" {
+      return "Connect the device before starting historical collection."
+    }
+    return "Starts the lean historical guard. Run the drain action when you are ready to catch up."
+  }
+
+  private var historicalTargetStatus: MoreStatusKind {
+    model.overnightGuardTargetSummary.contains("K18 0 | K24 0 | K25 0 | K26 0") ? .pending : .ready
+  }
+
+  private var historicalGuardStatus: MoreStatusKind {
+    if model.overnightGuardActive {
+      return .listening
+    }
+    if model.overnightGuardStatus.localizedCaseInsensitiveContains("failed")
+      || model.overnightGuardStatus.localizedCaseInsensitiveContains("blocked") {
+      return .blocked
+    }
+    if model.overnightGuardStatus.hasPrefix("Stopped") {
+      return .stale
+    }
+    return .notRun
+  }
+
+  private var referenceRunStatus: MoreStatusKind {
+    if store.guidedReferenceProbeInProgress {
+      return .inProgress
+    }
+    if store.rrReferenceCapture.hasLiveRRSamples || store.rrReferenceCapture.sampleCount > 0 {
+      return .ready
+    }
+    if model.ble.connectionState != "ready" {
+      return .blocked
+    }
+    return .notRun
+  }
+
+  private var referenceRunDisabled: Bool {
+    if store.guidedReferenceProbeInProgress {
+      return false
+    }
+    return store.automaticStreamProbeInProgress
+      || store.localExportInProgress
+      || model.ble.connectionState != "ready"
+  }
+
+  private var referenceStatus: MoreStatusKind {
+    if store.rrReferenceCapture.isCapturing {
+      return .listening
+    }
+    if store.rrReferenceCapture.sampleCount > 0 {
+      return .ready
+    }
+    return .pending
+  }
+
+  private var referenceSummary: String {
+    let capture = store.rrReferenceCapture
+    let heartRate = capture.lastHeartRateBPM.map { "\($0) bpm" } ?? "-- bpm"
+    let rr = capture.lastRRIntervalMS.map { "\(Int($0.rounded())) ms" } ?? "-- ms"
+    return "\(capture.sampleCount) RR samples | \(capture.notificationCount) notifications | HR \(heartRate) | RR \(rr)"
+  }
+
+  private var exportStatus: MoreStatusKind {
+    if store.localExportInProgress || model.overnightGuardExportInProgress {
+      return .inProgress
+    }
+    if store.localExportURL != nil || model.overnightGuardExportURL != nil {
+      return .ready
+    }
+    return .pending
+  }
+
+  private var exportDetail: String {
+    if model.overnightGuardExportInProgress {
+      return model.overnightGuardExportStatus
+    }
+    if store.localExportInProgress {
+      return store.localExportStatus
+    }
+    if store.localExportURL != nil {
+      return "Bundle ready. Share the local data file and manifest below."
+    }
+    if model.mobileCaptureStreamReady {
+      return "Fallback only. The Mac database should already be receiving streamed frames."
+    }
+    return "Creates a local bundle when Mac Stream is unavailable or you need a portable evidence file."
   }
 }
 

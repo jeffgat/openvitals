@@ -297,6 +297,10 @@ extension OpenVitalsBLEClient {
     if resultCode == 1 {
       if let scheduledDate = pending.kind.scheduledDate {
         lastAlarmScheduledAt = scheduledDate
+        persistWakeAlarmTarget(
+          scheduledAt: scheduledDate,
+          alarmID: pending.kind.alarmID.map(Int.init)
+        )
       }
       if let alarmID = pending.kind.alarmID {
         lastAlarmID = Int(alarmID)
@@ -304,6 +308,7 @@ extension OpenVitalsBLEClient {
       if case .disableAll = pending.kind {
         lastAlarmScheduledAt = nil
         lastAlarmID = nil
+        clearPersistedWakeAlarmTarget(reason: "disable command response")
       }
       alarmCommandStatus = "\(pending.kind.name) \(result)\(detail)"
       record(source: "ble.alarm", title: "alarm.command.response", body: "\(lastAlarmResponseSummary) payload=\(lastAlarmResponsePayloadHex)")
@@ -334,6 +339,7 @@ extension OpenVitalsBLEClient {
     case 59:
       lastAlarmScheduledAt = nil
       lastAlarmID = nil
+      clearPersistedWakeAlarmTarget(reason: "device disabled event")
       alarmCommandStatus = "Band alarm disabled"
       lastAlarmEventSummary = "STRAP_DRIVEN_ALARM_DISABLED"
       record(source: "ble.alarm", title: "alarm.event", body: "STRAP_DRIVEN_ALARM_DISABLED")
@@ -410,6 +416,10 @@ extension OpenVitalsBLEClient {
     if let alarmID {
       lastAlarmID = Int(alarmID)
     }
+    persistWakeAlarmTarget(
+      scheduledAt: date,
+      alarmID: alarmID.map(Int.init)
+    )
     alarmCommandStatus = "Band alarm set for \(Self.alarmTimeFormatter.string(from: date))"
     lastAlarmEventSummary = "STRAP_DRIVEN_ALARM_SET slot \(alarmID.map(String.init) ?? "legacy") \(date.formatted(date: .abbreviated, time: .standard))"
     record(
@@ -655,6 +665,8 @@ extension OpenVitalsBLEClient {
     historicalCommandTimeoutWorkItem?.cancel()
     historicalIdleWorkItem?.cancel()
     historicalRangeRetryWorkItem?.cancel()
+    historicalCatchUpWorkItem?.cancel()
+    historicalResumeWorkItem?.cancel()
     readySyncWorkItem?.cancel()
     let completedAt = Date()
     flushCoalescedHistoricalDataPackets(
@@ -663,6 +675,9 @@ extension OpenVitalsBLEClient {
       force: true,
       rescheduleIdle: false
     )
+    if continueHistoricalCatchUpIfNeeded(reason: reason, at: completedAt) {
+      return
+    }
     let sawHistoricalMetadata = historyStartReceived || historyEndReceived || historyCompleteReceived
     pendingHistoricalCommand = nil
     historyEndAckQueued = false
@@ -674,7 +689,12 @@ extension OpenVitalsBLEClient {
     historicalRangePendingResponses = 0
     historicalRangeRetryCount = 0
     historicalTransferRequestAttemptCount = 0
+    historicalDrainRound = 1
+    historicalMaxDrainRounds = 1
+    historicalPacketsReceivedAtDrainRoundStart = 0
     historicalDataResultAckEnabled = true
+    activeHistoricalSyncRequest = nil
+    pendingHistoricalSyncResumeRequest = nil
     let rangeOnly = historicalRangePollOnly
     isHistoricalSyncing = false
     historicalRangePollOnly = false
@@ -683,7 +703,7 @@ extension OpenVitalsBLEClient {
     lastHistoricalSyncCompletedAt = completedAt
     lastSyncAt = completedAt
     let detail = rangeOnly
-      ? "Historical range poll complete"
+      ? (reason == "historical_range_unavailable" ? "Historical range unavailable; live data unaffected" : "Historical range poll complete")
       : sawHistoricalMetadata && historicalPacketsReceivedThisSync == 0
       ? "Historical metadata captured but no packet bodies received"
       : historicalPacketsReceivedThisSync == 0
@@ -694,10 +714,69 @@ extension OpenVitalsBLEClient {
     record(source: "ble.sync", title: "historical_sync.completed", body: "reason=\(reason) \(detail)")
   }
 
+  func continueHistoricalCatchUpIfNeeded(reason: String, at date: Date) -> Bool {
+    guard !historicalRangePollOnly,
+          historicalMaxDrainRounds > historicalDrainRound else {
+      return false
+    }
+
+    let roundPacketCount = historicalPacketsReceivedThisSync - historicalPacketsReceivedAtDrainRoundStart
+    guard roundPacketCount > 0 else {
+      record(
+        level: .debug,
+        source: "ble.sync",
+        title: "historical_sync.catch_up.done",
+        body: "round=\(historicalDrainRound)/\(historicalMaxDrainRounds) reason=no_new_packets last_reason=\(reason)"
+      )
+      return false
+    }
+
+    historicalDrainRound += 1
+    historicalPacketsReceivedAtDrainRoundStart = historicalPacketsReceivedThisSync
+    historicalRangePendingResponses = 0
+    historicalRangeRetryCount = 0
+    historicalTransferRequestAttemptCount = 0
+    pendingHistoricalCommand = nil
+    historyStartReceived = false
+    historyEndReceived = false
+    historyCompleteReceived = false
+    historyEndAckQueued = false
+    historyEndAckSentThisBurst = false
+    pendingHistoryEndAckPayload = nil
+    historicalSyncStatus = "syncing"
+
+    let nextCommand = activeHistoricalSyncRequest?.firstCommandOverride ?? .getDataRange
+    let detail = "Catch-up round \(historicalDrainRound)/\(historicalMaxDrainRounds) after \(roundPacketCount) packets"
+    publishSyncToast(phase: .syncing, detail: detail)
+    notifyHistoricalSyncProgress(status: "syncing", detail: detail, terminal: false, failed: false)
+    record(
+      source: "ble.sync",
+      title: "historical_sync.catch_up.continue",
+      body: "round=\(historicalDrainRound)/\(historicalMaxDrainRounds) previous_round_packets=\(roundPacketCount) total_packets=\(historicalPacketsReceivedThisSync) previous_reason=\(reason)"
+    )
+
+    historicalCatchUpWorkItem?.cancel()
+    let runID = historicalSyncRunID
+    let workItem = DispatchWorkItem { [weak self] in
+      guard let self,
+            self.historicalSyncRunID == runID,
+            self.isHistoricalSyncing,
+            self.pendingHistoricalCommand == nil else {
+        return
+      }
+      self.writeHistoricalCommand(nextCommand)
+    }
+    historicalCatchUpWorkItem = workItem
+    DispatchQueue.main.asyncAfter(deadline: .now() + historicalCatchUpRoundDelay, execute: workItem)
+    return true
+  }
+
   func failHistoricalSync(_ message: String) {
     historicalCommandTimeoutWorkItem?.cancel()
     historicalIdleWorkItem?.cancel()
     historicalRangeRetryWorkItem?.cancel()
+    historicalCatchUpWorkItem?.cancel()
+    historicalResumeWorkItem?.cancel()
     readySyncWorkItem?.cancel()
     flushCoalescedHistoricalDataPackets(
       reason: "historical_sync_failed",
@@ -714,7 +793,12 @@ extension OpenVitalsBLEClient {
     historicalRangePendingResponses = 0
     historicalRangeRetryCount = 0
     historicalTransferRequestAttemptCount = 0
+    historicalDrainRound = 1
+    historicalMaxDrainRounds = 1
+    historicalPacketsReceivedAtDrainRoundStart = 0
     historicalDataResultAckEnabled = true
+    activeHistoricalSyncRequest = nil
+    pendingHistoricalSyncResumeRequest = nil
     isHistoricalSyncing = false
     historicalRangePollOnly = false
     publishHistoricalPacketCountIfNeeded(force: true)
@@ -725,6 +809,94 @@ extension OpenVitalsBLEClient {
     publishSyncToast(phase: .failed, detail: "Tap for details", clearAfter: 4.5)
     notifyHistoricalSyncProgress(status: "failed", detail: message, terminal: true, failed: true)
     record(level: .error, source: "ble.sync", title: "historical_sync.failed", body: message)
+  }
+
+  func pauseHistoricalSyncForReconnect(_ message: String) {
+    let request = activeHistoricalSyncRequest ?? HistoricalSyncRequestContext(
+      trigger: "disconnect",
+      automatic: false,
+      firstCommandOverride: historicalRangePollOnly ? .getDataRange : nil,
+      rangeOnly: historicalRangePollOnly,
+      acknowledgeHistoricalDataResult: historicalDataResultAckEnabled,
+      maxDrainRounds: historicalMaxDrainRounds
+    )
+    historicalCommandTimeoutWorkItem?.cancel()
+    historicalIdleWorkItem?.cancel()
+    historicalRangeRetryWorkItem?.cancel()
+    historicalCatchUpWorkItem?.cancel()
+    historicalResumeWorkItem?.cancel()
+    readySyncWorkItem?.cancel()
+    flushCoalescedHistoricalDataPackets(
+      reason: "historical_sync_paused_for_reconnect",
+      force: true,
+      rescheduleIdle: false
+    )
+    pendingHistoricalCommand = nil
+    historyEndAckQueued = false
+    historyEndAckSentThisBurst = false
+    pendingHistoryEndAckPayload = nil
+    historyStartReceived = false
+    historyEndReceived = false
+    historyCompleteReceived = false
+    historicalRangePendingResponses = 0
+    historicalRangeRetryCount = 0
+    historicalTransferRequestAttemptCount = 0
+    historicalDrainRound = 1
+    historicalMaxDrainRounds = 1
+    historicalPacketsReceivedAtDrainRoundStart = 0
+    historicalDataResultAckEnabled = true
+    activeHistoricalSyncRequest = nil
+    pendingHistoricalSyncResumeRequest = request
+    isHistoricalSyncing = false
+    historicalRangePollOnly = false
+    publishHistoricalPacketCountIfNeeded(force: true)
+    historicalSyncStatus = "reconnecting"
+    publishSyncToast(phase: .syncing, detail: "Reconnecting to resume history")
+    notifyHistoricalSyncProgress(status: "reconnecting", detail: message, terminal: false, failed: false)
+    record(level: .warn, source: "ble.sync", title: "historical_sync.paused_for_reconnect", body: message)
+  }
+
+  func scheduleHistoricalSyncResumeIfNeeded() {
+    guard let request = pendingHistoricalSyncResumeRequest,
+          connectionState == "ready",
+          activePeripheral != nil,
+          commandCharacteristic != nil,
+          supportsV5HistoricalSync,
+          !isHistoricalSyncing else {
+      return
+    }
+
+    historicalResumeWorkItem?.cancel()
+    let requestID = request.id
+    let workItem = DispatchWorkItem { [weak self] in
+      guard let self,
+            let pendingRequest = self.pendingHistoricalSyncResumeRequest,
+            pendingRequest.id == requestID,
+            self.connectionState == "ready",
+            self.activePeripheral != nil,
+            self.commandCharacteristic != nil,
+            self.supportsV5HistoricalSync,
+            !self.isHistoricalSyncing else {
+        return
+      }
+      self.pendingHistoricalSyncResumeRequest = nil
+      self.record(
+        source: "ble.sync",
+        title: "historical_sync.resume",
+        body: "trigger=\(pendingRequest.resumeTrigger) max_rounds=\(pendingRequest.maxDrainRounds)"
+      )
+      self.beginHistoricalSync(
+        trigger: pendingRequest.resumeTrigger,
+        automatic: pendingRequest.automatic,
+        firstCommandOverride: pendingRequest.firstCommandOverride,
+        rangeOnly: pendingRequest.rangeOnly,
+        acknowledgeHistoricalDataResult: pendingRequest.acknowledgeHistoricalDataResult,
+        maxDrainRounds: pendingRequest.maxDrainRounds
+      )
+    }
+    historicalResumeWorkItem = workItem
+    DispatchQueue.main.asyncAfter(deadline: .now() + historicalReconnectResumeDelay, execute: workItem)
+    record(source: "ble.sync", title: "historical_sync.resume_scheduled", body: request.resumeTrigger)
   }
 
   func notifyHistoricalSyncProgress(status: String, detail: String, terminal: Bool, failed: Bool) {

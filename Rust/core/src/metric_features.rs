@@ -93,6 +93,8 @@ const K18_HRV_REST_SEGMENT_MIN_CANDIDATE_INTERVALS: usize = 180;
 const K18_HRV_REST_SEGMENT_MAX_AVG_MOTION_INTENSITY: f64 = RESTING_HR_LOW_MOTION_INTENSITY_MAX;
 const K18_HRV_REST_SEGMENT_MAX_PEAK_MOTION_INTENSITY: f64 = 0.20;
 const K18_HRV_REST_SEGMENT_MAX_CANDIDATE_GAP_SECONDS: f64 = 10.0;
+const K18_HRV_REST_SEGMENT_PASS_MAX_CANDIDATE_GAP_SECONDS: f64 = 3.0;
+const K18_HRV_REST_SEGMENT_MIN_CANDIDATE_CURRENT_BIN_MAE_MS: f64 = 10.0;
 const K18_HRV_REST_SEGMENT_MAX_REFERENCE_EDGE_DELTA_SECONDS: f64 = 30.0;
 const K18_HRV_REST_SEGMENT_MOTION_CONTEXT_MS: i64 = 60 * 1_000;
 
@@ -7263,6 +7265,18 @@ fn k18_hrv_rest_segment_summary(
         &current_segment_intervals,
         bin_seconds,
     );
+    let candidate_shape_summary = k18_segment_shape_summary(
+        &candidate_selection.intervals,
+        bin_seconds,
+        window_start_ms,
+        window_end_ms,
+    );
+    let current_gate_shape_summary = k18_segment_shape_summary(
+        &current_segment_intervals,
+        bin_seconds,
+        window_start_ms,
+        window_end_ms,
+    );
     let accepted_rejected_by_current_gate_interval_fraction =
         if candidate_selection.intervals.is_empty() {
             None
@@ -7286,6 +7300,7 @@ fn k18_hrv_rest_segment_summary(
         current_segment_intervals.len(),
         candidate_selection.intervals.len(),
         max_candidate_sample_gap_seconds,
+        &candidate_current_binned_comparison,
     );
     let reference_validation_pass = k18_rest_segment_reference_validation_pass(
         reference_segment_intervals.len(),
@@ -7322,18 +7337,6 @@ fn k18_hrv_rest_segment_summary(
         &reference_segment_intervals,
         &binned_comparison,
     );
-    let candidate_shape_summary = k18_segment_shape_summary(
-        &candidate_selection.intervals,
-        bin_seconds,
-        window_start_ms,
-        window_end_ms,
-    );
-    let current_gate_shape_summary = k18_segment_shape_summary(
-        &current_segment_intervals,
-        bin_seconds,
-        window_start_ms,
-        window_end_ms,
-    );
     let row_context_summary =
         k18_segment_row_context_summary(&window_frames, current_gated_intervals);
     let failure_reasons = k18_rest_segment_failure_reasons(
@@ -7347,6 +7350,7 @@ fn k18_hrv_rest_segment_summary(
         candidate_selection.intervals.len(),
         reference_segment_intervals.len(),
         max_candidate_sample_gap_seconds,
+        &candidate_current_binned_comparison,
         &timebase_audit,
         rmssd_error_ms,
         sdnn_error_ms,
@@ -7371,6 +7375,7 @@ fn k18_hrv_rest_segment_summary(
         reference_segment_intervals.len(),
         accepted_rejected_by_current_gate_interval_fraction,
         max_candidate_sample_gap_seconds,
+        &candidate_current_binned_comparison,
         rmssd_error_ms,
         sdnn_error_ms,
         mean_nn_error_ms,
@@ -7474,12 +7479,21 @@ fn k18_rest_segment_passes_k18_only_quality(
     current_gate_interval_count: usize,
     candidate_interval_count: usize,
     max_candidate_sample_gap_seconds: Option<f64>,
+    candidate_current_binned_comparison: &Option<K18HrvBinnedComparison>,
 ) -> bool {
     selected_by_non_oracle_rest_gate
         && current_gate_interval_count >= K18_HRV_REST_SEGMENT_MIN_CURRENT_GATE_INTERVALS
         && candidate_interval_count >= K18_HRV_REST_SEGMENT_MIN_CANDIDATE_INTERVALS
         && max_candidate_sample_gap_seconds
-            .is_some_and(|value| value <= K18_HRV_REST_SEGMENT_MAX_CANDIDATE_GAP_SECONDS)
+            .is_some_and(|value| value <= K18_HRV_REST_SEGMENT_PASS_MAX_CANDIDATE_GAP_SECONDS)
+        && candidate_current_binned_comparison
+            .as_ref()
+            .is_some_and(|comparison| {
+                comparison.common_bin_count >= 3
+                    && comparison.mean_absolute_error_ms.is_some_and(|value| {
+                        value >= K18_HRV_REST_SEGMENT_MIN_CANDIDATE_CURRENT_BIN_MAE_MS
+                    })
+            })
 }
 
 fn k18_rest_segment_reference_label(
@@ -7959,6 +7973,7 @@ fn k18_rest_segment_failure_reasons(
     candidate_interval_count: usize,
     reference_interval_count: usize,
     max_candidate_sample_gap_seconds: Option<f64>,
+    candidate_current_binned_comparison: &Option<K18HrvBinnedComparison>,
     timebase_audit: &K18HrvSegmentTimebaseAudit,
     rmssd_error_ms: Option<f64>,
     sdnn_error_ms: Option<f64>,
@@ -7999,6 +8014,28 @@ fn k18_rest_segment_failure_reasons(
         .is_some_and(|value| value > K18_HRV_REST_SEGMENT_MAX_CANDIDATE_GAP_SECONDS)
     {
         reasons.push("row_dropout_or_k18_gap".to_string());
+    }
+    if selected_by_non_oracle_rest_gate
+        && max_candidate_sample_gap_seconds.is_some_and(|value| {
+            value > K18_HRV_REST_SEGMENT_PASS_MAX_CANDIDATE_GAP_SECONDS
+                && value <= K18_HRV_REST_SEGMENT_MAX_CANDIDATE_GAP_SECONDS
+        })
+    {
+        reasons.push("candidate_gap_above_pass_threshold".to_string());
+    }
+    match candidate_current_binned_comparison {
+        Some(comparison)
+            if comparison.common_bin_count >= 3
+                && comparison.mean_absolute_error_ms.is_some_and(|value| {
+                    value >= K18_HRV_REST_SEGMENT_MIN_CANDIDATE_CURRENT_BIN_MAE_MS
+                }) => {}
+        Some(_) if selected_by_non_oracle_rest_gate => {
+            reasons.push("candidate_current_shape_separation_low".to_string());
+        }
+        None if selected_by_non_oracle_rest_gate => {
+            reasons.push("candidate_current_shape_missing".to_string());
+        }
+        _ => {}
     }
     if timebase_audit
         .candidate_reference_start_delta_seconds
@@ -8067,6 +8104,7 @@ fn k18_rest_segment_quality_flags(
     reference_interval_count: usize,
     accepted_rejected_by_current_gate_interval_fraction: Option<f64>,
     max_candidate_sample_gap_seconds: Option<f64>,
+    candidate_current_binned_comparison: &Option<K18HrvBinnedComparison>,
     rmssd_error_ms: Option<f64>,
     sdnn_error_ms: Option<f64>,
     mean_nn_error_ms: Option<f64>,
@@ -8122,6 +8160,28 @@ fn k18_rest_segment_quality_flags(
         .is_some_and(|value| value > K18_HRV_REST_SEGMENT_MAX_CANDIDATE_GAP_SECONDS)
     {
         flags.insert("rest_segment_candidate_gap_above_threshold".to_string());
+    }
+    if selected_by_non_oracle_rest_gate
+        && max_candidate_sample_gap_seconds.is_some_and(|value| {
+            value > K18_HRV_REST_SEGMENT_PASS_MAX_CANDIDATE_GAP_SECONDS
+                && value <= K18_HRV_REST_SEGMENT_MAX_CANDIDATE_GAP_SECONDS
+        })
+    {
+        flags.insert("rest_segment_candidate_gap_above_pass_threshold".to_string());
+    }
+    match candidate_current_binned_comparison {
+        Some(comparison)
+            if comparison.common_bin_count >= 3
+                && comparison.mean_absolute_error_ms.is_some_and(|value| {
+                    value >= K18_HRV_REST_SEGMENT_MIN_CANDIDATE_CURRENT_BIN_MAE_MS
+                }) => {}
+        Some(_) if selected_by_non_oracle_rest_gate => {
+            flags.insert("rest_segment_candidate_current_shape_separation_low".to_string());
+        }
+        None if selected_by_non_oracle_rest_gate => {
+            flags.insert("rest_segment_candidate_current_shape_missing".to_string());
+        }
+        _ => {}
     }
     if reference_interval_count < K18_HRV_REST_SEGMENT_MIN_CANDIDATE_INTERVALS {
         flags.insert("rest_segment_reference_overlap_low".to_string());
@@ -18385,19 +18445,16 @@ fn normalized_sample_time(
     if let Some(seconds) = timestamp_seconds
         && plausible_unix_timestamp_seconds(seconds)
     {
-        if let Some(subseconds) = timestamp_subseconds
-            && subseconds > 999
-        {
-            quality_flags.insert("device_timestamp_subseconds_out_of_range".to_string());
-            quality_flags.insert("sample_time_from_capture_time".to_string());
-            return NormalizedSampleTime {
-                time: row.captured_at.clone(),
-                unix_ms: parse_rfc3339_utc_unix_ms(&row.captured_at),
-                source: "captured_at".to_string(),
-            };
-        }
+        let millis = match timestamp_subseconds {
+            Some(subseconds) if subseconds > 999 => {
+                quality_flags.insert("device_timestamp_subseconds_out_of_range".to_string());
+                quality_flags.insert("device_timestamp_subseconds_ignored".to_string());
+                0
+            }
+            Some(subseconds) => i64::from(subseconds),
+            None => 0,
+        };
         quality_flags.insert("sample_time_from_device_timestamp".to_string());
-        let millis = timestamp_subseconds.map_or(0, i64::from);
         let unix_ms = i64::from(seconds) * 1_000 + millis;
         return NormalizedSampleTime {
             time: unix_ms_to_rfc3339_utc(unix_ms),

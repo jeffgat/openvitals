@@ -9,7 +9,8 @@ extension OpenVitalsBLEClient {
     automatic: Bool,
     firstCommandOverride: HistoricalCommandKind? = nil,
     rangeOnly: Bool = false,
-    acknowledgeHistoricalDataResult: Bool = true
+    acknowledgeHistoricalDataResult: Bool = true,
+    maxDrainRounds: Int = 1
   ) {
     guard !isHistoricalSyncing else {
       record(level: .debug, source: "ble.sync", title: "historical_sync.skipped", body: "already syncing trigger=\(trigger)")
@@ -34,8 +35,19 @@ extension OpenVitalsBLEClient {
     }
 
     historicalSyncRunID = UUID()
+    activeHistoricalSyncRequest = HistoricalSyncRequestContext(
+      trigger: trigger,
+      automatic: automatic,
+      firstCommandOverride: firstCommandOverride,
+      rangeOnly: rangeOnly,
+      acknowledgeHistoricalDataResult: acknowledgeHistoricalDataResult,
+      maxDrainRounds: maxDrainRounds
+    )
     historicalRangePollOnly = rangeOnly
     historicalDataResultAckEnabled = acknowledgeHistoricalDataResult
+    historicalMaxDrainRounds = rangeOnly ? 1 : max(1, maxDrainRounds)
+    historicalDrainRound = 1
+    historicalPacketsReceivedAtDrainRoundStart = 0
     isHistoricalSyncing = true
     historicalSyncStatus = "syncing"
     historicalPacketCount = 0
@@ -59,6 +71,7 @@ extension OpenVitalsBLEClient {
     historicalCommandTimeoutWorkItem?.cancel()
     historicalIdleWorkItem?.cancel()
     historicalRangeRetryWorkItem?.cancel()
+    historicalCatchUpWorkItem?.cancel()
     let toastDetail = rangeOnly
       ? "Polling historical range"
       : (automatic ? "Requesting missed packets" : "Requesting historical packets")
@@ -70,7 +83,7 @@ extension OpenVitalsBLEClient {
     record(
       source: "ble.sync",
       title: "historical_sync.started",
-      body: "trigger=\(trigger) first=\(firstCommand.name) range_only=\(rangeOnly) ack_enabled=\(historicalDataResultAckEnabled)"
+      body: "trigger=\(trigger) first=\(firstCommand.name) range_only=\(rangeOnly) ack_enabled=\(historicalDataResultAckEnabled) max_rounds=\(historicalMaxDrainRounds)"
     )
     notifyHistoricalSyncProgress(status: "syncing", detail: "Starting \(firstCommand.name)", terminal: false, failed: false)
     writeHistoricalCommand(firstCommand)

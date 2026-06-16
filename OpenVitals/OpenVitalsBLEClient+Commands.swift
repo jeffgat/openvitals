@@ -533,6 +533,38 @@ extension OpenVitalsBLEClient {
     return migrated
   }
 
+  func loadPersistedWakeAlarmTarget() {
+    guard let scheduledAt = defaults.object(forKey: DefaultsKey.savedWakeAlarmScheduledAt) as? Date else {
+      return
+    }
+    let storedDeviceID = defaults
+      .string(forKey: DefaultsKey.savedWakeAlarmDeviceID)
+      .flatMap(UUID.init(uuidString:))
+    if let storedDeviceID,
+       let rememberedDeviceID,
+       storedDeviceID != rememberedDeviceID {
+      record(
+        level: .debug,
+        source: "ble.alarm",
+        title: "alarm.saved_target.ignored",
+        body: "storedDeviceID=\(storedDeviceID.uuidString) rememberedDeviceID=\(rememberedDeviceID.uuidString)"
+      )
+      return
+    }
+
+    savedWakeAlarmScheduledAt = scheduledAt
+    if defaults.object(forKey: DefaultsKey.savedWakeAlarmID) != nil {
+      savedWakeAlarmID = defaults.integer(forKey: DefaultsKey.savedWakeAlarmID)
+    }
+    savedWakeAlarmUpdatedAt = defaults.object(forKey: DefaultsKey.savedWakeAlarmUpdatedAt) as? Date
+    savedWakeAlarmDeviceID = storedDeviceID
+    record(
+      source: "ble.alarm",
+      title: "alarm.saved_target.loaded",
+      body: "\(Self.alarmTimeFormatter.string(from: scheduledAt)) alarmID=\(savedWakeAlarmID.map(String.init) ?? "unknown")"
+    )
+  }
+
   func loadPersistedBatterySample() {
     guard defaults.object(forKey: DefaultsKey.lastBatteryPercent) != nil else {
       return
@@ -608,6 +640,53 @@ extension OpenVitalsBLEClient {
   func persistBatterySample(percent: Int, capturedAt: Date) {
     defaults.set(percent, forKey: DefaultsKey.lastBatteryPercent)
     defaults.set(capturedAt, forKey: DefaultsKey.lastBatteryCapturedAt)
+  }
+
+  func persistWakeAlarmTarget(scheduledAt: Date, alarmID: Int?) {
+    let normalizedAlarmID = alarmID.map { min(max($0, 0), 255) }
+    let updatedAt = Date()
+    let deviceID = activeDeviceIdentifier ?? rememberedDeviceID
+
+    savedWakeAlarmScheduledAt = scheduledAt
+    savedWakeAlarmID = normalizedAlarmID
+    savedWakeAlarmUpdatedAt = updatedAt
+    savedWakeAlarmDeviceID = deviceID
+
+    defaults.set(scheduledAt, forKey: DefaultsKey.savedWakeAlarmScheduledAt)
+    if let normalizedAlarmID {
+      defaults.set(normalizedAlarmID, forKey: DefaultsKey.savedWakeAlarmID)
+    } else {
+      defaults.removeObject(forKey: DefaultsKey.savedWakeAlarmID)
+    }
+    defaults.set(updatedAt, forKey: DefaultsKey.savedWakeAlarmUpdatedAt)
+    if let deviceID {
+      defaults.set(deviceID.uuidString, forKey: DefaultsKey.savedWakeAlarmDeviceID)
+    } else {
+      defaults.removeObject(forKey: DefaultsKey.savedWakeAlarmDeviceID)
+    }
+
+    record(
+      source: "ble.alarm",
+      title: "alarm.saved_target.persisted",
+      body: "\(Self.alarmTimeFormatter.string(from: scheduledAt)) alarmID=\(normalizedAlarmID.map(String.init) ?? "unknown")"
+    )
+  }
+
+  func clearPersistedWakeAlarmTarget(reason: String) {
+    let previous = savedWakeAlarmScheduledAt.map { Self.alarmTimeFormatter.string(from: $0) } ?? "none"
+    savedWakeAlarmScheduledAt = nil
+    savedWakeAlarmID = nil
+    savedWakeAlarmUpdatedAt = nil
+    savedWakeAlarmDeviceID = nil
+    defaults.removeObject(forKey: DefaultsKey.savedWakeAlarmScheduledAt)
+    defaults.removeObject(forKey: DefaultsKey.savedWakeAlarmID)
+    defaults.removeObject(forKey: DefaultsKey.savedWakeAlarmUpdatedAt)
+    defaults.removeObject(forKey: DefaultsKey.savedWakeAlarmDeviceID)
+    record(
+      source: "ble.alarm",
+      title: "alarm.saved_target.cleared",
+      body: "reason=\(reason) previous=\(previous)"
+    )
   }
 
   func persistInferredBatteryChargingUntil(_ date: Date?) {
@@ -958,6 +1037,7 @@ extension OpenVitalsBLEClient {
       updateConnectionState("ready")
       sendClientHelloIfNeeded(reason: cached ? "cached_gatt" : "gatt_discovery")
       scheduleDebugSkinTemperatureCommandIfNeeded(reason: cached ? "cached_ready" : "ready")
+      scheduleHistoricalSyncResumeIfNeeded()
       scheduleAutomaticHistoricalSyncIfNeeded()
       scheduleAutomaticPhysiologyCaptureIfNeeded()
     } else if connectionState == "discovering" {
@@ -988,6 +1068,7 @@ extension OpenVitalsBLEClient {
 
   func scheduleAutomaticHistoricalSyncIfNeeded() {
     guard let reason = pendingAutomaticHistoricalSyncReason,
+          pendingHistoricalSyncResumeRequest == nil,
           autoHistoricalSyncOnReady,
           connectionState == "ready",
           activePeripheral != nil,

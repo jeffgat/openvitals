@@ -406,10 +406,14 @@ extension OpenVitalsBLEClient {
     let metadataSummary = historyStartReceived || historyEndReceived || historyCompleteReceived
       ? "metadata-only"
       : "no-start"
+    let retryCommand = activeHistoricalSyncRequest?.firstCommandOverride ?? .getDataRange
+    let retryCommandDetail = retryCommand == .sendHistoricalData
+      ? "SEND_HISTORICAL_DATA"
+      : "GET_DATA_RANGE then SEND_HISTORICAL_DATA"
     publishSyncToast(phase: .syncing, detail: "Retrying historical transfer \(nextAttempt)/\(historicalTransferMaxRequestAttempts)")
     notifyHistoricalSyncProgress(
       status: "waiting",
-      detail: "Retrying GET_DATA_RANGE then SEND_HISTORICAL_DATA \(nextAttempt)/\(historicalTransferMaxRequestAttempts) after \(metadataSummary) transfer",
+      detail: "Retrying \(retryCommandDetail) \(nextAttempt)/\(historicalTransferMaxRequestAttempts) after \(metadataSummary) transfer",
       terminal: false,
       failed: false
     )
@@ -417,7 +421,7 @@ extension OpenVitalsBLEClient {
       level: .warn,
       source: "ble.sync",
       title: "historical_sync.transfer.retry",
-      body: "attempt=\(nextAttempt)/\(historicalTransferMaxRequestAttempts) first=GET_DATA_RANGE reason=\(reason) previous=\(metadataSummary) history_start=\(historyStartReceived) history_end=\(historyEndReceived) history_complete=\(historyCompleteReceived)"
+      body: "attempt=\(nextAttempt)/\(historicalTransferMaxRequestAttempts) first=\(retryCommand.name) reason=\(reason) previous=\(metadataSummary) history_start=\(historyStartReceived) history_end=\(historyEndReceived) history_complete=\(historyCompleteReceived)"
     )
     historyStartReceived = false
     historyEndReceived = false
@@ -425,7 +429,7 @@ extension OpenVitalsBLEClient {
     historyEndAckQueued = false
     historyEndAckSentThisBurst = false
     pendingHistoryEndAckPayload = nil
-    writeHistoricalCommand(.getDataRange)
+    writeHistoricalCommand(retryCommand)
     return true
   }
 
@@ -433,6 +437,10 @@ extension OpenVitalsBLEClient {
     pendingHistoricalCommand = nil
     historicalCommandTimeoutWorkItem?.cancel()
     guard historicalRangeRetryCount < historicalRangeMaxRetries else {
+      if historicalRangePollOnly {
+        completeHistoricalRangePollWithoutFinalRange(reason: reason)
+        return
+      }
       if continueHistoricalTransferAfterRangeFailure(reason: reason) {
         return
       }
@@ -471,6 +479,26 @@ extension OpenVitalsBLEClient {
     }
     historicalRangeRetryWorkItem = workItem
     DispatchQueue.main.asyncAfter(deadline: .now() + historicalRangeRetryDelay, execute: workItem)
+  }
+
+  func completeHistoricalRangePollWithoutFinalRange(reason: String) {
+    let detail = "Range unavailable; live streams unaffected"
+    historicalSyncStatus = "synced"
+    updateHistoricalRangeDebugStatus("range_unavailable after \(historicalRangeRetryCount) retries: \(reason)")
+    publishSyncToast(phase: .synced, detail: detail, clearAfter: 2.2)
+    notifyHistoricalSyncProgress(
+      status: "synced",
+      detail: detail,
+      terminal: true,
+      failed: false
+    )
+    record(
+      level: .warn,
+      source: "ble.sync",
+      title: "historical_sync.range.unavailable",
+      body: "GET_DATA_RANGE did not return a final range after \(historicalRangeRetryCount) retries; treating range-only poll as non-fatal. reason=\(reason)"
+    )
+    completeHistoricalSync(reason: "historical_range_unavailable")
   }
 
   func continueHistoricalTransferAfterRangeFailure(reason: String) -> Bool {

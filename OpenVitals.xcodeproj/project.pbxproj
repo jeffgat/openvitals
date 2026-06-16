@@ -149,6 +149,8 @@
 		D10000000000000000000054 /* MoreDataStore+SupabaseDebugUpload.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000054 /* MoreDataStore+SupabaseDebugUpload.swift */; };
 		D10000000000000000000055 /* MoreStreamProbeViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000055 /* MoreStreamProbeViews.swift */; };
 		D10000000000000000000056 /* OpenVitalsRRReferenceCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000056 /* OpenVitalsRRReferenceCapture.swift */; };
+		D10000000000000000000057 /* MobileCaptureStreamQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000057 /* MobileCaptureStreamQueue.swift */; };
+		D10000000000000000000058 /* OpenVitalsAppModel+MobileCaptureStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000058 /* OpenVitalsAppModel+MobileCaptureStream.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -323,6 +325,8 @@
 		D20000000000000000000054 /* MoreDataStore+SupabaseDebugUpload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MoreDataStore+SupabaseDebugUpload.swift"; sourceTree = "<group>"; };
 		D20000000000000000000055 /* MoreStreamProbeViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoreStreamProbeViews.swift; sourceTree = "<group>"; };
 		D20000000000000000000056 /* OpenVitalsRRReferenceCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenVitalsRRReferenceCapture.swift; sourceTree = "<group>"; };
+		D20000000000000000000057 /* MobileCaptureStreamQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileCaptureStreamQueue.swift; sourceTree = "<group>"; };
+		D20000000000000000000058 /* OpenVitalsAppModel+MobileCaptureStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OpenVitalsAppModel+MobileCaptureStream.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -369,11 +373,13 @@
 				D2000000000000000000003D /* OpenVitalsAppModel+OvernightRun.swift */,
 				D2000000000000000000003E /* OpenVitalsAppModel+HealthCapture.swift */,
 				D2000000000000000000003F /* OpenVitalsAppModel+ActivityRecording.swift */,
+				D20000000000000000000058 /* OpenVitalsAppModel+MobileCaptureStream.swift */,
 				D20000000000000000000041 /* OpenVitalsAppModel+NotificationPipeline.swift */,
 				D20000000000000000000042 /* OpenVitalsAppModel+PacketPublishing.swift */,
 				D20000000000000000000043 /* OpenVitalsAppModel+ActivityTimeline.swift */,
 				D20000000000000000000017 /* NotificationFrameParsing.swift */,
 				D20000000000000000000018 /* CaptureFrameWriteQueue.swift */,
+				D20000000000000000000057 /* MobileCaptureStreamQueue.swift */,
 				D20000000000000000000019 /* OvernightSQLiteMirrorQueue.swift */,
 				D2000000000000000000001A /* OvernightRawNotificationSpool.swift */,
 				D2000000000000000000001B /* HeartRateSeriesStores.swift */,
@@ -677,11 +683,13 @@
 				D1000000000000000000003D /* OpenVitalsAppModel+OvernightRun.swift in Sources */,
 				D1000000000000000000003E /* OpenVitalsAppModel+HealthCapture.swift in Sources */,
 				D1000000000000000000003F /* OpenVitalsAppModel+ActivityRecording.swift in Sources */,
+				D10000000000000000000058 /* OpenVitalsAppModel+MobileCaptureStream.swift in Sources */,
 				D10000000000000000000041 /* OpenVitalsAppModel+NotificationPipeline.swift in Sources */,
 				D10000000000000000000042 /* OpenVitalsAppModel+PacketPublishing.swift in Sources */,
 				D10000000000000000000043 /* OpenVitalsAppModel+ActivityTimeline.swift in Sources */,
 				D10000000000000000000017 /* NotificationFrameParsing.swift in Sources */,
 				D10000000000000000000018 /* CaptureFrameWriteQueue.swift in Sources */,
+				D10000000000000000000057 /* MobileCaptureStreamQueue.swift in Sources */,
 				D10000000000000000000019 /* OvernightSQLiteMirrorQueue.swift in Sources */,
 				D1000000000000000000001A /* OvernightRawNotificationSpool.swift in Sources */,
 				D1000000000000000000001B /* HeartRateSeriesStores.swift in Sources */,

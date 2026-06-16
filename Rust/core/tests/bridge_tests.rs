@@ -2340,6 +2340,85 @@ fn bridge_manages_local_activity_sessions_metrics_and_intervals() {
     );
     assert_eq!(chart_result["metrics"][0]["value"], 148.0);
 
+    let motion_features = request(serde_json::json!({
+        "schema": "open_vitals.bridge.request.v1",
+        "request_id": "activity-attach-motion-features",
+        "method": "activity.attach_motion_features",
+        "args": {
+            "database_path": db_path,
+            "include_features": true,
+            "features": [{
+                "feature_id": "activity-motion-feature-bridge",
+                "activity_session_id": "activity-session-bridge",
+                "capture_session_id": null,
+                "start_time_unix_ms": 1770003000000i64,
+                "end_time_unix_ms": 1770003010000i64,
+                "sequence": 0,
+                "movement_packet_count": 3,
+                "source_frame_ids": ["frame-bridge-1", "frame-bridge-2"],
+                "source_evidence_ids": ["evidence-bridge-1", "evidence-bridge-2"],
+                "mean_motion_intensity": 0.21,
+                "peak_motion_intensity": 0.48,
+                "mean_accelerometer_vector_intensity": 0.18,
+                "peak_accelerometer_peak_range": 900.0,
+                "mean_gyroscope_peak_range": 44.0,
+                "peak_gyroscope_peak_range": 77.0,
+                "stillness_ratio": 0.33,
+                "average_heart_rate_bpm": 144.0,
+                "max_heart_rate_bpm": 151.0,
+                "heart_rate_sample_count": 3,
+                "dominant_hr_zone": 4,
+                "gps_pace_seconds_per_km": 345.0,
+                "gps_speed_mps": 2.9,
+                "cadence_spm_candidate": null,
+                "quality_flags": ["cadence_unavailable"],
+                "provenance": {
+                    "source": "bridge-test",
+                    "kind": "motion_window"
+                }
+            }]
+        }
+    }));
+    assert!(motion_features.ok, "{:?}", motion_features.error);
+    let motion_features_result = motion_features.result.unwrap();
+    assert_eq!(
+        motion_features_result["schema"],
+        "open_vitals.activity-motion-feature-batch-result.v1"
+    );
+    assert_eq!(motion_features_result["inserted"], 1);
+    assert_eq!(motion_features_result["feature_count"], 1);
+    assert_eq!(
+        motion_features_result["features"][0]["feature_id"],
+        "activity-motion-feature-bridge"
+    );
+
+    let listed_motion_features = request(serde_json::json!({
+        "schema": "open_vitals.bridge.request.v1",
+        "request_id": "activity-list-motion-features",
+        "method": "activity.list_motion_features",
+        "args": {
+            "database_path": db_path,
+            "activity_session_id": "activity-session-bridge",
+            "start_time_unix_ms": 1770002990000i64,
+            "end_time_unix_ms": 1770003020000i64
+        }
+    }));
+    assert!(
+        listed_motion_features.ok,
+        "{:?}",
+        listed_motion_features.error
+    );
+    let listed_motion_features_result = listed_motion_features.result.unwrap();
+    assert_eq!(
+        listed_motion_features_result["schema"],
+        "open_vitals.activity-motion-feature-list.v1"
+    );
+    assert_eq!(listed_motion_features_result["feature_count"], 1);
+    assert_eq!(
+        listed_motion_features_result["features"][0]["movement_packet_count"],
+        3
+    );
+
     let delete = request(serde_json::json!({
         "schema": "open_vitals.bridge.request.v1",
         "request_id": "activity-delete-session",

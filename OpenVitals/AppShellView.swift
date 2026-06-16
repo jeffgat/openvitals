@@ -83,7 +83,7 @@ struct AppShellView: View {
     case .coach:
       CoachView(healthStore: healthStore)
     case .developer:
-      MoreDeveloperView(routes: MoreRoute.developerToolRoutes, routeStatus: moreRouteStatus)
+      MoreDeveloperView(store: moreStore, routes: MoreRoute.developerToolRoutes, routeStatus: moreRouteStatus)
         .onAppear {
           model.recordUIAction("page.opened", detail: "Developer")
           moreStore.refreshBridgeStatus(model: model)
@@ -159,7 +159,7 @@ enum OpenVitalsAppTab: String, CaseIterable, Identifiable {
     case .home: "Home"
     case .health: "Health"
     case .coach: "Coach"
-    case .developer: "Developer"
+    case .developer: "Collect"
     case .more: "More"
     }
   }
@@ -169,7 +169,7 @@ enum OpenVitalsAppTab: String, CaseIterable, Identifiable {
     case .home: "house"
     case .health: "heart.text.square"
     case .coach: "sparkles"
-    case .developer: "hammer"
+    case .developer: "tray.and.arrow.down"
     case .more: "ellipsis.circle"
     }
   }

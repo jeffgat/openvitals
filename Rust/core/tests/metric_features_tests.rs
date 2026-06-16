@@ -979,9 +979,9 @@ fn k18_hrv_validation_reports_low_motion_rest_segment_diagnostic() {
         .find(|segment| segment.selected_by_non_oracle_rest_gate)
         .unwrap();
     assert_eq!(segment.gate_id, "bounded_plausible_560_1300");
-    assert!(segment.passes_k18_only_segment_quality);
+    assert!(!segment.passes_k18_only_segment_quality);
     assert_eq!(segment.reference_label, "pass");
-    assert_eq!(segment.k18_only_decision, "pass");
+    assert_eq!(segment.k18_only_decision, "fail");
     assert!(segment.reference_validation_pass);
     assert_eq!(segment.motion_sample_count, 5);
     assert_eq!(segment.current_gate_interval_count, 300);
@@ -994,6 +994,14 @@ fn k18_hrv_validation_reports_low_motion_rest_segment_diagnostic() {
     );
     assert_eq!(segment.max_candidate_sample_gap_seconds, Some(1.0));
     assert_eq!(segment.rmssd_error_ms, Some(0.0));
+    assert_eq!(
+        segment
+            .candidate_current_binned_comparison
+            .as_ref()
+            .unwrap()
+            .mean_absolute_error_ms,
+        Some(0.0)
+    );
     assert_eq!(segment.candidate_shape_summary.sample_time_count, 300);
     assert_eq!(segment.candidate_shape_summary.sample_gap_over_3s_count, 0);
     assert_eq!(
@@ -1017,8 +1025,20 @@ fn k18_hrv_validation_reports_low_motion_rest_segment_diagnostic() {
             .iter()
             .any(|flag| flag == "reference_validation_pass")
     );
-    assert_eq!(segment.primary_failure_reason.as_deref(), Some("pass"));
-    assert_eq!(segment.failure_reasons, vec!["pass".to_string()]);
+    assert!(
+        segment
+            .quality_flags
+            .iter()
+            .any(|flag| flag == "rest_segment_candidate_current_shape_separation_low")
+    );
+    assert_eq!(
+        segment.primary_failure_reason.as_deref(),
+        Some("candidate_current_shape_separation_low")
+    );
+    assert_eq!(
+        segment.failure_reasons,
+        vec!["candidate_current_shape_separation_low".to_string()]
+    );
     assert_eq!(segment.timebase_audit.common_bin_count, 60);
     assert!(report.diagnostic_sliding_window_total_count >= 1);
     assert_eq!(
@@ -1035,7 +1055,7 @@ fn k18_hrv_validation_reports_low_motion_rest_segment_diagnostic() {
         report
             .diagnostic_sliding_window_decision_summary
             .true_accept_count,
-        1
+        0
     );
     assert_eq!(
         report
@@ -1046,14 +1066,20 @@ fn k18_hrv_validation_reports_low_motion_rest_segment_diagnostic() {
     assert_eq!(
         report
             .diagnostic_sliding_window_decision_summary
+            .false_reject_count,
+        1
+    );
+    assert_eq!(
+        report
+            .diagnostic_sliding_window_decision_summary
             .k18_pass_precision_fraction,
-        Some(1.0)
+        None
     );
     assert_eq!(
         report
             .diagnostic_sliding_window_decision_summary
             .promotion_status,
-        "validation_only_repeat_required"
+        "validation_only_blocked"
     );
 }
 
@@ -1877,7 +1903,7 @@ fn motion_feature_extraction_normalizes_historical_k21_sample_time() {
 }
 
 #[test]
-fn motion_feature_extraction_rejects_invalid_device_timestamp_subseconds() {
+fn motion_feature_extraction_ignores_invalid_device_timestamp_subseconds() {
     let store = OpenVitalsStore::open_in_memory().unwrap();
     import_motion_frame_at_value_with_device_timestamp_subseconds(
         &store,
@@ -1903,9 +1929,9 @@ fn motion_feature_extraction_rejects_invalid_device_timestamp_subseconds() {
     assert!(report.pass, "{:?}", report.issues);
     assert_eq!(report.feature_count, 1);
     let feature = &report.features[0];
-    assert_eq!(feature.sample_time, "2026-01-01T20:00:00Z");
-    assert_eq!(feature.sample_time_source, "captured_at");
-    assert_eq!(feature.sample_time_unix_ms, Some(1_767_297_600_000));
+    assert_eq!(feature.sample_time, "2026-01-01T22:00:00Z");
+    assert_eq!(feature.sample_time_source, "device_timestamp");
+    assert_eq!(feature.sample_time_unix_ms, Some(1_767_304_800_000));
     assert_eq!(feature.device_timestamp_seconds, Some(1_767_304_800));
     assert_eq!(feature.device_timestamp_subseconds, Some(1_500));
     assert!(
@@ -1915,10 +1941,22 @@ fn motion_feature_extraction_rejects_invalid_device_timestamp_subseconds() {
             .any(|flag| flag == "device_timestamp_subseconds_out_of_range")
     );
     assert!(
-        !feature
+        feature
+            .quality_flags
+            .iter()
+            .any(|flag| flag == "device_timestamp_subseconds_ignored")
+    );
+    assert!(
+        feature
             .quality_flags
             .iter()
             .any(|flag| flag == "sample_time_from_device_timestamp")
+    );
+    assert!(
+        !feature
+            .quality_flags
+            .iter()
+            .any(|flag| flag == "sample_time_from_capture_time")
     );
 }
 

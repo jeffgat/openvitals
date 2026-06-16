@@ -9,6 +9,7 @@ import {
   RadioTower,
   RefreshCw,
   Send,
+  Smartphone,
   Square,
   Unplug,
 } from "lucide-react";
@@ -45,6 +46,22 @@ const initialState: DebuggerAppState = {
     framesExisting: 0,
     pendingFrames: 0,
     flushing: false,
+    lastImportStatus: "loading",
+  },
+  mobileIngest: {
+    enabled: false,
+    listening: false,
+    bindHost: "127.0.0.1",
+    port: 8765,
+    url: "http://127.0.0.1:8765/v1/mobile/frame-batch",
+    tokenRequired: false,
+    receivedBatches: 0,
+    receivedFrames: 0,
+    importedFrames: 0,
+    existingFrames: 0,
+    rawInserted: 0,
+    rawExisting: 0,
+    pendingBatches: 0,
     lastImportStatus: "loading",
   },
   packets: [],
@@ -222,6 +239,33 @@ export function App(): JSX.Element {
             </button>
           </div>
           {lastStorageReport ? <pre className="mini-report">{lastStorageReport}</pre> : null}
+        </section>
+
+        <section className="panel">
+          <div className="panel-heading">
+            <span>Mobile Ingest</span>
+            <Smartphone size={15} />
+          </div>
+          <div className="mobile-ingest-grid">
+            <span>Status</span>
+            <StatusPill label={mobileIngestStatusLabel(state)} tone={mobileIngestTone(state)} compact />
+            <span>URL</span>
+            <strong className="mono">{state.mobileIngest.url}</strong>
+            <span>Token</span>
+            <strong>{state.mobileIngest.tokenRequired ? "required" : "not required"}</strong>
+            <span>Batches</span>
+            <strong>{state.mobileIngest.receivedBatches} received · {state.mobileIngest.pendingBatches} pending</strong>
+            <span>Frames</span>
+            <strong>{state.mobileIngest.importedFrames}/{state.mobileIngest.existingFrames} decoded</strong>
+            <span>Raw</span>
+            <strong>{state.mobileIngest.rawInserted}/{state.mobileIngest.rawExisting}</strong>
+          </div>
+          {state.mobileIngest.activeSessionId ? (
+            <p className="mobile-ingest-note mono">{state.mobileIngest.activeSessionId}</p>
+          ) : null}
+          <p className={`mobile-ingest-note ${state.mobileIngest.lastError ? "bad" : ""}`}>
+            {state.mobileIngest.lastError ?? state.mobileIngest.lastImportStatus}
+          </p>
         </section>
       </aside>
 
@@ -683,6 +727,29 @@ function notifyRetryTone(diagnostics: DebuggerAppState["diagnostics"]): "good" |
     return "good";
   }
   return "warn";
+}
+
+function mobileIngestStatusLabel(state: DebuggerAppState): string {
+  if (!state.mobileIngest.enabled) {
+    return "disabled";
+  }
+  if (state.mobileIngest.listening) {
+    return "listening";
+  }
+  if (state.mobileIngest.lastError) {
+    return "blocked";
+  }
+  return "stopped";
+}
+
+function mobileIngestTone(state: DebuggerAppState): "good" | "warn" | "bad" | "neutral" {
+  if (!state.mobileIngest.enabled) {
+    return "neutral";
+  }
+  if (state.mobileIngest.lastError) {
+    return "bad";
+  }
+  return state.mobileIngest.listening ? "good" : "warn";
 }
 
 function notifyFailureMessage(diagnostics: DebuggerAppState["diagnostics"]): string | undefined {

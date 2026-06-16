@@ -35,7 +35,7 @@ enum MoreRoute: String, CaseIterable, Identifiable, Hashable {
     case .privacy: "Privacy"
     case .support: "Support"
     case .about: "About"
-    case .developer: "Developer"
+    case .developer: "Data Collection"
     }
   }
 
@@ -55,7 +55,7 @@ enum MoreRoute: String, CaseIterable, Identifiable, Hashable {
     case .privacy: "Local data, export, lint, and deletion state"
     case .support: "Logs, support bundles, and troubleshooting"
     case .about: "App, Rust core, and licenses"
-    case .developer: "Capture, exports, bridge diagnostics, and debug tools"
+    case .developer: "Mac stream, live data, historical catch-up, and exports"
     }
   }
 
@@ -75,7 +75,7 @@ enum MoreRoute: String, CaseIterable, Identifiable, Hashable {
     case .privacy: "hand.raised"
     case .support: "lifepreserver"
     case .about: "info.circle"
-    case .developer: "hammer"
+    case .developer: "tray.and.arrow.down"
     }
   }
 

@@ -26,8 +26,10 @@ For a production App Store iOS app, the lower-risk architecture is either a supp
   - `activity.list_metrics`
   - `activity.list_intervals`
   - `activity.metrics_for_session_in_window`
+  - `activity.list_motion_features`
   - `export.raw_timeframe`
 - The Rust store already has direct read paths for `activity_sessions_between(...)`, `raw_evidence_between(...)`, and `decoded_frames_between(...)`.
+- Live workout recording now stores per-10-second `activity_motion_features` windows with source frame/evidence ids, motion summaries, HR, GPS pace, quality flags, and provenance so activity pattern tools can use normalized features before requesting raw session data.
 - The generated Codex app-server schema from local `codex-cli 0.135.0` supports ChatGPT login modes, dynamic tool specs, dynamic tool calls, thread/turn lifecycle, sandbox configuration, and approval policy configuration.
 
 ## External Constraints
@@ -111,8 +113,9 @@ Backs onto:
 - `activity.list_metrics`
 - `activity.list_intervals`
 - `activity.metrics_for_session_in_window`
+- `activity.list_motion_features`
 
-Output should normalize session id, activity type, start/end/duration, confidence, detection method, sync status, metrics, intervals, and provenance.
+Output should normalize session id, activity type, start/end/duration, confidence, detection method, sync status, metrics, intervals, motion feature windows, and provenance.
 
 ### `get_capture_sessions`
 

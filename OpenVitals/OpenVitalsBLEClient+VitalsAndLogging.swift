@@ -426,6 +426,8 @@ extension OpenVitalsBLEClient {
       return
     }
     guard message.source == "ble.sync"
+        || message.source == "ble.sensor"
+        || shouldWriteBLESetupConsoleDiagnostic(message)
         || message.source == "respiratory.packet_watch"
         || (consoleCaptureStatusEnabled && message.source == "health.packet_capture" && !isHighVolumeDiagnostic(message))
         || message.level == .warn
@@ -440,6 +442,21 @@ extension OpenVitalsBLEClient {
       }
       FileHandle.standardError.write(data)
     }
+  }
+
+  func shouldWriteBLESetupConsoleDiagnostic(_ message: OpenVitalsMessage) -> Bool {
+    guard consoleCaptureStatusEnabled, message.source == "ble" else {
+      return false
+    }
+    return message.title == "gatt.services"
+      || message.title == "gatt.characteristics"
+      || message.title == "command_characteristic.discovered"
+      || message.title == "command_characteristic.cached"
+      || message.title == "notify.requested"
+      || message.title == "notify.state"
+      || message.title == "notify.failed"
+      || message.title == "hello.sent"
+      || message.title == "write.accepted"
   }
 
   static func diagnosticLogTimestampString(from date: Date) -> String {

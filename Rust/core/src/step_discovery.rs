@@ -15,6 +15,8 @@ use crate::{
 pub const STEP_PACKET_DISCOVERY_REPORT_SCHEMA: &str = "open_vitals.step-packet-discovery-report.v1";
 pub const STEP_CAPTURE_VALIDATION_REPORT_SCHEMA: &str =
     "open_vitals.step-capture-validation-report.v1";
+const STEP_COUNTER_U16_WRAP: i64 = 65_536;
+const MAX_STEP_COUNTER_SEGMENT_DELTA: i64 = 30_000;
 
 #[derive(Debug, Clone, Copy)]
 pub struct StepPacketDiscoveryOptions {
@@ -786,8 +788,7 @@ fn step_counter_deltas(
                 .iter()
                 .filter_map(|candidate| numeric_i64(&candidate.value))
                 .collect::<Vec<_>>();
-            let monotonic_non_decreasing = values.windows(2).all(|pair| pair[1] >= pair[0]);
-            let delta = last_value - first_value;
+            let (delta, monotonic_non_decreasing) = counter_delta_for_values(&values);
             let manual_delta_error = manual_step_delta.map(|label| delta - label);
             let official_delta_error = official_whoop_step_delta.map(|label| delta - label);
             let matches_manual_label = manual_delta_error
@@ -837,6 +838,28 @@ fn has_distinct_counter_observations(samples: &[&StepPacketDiscoveryCandidate]) 
     samples
         .iter()
         .any(|sample| sample.frame_id != first.frame_id || sample.captured_at != first.captured_at)
+}
+
+fn counter_delta_for_values(values: &[i64]) -> (i64, bool) {
+    let mut total = 0;
+    let mut valid_progression = true;
+    for pair in values.windows(2) {
+        let raw_delta = pair[1] - pair[0];
+        let corrected_delta = if raw_delta >= 0 {
+            raw_delta
+        } else {
+            raw_delta + STEP_COUNTER_U16_WRAP
+        };
+        if corrected_delta == 0 {
+            continue;
+        }
+        if corrected_delta > MAX_STEP_COUNTER_SEGMENT_DELTA {
+            valid_progression = false;
+            continue;
+        }
+        total += corrected_delta;
+    }
+    (total, valid_progression)
 }
 
 fn selected_counter_delta(

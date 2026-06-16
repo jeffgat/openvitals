@@ -90,6 +90,26 @@ export interface CaptureState {
   lastImportStatus: string;
 }
 
+export interface MobileIngestState {
+  enabled: boolean;
+  listening: boolean;
+  bindHost: string;
+  port: number;
+  url: string;
+  tokenRequired: boolean;
+  receivedBatches: number;
+  receivedFrames: number;
+  importedFrames: number;
+  existingFrames: number;
+  rawInserted: number;
+  rawExisting: number;
+  pendingBatches: number;
+  lastReceivedAt?: string | undefined;
+  lastImportStatus: string;
+  activeSessionId?: string | undefined;
+  lastError?: string | undefined;
+}
+
 export interface NotifySubscriptionDiagnostic {
   characteristicUuid: string;
   requested: boolean;
@@ -196,6 +216,7 @@ export interface DebuggerAppState {
   devices: DiscoveredDevice[];
   connectedDevice?: ConnectedDevice;
   capture: CaptureState;
+  mobileIngest: MobileIngestState;
   packets: PacketRecord[];
   selectedPacketId?: string;
   logs: LogEntry[];

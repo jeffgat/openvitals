@@ -227,6 +227,9 @@ struct HealthMetricFamilyView: View {
     if model.ble.lastAlarmScheduledAt != nil {
       return .live("band alarm command response")
     }
+    if model.ble.savedWakeAlarmScheduledAt != nil {
+      return .local("saved alarm target")
+    }
     if model.ble.canWriteAlarm {
       return .live("band alarm write ready")
     }

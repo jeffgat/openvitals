@@ -25,7 +25,7 @@ Current product cut 2026-06-10: Home keeps the Sleep, Recovery, and Strain top s
 - [x] Route automatic BLE historical sync through a packet import session before refreshing packet-derived Home scores.
 - [x] Preserve unavailable packet-derived scores as `--` instead of coercing missing score text to `0`.
 - [x] Deduplicate repeated historical packet imports by stable device packet identity instead of BLE receive timestamp.
-- [x] Keep device-side timestamp cursor sync gated in Rust dry-run until command 33 read-pointer payload evidence is validated; current Home sync uses transfer plus local dedupe.
+- [x] Keep device-side timestamp cursor sync gated in Rust dry-run until command 33 read-pointer payload evidence is validated; current Home sync uses bounded range-first transfer plus local dedupe.
 - [ ] Add device toolbar button with connected/disconnected color state.
 - [ ] Tapping the device button opens `DeviceView`.
 - [ ] Define one shared relative-time formatter for `lastSyncAt`, battery, HR, and metric refreshes.
@@ -88,7 +88,7 @@ Current product cut 2026-06-10: Home keeps the Sleep, Recovery, and Strain top s
 ## Alarm
 
 - [x] Add a Home alarm card below Health Monitor for current alarm state, wake time, edit alarm sheet, and disable action using the existing BLE alarm command path.
-- [ ] Persist the user's selected wake target separately from the latest connected-device alarm event.
+- [x] Persist the user's selected wake target separately from the latest connected-device alarm event.
 
 ## Daily Timeline
 

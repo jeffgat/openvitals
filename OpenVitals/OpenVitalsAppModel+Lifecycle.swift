@@ -146,6 +146,7 @@ extension OpenVitalsAppModel {
           !autoStartTemperaturePacketCaptureOnReady,
           !autoStartPhysiologyPacketCaptureOnReady,
           !autoStartRespiratoryPacketWatchOnReady,
+          !mobileCaptureStreamEnabled,
           !healthPacketCaptureStartInProgress,
           activeHealthPacketCapture == nil else {
       return
@@ -166,6 +167,7 @@ extension OpenVitalsAppModel {
     guard ble.connectionState == "ready",
           activeHealthPacketCapture == nil,
           !healthPacketCaptureStartInProgress,
+          !mobileCaptureStreamEnabled,
           !autoStartPhysiologyPacketCaptureOnReady,
           !activitySession.isActive else {
       return

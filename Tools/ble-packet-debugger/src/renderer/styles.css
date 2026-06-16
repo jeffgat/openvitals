@@ -241,6 +241,36 @@ small {
   color: var(--accent);
 }
 
+.mobile-ingest-grid {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 7px 10px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.mobile-ingest-grid span {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.mobile-ingest-grid strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mobile-ingest-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.mobile-ingest-note.bad {
+  color: var(--accent-muted);
+}
+
 .device-row {
   width: 100%;
   height: auto;

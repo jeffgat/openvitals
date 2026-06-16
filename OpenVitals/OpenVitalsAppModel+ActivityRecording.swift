@@ -210,6 +210,7 @@ extension OpenVitalsAppModel {
     let sensorMetrics = sessionDetectionMethod == "user_assigned"
       ? persistence?.sensorMetricSnapshot(endedAt: end)
       : nil
+    let motionFeatureWindows = persistence?.motionFeatureWindows(endedAt: end) ?? []
     let metricAverageHeartRate = sensorMetrics?.averageHeartRate ?? averageHeartRate
     let metricMaxHeartRate = sensorMetrics?.maxHeartRate ?? maxHeartRate
     let metricZoneDurations = normalizedZoneDurations(
@@ -274,6 +275,10 @@ extension OpenVitalsAppModel {
       provenance["mean_motion_intensity_0_to_1"] = sensorMetrics.meanMotionIntensity
       provenance["peak_motion_intensity_0_to_1"] = sensorMetrics.peakMotionIntensity
     }
+    if !motionFeatureWindows.isEmpty {
+      provenance["motion_feature_window_count"] = motionFeatureWindows.count
+      provenance["motion_feature_window_seconds"] = 10
+    }
     if let lastImportedFrameAt = persistence?.lastImportedFrameAt {
       provenance["last_imported_frame_at"] = Self.captureTimestampFormatter.string(from: lastImportedFrameAt)
     }
@@ -316,6 +321,13 @@ extension OpenVitalsAppModel {
       let seconds = metricZoneDurations[zoneID, default: 0]
       appendActivityMetric(&activityMetrics, sessionID: sessionID, name: "hr_zone_\(zoneID)_duration", value: seconds, unit: "s", startMs: startMs, endMs: endMs, source: sessionSource)
     }
+    let activityMotionFeatures = motionFeatureWindows.map {
+      $0.bridgeObject(
+        activitySessionID: sessionID,
+        captureSessionID: captureSessionID,
+        source: sessionSource
+      )
+    }
     activityPersistenceStatus = "Storing \(activity.title)..."
     OpenVitalsRustBridge.performInBackground(qos: .utility, {
       try OpenVitalsRustBridge().request(method: "activity.create_session", args: sessionArgs)
@@ -326,6 +338,7 @@ extension OpenVitalsAppModel {
       switch result {
       case .success:
         self.attachActivityMetrics(activityMetrics)
+        self.attachActivityMotionFeatures(activityMotionFeatures)
 
         let storedPrefix = sessionSyncStatus == "candidate" ? "Stored candidate" : "Stored"
         let storedDistance = storesLocationMetrics ? " \(self.formatPersistedDistance(distanceMeters))" : ""
